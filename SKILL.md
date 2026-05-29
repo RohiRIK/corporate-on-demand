@@ -32,6 +32,7 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Honker + sqlite-vec v2 architecture research | `references/honker-sqlite-vec-integration.md` |
 | **v2 architecture (Honker + sqlite-vec)** | `references/v2-honker-sqlite-vec.md` |
 | LanceDB + Honker event-driven architecture | `references/lancedb-honker-integration.md` |
+| **C-Suite layer (CEO/CTO/CISO/CPO) — design + planned tools** | `references/csuite-layer-plan.md` |
 
 ### Implementation Guides
 
@@ -82,6 +83,43 @@ $BUN $SCRIPTS/report.ts --path ~/myproj
 
 # Add department to existing project
 $BUN $SCRIPTS/add-department.ts --path ~/myproj --name qa --focus "QA testing" --pipeline "test-plan,execute,report"
+```
+
+### C-Suite Management
+
+```bash
+# Role-specific reports (ceo|cto|ciso|cpo)
+$BUN $SCRIPTS/csuite-report.ts --path ~/myproj --role ceo
+
+# CEO grades a department
+$BUN $SCRIPTS/grade.ts --path ~/myproj --dept rnd --grade B --reason "Good specs"
+
+# Run a board meeting — collects summaries, writes minutes
+$BUN $SCRIPTS/board-meeting.ts --path ~/myproj
+
+# CPO staleness checker for UX/UI
+$BUN $SCRIPTS/staleness-check.ts --path ~/myproj
+```
+
+### Shared Tools
+
+```bash
+# Read/scan department artifacts
+$BUN $SCRIPTS/read-artifacts.ts --path ~/myproj --dept rnd,infra --since 24h --format summary
+
+# Read/write state.json fields
+$BUN $SCRIPTS/state-rw.ts --path ~/myproj --read grades
+$BUN $SCRIPTS/state-rw.ts --path ~/myproj --write grades.rnd=B
+
+# Send inbox messages between departments
+$BUN $SCRIPTS/inbox-send.ts --path ~/myproj --to rnd --from ceo --priority high --title "Auth refactor" --body "Details"
+
+# Digest a department's inbox
+$BUN $SCRIPTS/inbox-digest.ts --path ~/myproj --dept rnd --status pending --since 24h
+
+# Activity log — append or query
+$BUN $SCRIPTS/activity-log.ts --path ~/myproj --append --dept rnd --action "wrote spec"
+$BUN $SCRIPTS/activity-log.ts --path ~/myproj --query --since 12h --dept rnd
 ```
 
 ## Examples

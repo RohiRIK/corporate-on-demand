@@ -4,6 +4,19 @@ All notable changes to Corporate-on-Demand are documented here.
 
 ---
 
+## [3.4.2] — 2026-05-31
+
+### Added
+- C-Suite management layer: CEO, CTO, CISO, CPO support
+- Shared scripts: read-artifacts.ts, state-rw.ts, inbox-send.ts, inbox-digest.ts, activity-log.ts
+- Role-specific scripts: csuite-report.ts, staleness-check.ts, grade.ts, board-meeting.ts
+- Shared utilities library: scripts/lib/utils.ts
+- CTO, CISO, CPO departments added to all scaffold templates
+### Changed
+- scaffold.ts updated with C-Suite departments and data-collection scripts
+
+---
+
 ## [3.3.1] — 2026-05-29
 
 ### Added

@@ -10,6 +10,9 @@ const TEMPLATES: Record<string, { departments: Record<string, { focus: string; p
   game: {
     departments: {
       ceo: { focus: "Quality oversight, play-testing, grading all departments A-F", pipeline: ["directives", "reviews"], subdirs: ["directives", "reviews", "inbox"], mustNotTouch: "" },
+      cto: { focus: "Technical oversight of R&D + Infra + IT, architecture decisions, tech debt tracking", pipeline: ["review", "direct", "audit"], subdirs: ["reviews", "directives", "audits", "inbox"], mustNotTouch: "Design files, content, business strategy" },
+      ciso: { focus: "Security posture, vulnerability management, compliance, access control", pipeline: ["audit", "assess", "direct"], subdirs: ["audits", "assessments", "directives", "inbox"], mustNotTouch: "Feature code, design files, business logic" },
+      cpo: { focus: "Product quality, UX consistency, design freshness, user experience advocacy", pipeline: ["review", "assess", "direct"], subdirs: ["reviews", "assessments", "directives", "inbox"], mustNotTouch: "Backend code, infrastructure, security configs" },
       rnd: { focus: "Game design, mechanics, JS/Canvas game development", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "CSS, design tokens, layout files, Docker configs" },
       uxui: { focus: "Game UI, CSS design system, player experience", pipeline: ["research", "design", "build"], subdirs: ["research", "designs", "styleguide", "inbox"], mustNotTouch: "Game logic, backend routes, Docker configs" },
       infra: { focus: "Docker hosting, Nginx, health monitoring, deployment", pipeline: ["audit", "runbook", "execute"], subdirs: ["runbooks", "audits", "inbox"], mustNotTouch: "Application code, game logic, CSS" },
@@ -20,6 +23,9 @@ const TEMPLATES: Record<string, { departments: Record<string, { focus: string; p
   saas: {
     departments: {
       ceo: { focus: "Quality oversight, product review, customer perspective", pipeline: ["directives", "reviews"], subdirs: ["directives", "reviews", "inbox"], mustNotTouch: "" },
+      cto: { focus: "Technical oversight of R&D + Infra + IT, architecture decisions, tech debt tracking", pipeline: ["review", "direct", "audit"], subdirs: ["reviews", "directives", "audits", "inbox"], mustNotTouch: "Design files, content, business strategy" },
+      ciso: { focus: "Security posture, vulnerability management, compliance, access control", pipeline: ["audit", "assess", "direct"], subdirs: ["audits", "assessments", "directives", "inbox"], mustNotTouch: "Feature code, design files, business logic" },
+      cpo: { focus: "Product quality, UX consistency, design freshness, user experience advocacy", pipeline: ["review", "assess", "direct"], subdirs: ["reviews", "assessments", "directives", "inbox"], mustNotTouch: "Backend code, infrastructure, security configs" },
       rnd: { focus: "Feature development, API design, backend/frontend code", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "CSS design tokens, infrastructure configs, deployment scripts" },
       uxui: { focus: "Product design, user flows, responsive UI, accessibility", pipeline: ["research", "design", "build"], subdirs: ["research", "designs", "styleguide", "inbox"], mustNotTouch: "Backend logic, API routes, database schemas" },
       infra: { focus: "Cloud infrastructure, CI/CD, monitoring, scaling", pipeline: ["audit", "runbook", "execute"], subdirs: ["runbooks", "audits", "inbox"], mustNotTouch: "Application code, UI components, business logic" },
@@ -30,6 +36,9 @@ const TEMPLATES: Record<string, { departments: Record<string, { focus: string; p
   content: {
     departments: {
       ceo: { focus: "Quality oversight, content strategy, reader perspective", pipeline: ["directives", "reviews"], subdirs: ["directives", "reviews", "inbox"], mustNotTouch: "" },
+      cto: { focus: "Technical oversight of R&D + Infra + IT, architecture decisions, tech debt tracking", pipeline: ["review", "direct", "audit"], subdirs: ["reviews", "directives", "audits", "inbox"], mustNotTouch: "Design files, content, business strategy" },
+      ciso: { focus: "Security posture, vulnerability management, compliance, access control", pipeline: ["audit", "assess", "direct"], subdirs: ["audits", "assessments", "directives", "inbox"], mustNotTouch: "Feature code, design files, business logic" },
+      cpo: { focus: "Product quality, UX consistency, design freshness, user experience advocacy", pipeline: ["review", "assess", "direct"], subdirs: ["reviews", "assessments", "directives", "inbox"], mustNotTouch: "Backend code, infrastructure, security configs" },
       rnd: { focus: "Publishing tools, editor features, content APIs", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Content files, editorial decisions, design tokens" },
       uxui: { focus: "Reader experience, typography, content layout", pipeline: ["research", "design", "build"], subdirs: ["research", "designs", "styleguide", "inbox"], mustNotTouch: "Backend code, editorial content, infrastructure" },
       editorial: { focus: "Content quality, style guide enforcement, editorial standards", pipeline: ["review", "edit", "publish"], subdirs: ["reviews", "drafts", "published", "inbox"], mustNotTouch: "Application code, infrastructure, design system code" },
@@ -40,6 +49,9 @@ const TEMPLATES: Record<string, { departments: Record<string, { focus: string; p
   devtools: {
     departments: {
       ceo: { focus: "Quality oversight, dogfooding, developer perspective", pipeline: ["directives", "reviews"], subdirs: ["directives", "reviews", "inbox"], mustNotTouch: "" },
+      cto: { focus: "Technical oversight of R&D + Infra + IT, architecture decisions, tech debt tracking", pipeline: ["review", "direct", "audit"], subdirs: ["reviews", "directives", "audits", "inbox"], mustNotTouch: "Design files, content, business strategy" },
+      ciso: { focus: "Security posture, vulnerability management, compliance, access control", pipeline: ["audit", "assess", "direct"], subdirs: ["audits", "assessments", "directives", "inbox"], mustNotTouch: "Feature code, design files, business logic" },
+      cpo: { focus: "Product quality, UX consistency, design freshness, user experience advocacy", pipeline: ["review", "assess", "direct"], subdirs: ["reviews", "assessments", "directives", "inbox"], mustNotTouch: "Backend code, infrastructure, security configs" },
       rnd: { focus: "CLI/SDK development, API design, plugin architecture", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Documentation site, release pipeline configs" },
       uxui: { focus: "Developer experience, documentation site, error messages", pipeline: ["research", "design", "build"], subdirs: ["research", "designs", "styleguide", "inbox"], mustNotTouch: "Core CLI/SDK code, release pipeline, package configs" },
       infra: { focus: "Release pipeline, package registry, CI/CD, versioning", pipeline: ["audit", "runbook", "execute"], subdirs: ["runbooks", "audits", "inbox"], mustNotTouch: "Application code, documentation content" },
@@ -50,6 +62,9 @@ const TEMPLATES: Record<string, { departments: Record<string, { focus: string; p
   homelab: {
     departments: {
       ceo: { focus: "Quality oversight, real-world testing, reliability focus", pipeline: ["directives", "reviews"], subdirs: ["directives", "reviews", "inbox"], mustNotTouch: "" },
+      cto: { focus: "Technical oversight of R&D + Infra + IT, architecture decisions, tech debt tracking", pipeline: ["review", "direct", "audit"], subdirs: ["reviews", "directives", "audits", "inbox"], mustNotTouch: "Design files, content, business strategy" },
+      ciso: { focus: "Security posture, vulnerability management, compliance, access control", pipeline: ["audit", "assess", "direct"], subdirs: ["audits", "assessments", "directives", "inbox"], mustNotTouch: "Feature code, design files, business logic" },
+      cpo: { focus: "Product quality, UX consistency, design freshness, user experience advocacy", pipeline: ["review", "assess", "direct"], subdirs: ["reviews", "assessments", "directives", "inbox"], mustNotTouch: "Backend code, infrastructure, security configs" },
       rnd: { focus: "Integration development, protocol bridges, automation rules", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Docker configs, dashboard UI, network configs" },
       uxui: { focus: "Dashboard design, mobile-friendly UI, status visualization", pipeline: ["research", "design", "build"], subdirs: ["research", "designs", "styleguide", "inbox"], mustNotTouch: "Integration code, Docker configs, IoT protocols" },
       infra: { focus: "Docker Swarm/Compose, IoT networking, monitoring, backups", pipeline: ["audit", "runbook", "execute"], subdirs: ["runbooks", "audits", "inbox"], mustNotTouch: "Application code, dashboard UI, automation rules" },
@@ -59,6 +74,9 @@ const TEMPLATES: Record<string, { departments: Record<string, { focus: string; p
   data: {
     departments: {
       ceo: { focus: "Quality oversight, data accuracy verification, SLA review", pipeline: ["directives", "reviews"], subdirs: ["directives", "reviews", "inbox"], mustNotTouch: "" },
+      cto: { focus: "Technical oversight of R&D + Infra + IT, architecture decisions, tech debt tracking", pipeline: ["review", "direct", "audit"], subdirs: ["reviews", "directives", "audits", "inbox"], mustNotTouch: "Design files, content, business strategy" },
+      ciso: { focus: "Security posture, vulnerability management, compliance, access control", pipeline: ["audit", "assess", "direct"], subdirs: ["audits", "assessments", "directives", "inbox"], mustNotTouch: "Feature code, design files, business logic" },
+      cpo: { focus: "Product quality, UX consistency, design freshness, user experience advocacy", pipeline: ["review", "assess", "direct"], subdirs: ["reviews", "assessments", "directives", "inbox"], mustNotTouch: "Backend code, infrastructure, security configs" },
       rnd: { focus: "ETL development, data transforms, pipeline logic", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Dashboard UI, orchestration configs, infrastructure" },
       uxui: { focus: "Dashboards, data visualization, report templates", pipeline: ["research", "design", "build"], subdirs: ["research", "designs", "styleguide", "inbox"], mustNotTouch: "ETL code, pipeline logic, orchestration configs" },
       infra: { focus: "Pipeline orchestration, storage, scheduling", pipeline: ["audit", "runbook", "execute"], subdirs: ["runbooks", "audits", "inbox"], mustNotTouch: "ETL logic, dashboard code, transform code" },
