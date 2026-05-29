@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight."
-version: 3.4.0
+version: 3.4.1
 author: Rohi Rikman
 license: MIT
 platforms: [linux]
@@ -29,6 +29,9 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Template configs for different domains | `references/company-templates.md` |
 | Arcade platform case study | `references/example-arcade-platform.md` |
 | Future ideas & expansion backlog | `references/ideas.md` |
+| Honker + sqlite-vec v2 architecture research | `references/honker-sqlite-vec-integration.md` |
+| **v2 architecture (Honker + sqlite-vec)** | `references/v2-honker-sqlite-vec.md` |
+| LanceDB + Honker event-driven architecture | `references/lancedb-honker-integration.md` |
 
 ### Implementation Guides
 
@@ -52,6 +55,9 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Seasonal events / themes | `references/impl-seasonal-events.md` |
 | **Testing strategy (E2E, escalation, TDD)** | `references/impl-testing-strategy.md` |
 | **Reporting modes (MANDATORY setup)** | `references/impl-reporting-modes.md` |
+| **Pre-publish checklist** | `references/pre-publish-checklist.md` |
+| Schedule optimization (QA buffer) | `references/impl-schedule-optimization.md` |
+| Publishing & distribution | `references/impl-publishing.md` |
 | Full changelog | `CHANGELOG.md` |
 | Newsletter, SLAs, Labs, Plugins | `references/impl-ecosystem.md` |
 

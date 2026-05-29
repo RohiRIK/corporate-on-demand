@@ -48,30 +48,44 @@ Make executable: `chmod +x ~/.hermes/scripts/myproject-rnd.sh`
 Use Hermes cron to create staggered jobs:
 
 ```python
-# R&D department — runs at :25 past even hours
+# Recommended schedule — QA must run 20+ min after R&D/UX to test completed work
+# Even hours:  :00 Board, :20 R&D, :45 IT, :55 Infra
+# Odd hours:   :00 DevOps, :10 UX/UI, :40 QA, :50 PM
+
+# R&D department — runs at :20 past even hours
 hermes cron create \
   --name myproject-rnd \
-  --schedule "25 */2 * * *" \
+  --schedule "20 */2 * * *" \
   --script myproject-rnd.sh \
   --prompt "You are the R&D department. Read your SYSTEM.md for identity and pipeline rules. Follow the pipeline strictly: research → pitch → spec → build. If no spec exists for your current directive, write the spec. Do NOT build yet." \
   --workdir ~/my-project \
-  --toolsets terminal,file \
+  --toolsets terminal,file,browser \
   --deliver telegram
 
-# UX department — runs at :15 past odd hours
+# UX department — runs at :10 past odd hours
 hermes cron create \
   --name myproject-uxui \
-  --schedule "15 1-23/2 * * *" \
+  --schedule "10 1-23/2 * * *" \
   --script myproject-uxui.sh \
   --prompt "You are the UX/UI department..." \
   --workdir ~/my-project \
-  --toolsets terminal,file \
+  --toolsets terminal,file,browser \
   --deliver telegram
 
-# Infra — runs at :50 past even hours
+# QA — runs at :40 past odd hours (20 min after R&D, 30 min after UX)
+hermes cron create \
+  --name myproject-qa \
+  --schedule "40 1-23/2 * * *" \
+  --script myproject-qa.sh \
+  --prompt "You are the QA department..." \
+  --workdir ~/my-project \
+  --toolsets terminal,file,browser \
+  --deliver telegram
+
+# Infra — runs at :55 past even hours
 hermes cron create \
   --name myproject-infra \
-  --schedule "50 */2 * * *" \
+  --schedule "55 */2 * * *" \
   --script myproject-infra.sh \
   --prompt "You are the Infrastructure department..." \
   --workdir ~/my-project \

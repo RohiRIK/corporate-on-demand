@@ -43,7 +43,7 @@
 **Problem**: `add-department.ts` scaffolds a minimal SYSTEM.md without an anti-slop contract section. Validator fails on `/anti-slop/i` check.
 **Fix**: After running `add-department.ts`, append the full anti-slop contract to each new department's SYSTEM.md. Never ship a department with just the scaffold output.
 
-## 10. Browser Toolset for E2E Departments
+## 10. Browser Toolset Required for E2E Departments
 **Problem**: QA, R&D, and CEO need browser tools for E2E smoke tests, pre-ship checks, and visual spot-checks. Default `enabled_toolsets` is `["terminal", "file"]` which blocks browser-based testing.
 **Fix**: Set `enabled_toolsets: ["terminal", "file", "browser"]` for QA, R&D, CEO cron jobs.
 
@@ -63,3 +63,16 @@
 **Problem**: Department scripts that `curl localhost:PORT` report "healthy" even when LAN clients can't connect. Root cause: frontend JS hardcodes `localhost:3001` as the API URL, which resolves on the server but not on phones/tablets/other machines. From the server's perspective everything works — the bug is invisible to API-level checks.
 **Detection**: At least one department (QA or Infra) must grep frontend source for hardcoded `localhost` references. Backend URLs must be relative or use the host IP. QA/R&D should open the site with browser tools and screenshot it — comparing game count on screen vs API response catches rendering mismatches that curl never will.
 **Fix**: Give QA, R&D, CEO the `browser` toolset (pitfall #10). Add a static-analysis check to QA's SYSTEM.md: "scan index.html for hardcoded localhost references". Add visual spot-check to CEO inspection: "open site in browser, screenshot, verify game count matches API".
+
+## 15. QA Schedule Too Close to R&D/UX
+**Problem**: If QA runs only 5 minutes after R&D or UX, it may start testing before the prior department finishes its build. QA tests the OLD code and reports false positives or misses real bugs.
+**Fix**: QA must run at least 20 minutes after R&D and UX. Recommended layout per 2-hour cycle: UX at :10, R&D at :20, QA at :40. The 20-minute buffer ensures builds complete before verification starts. Never schedule QA less than 15 minutes after a building department.
+
+## 16. Hermes Skill Distribution — No Self-Serve Registry
+**Problem**: `hermes skills publish --to clawhub` prints "not yet supported". `skills.sh` auto-indexes via install telemetry (no submit form). There is no CLI command to push a skill into the Hermes hub.
+**Current options**: (1) Direct URL install: `hermes skills install https://raw.githubusercontent.com/<owner>/<repo>/main/SKILL.md`. (2) Tap the repo: `hermes skills tap add <owner>/<repo>`. (3) `--to github --repo <owner>/<repo>` creates a PR on your own repo (not a registry submission). (4) ClawHub web submit at `https://clawhub.ai/publish-skill` — but that's OpenClaw's registry, not Hermes-native.
+**Bottom line**: GitHub direct URL + taps are the reliable distribution path for now.
+
+## 17. Publish Readiness
+**Problem**: Skills with hardcoded `/home/<user>/` paths, stale version numbers, "Hermes Agent" as author, and project-specific reference files (with real IPs/paths) fail review or confuse other users.
+**Fix**: Before publishing, run the checklist in `create-skill` skill's `references/publish.md`. Key items: grep for hardcoded home paths, verify version matches CHANGELOG, set real author, rename project-specific files to `example-*.md` with disclaimer.

@@ -21,18 +21,20 @@ Every department sends its full report to your chat after every cycle.
 - **Downside**: Noisy. Gets overwhelming fast with 6+ departments.
 
 ### Mode B: Tiered Delivery
-Critical departments report to chat. Others save locally. Morning digest covers everything.
+Critical departments report to chat. Others save locally. Digests cover everything.
 
 ```json
 "reporting": {
   "mode": "tiered",
   "alwaysDeliver": ["ceo", "qa"],
-  "localOnly": ["it", "devops", "security", "infra"],
-  "digestSchedule": "0 8 * * *"
+  "localOnly": ["it", "devops", "security", "infra", "rnd", "uxui", "pm", "board"],
+  "digestSchedule": ["0 8 * * *", "0 20 * * *"]
 }
 ```
 
-- **Volume**: 4-8 messages/day + 1 morning digest
+Note: `digestSchedule` can be an array for multiple digests (e.g., morning + evening).
+
+- **Volume**: 4-8 messages/day + 1-2 digests
 - **Latency**: CEO/QA instant, others delayed until digest
 - **Best for**: Established orgs where you trust departments to work autonomously
 - **Downside**: Infrastructure issues from silent departments may wait until morning
