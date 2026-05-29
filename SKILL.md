@@ -19,6 +19,7 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 
 | Need | Reference |
 |------|-----------|
+| **Strategic planning — start here** | `references/strategy-guide.md` |
 | Folder structure, schedules, state.json, delegation | `references/architecture.md` |
 | Department pipelines & enforcement rules | `references/pipelines.md` |
 | Banned words, quality grading, slop prevention | `references/anti-slop.md` |
