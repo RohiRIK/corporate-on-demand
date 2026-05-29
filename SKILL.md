@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight."
-version: 3.1.0
+version: 3.2.0
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -27,6 +27,28 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Template configs for different domains | `references/company-templates.md` |
 | Arcade platform case study | `references/arcade-platform.md` |
 | Future ideas & expansion backlog | `references/ideas.md` |
+
+### Implementation Guides
+
+| Feature | Reference |
+|---------|-----------|
+| DevOps department | `references/impl-devops-dept.md` |
+| Cross-department meetings | `references/impl-cross-dept-meetings.md` |
+| Project fast-track | `references/impl-fast-track.md` |
+| CEO department creation | `references/impl-dept-creation.md` |
+| IT department | `references/impl-it-dept.md` |
+| HR department | `references/impl-hr-dept.md` |
+| QA department | `references/impl-qa-dept.md` |
+| Team building (Gibbush) | `references/impl-gibbush.md` |
+| Incident response | `references/impl-incident-response.md` |
+| KPI dashboard & metrics | `references/impl-kpi-dashboard.md` |
+| Department budgets | `references/impl-dept-budgets.md` |
+| Retrospectives | `references/impl-retrospectives.md` |
+| Mentorship / shadowing | `references/impl-mentorship.md` |
+| Security department | `references/impl-security-dept.md` |
+| Analytics department | `references/impl-analytics-dept.md` |
+| Seasonal events | `references/impl-seasonal-events.md` |
+| Newsletter, SLAs, Labs, Plugins | `references/impl-ecosystem.md` |
 
 ## Tools
 
