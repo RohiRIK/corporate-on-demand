@@ -39,24 +39,27 @@
 **Problem**: Snap-installed bun (`/snap/bin/bun`) is sandboxed and cannot access paths like `~/.hermes/`. Every `bun /path/to/script.ts` returns "Module not found".
 **Fix**: Use the real bun binary at `~/.bun/bin/bun`. Piping also works: `cat script.ts | bun run -`.
 
-## 9. add-department.ts missing anti-slop contract
-**Problem**: The `add-department.ts` scaffold generates a SYSTEM.md without the anti-slop contract section. Validator catches this as a failure (`SYSTEM.md has anti-slop contract`).
-**Fix**: After running `add-department.ts`, manually append the anti-slop contract to each new department's SYSTEM.md. The contract text lives in `references/anti-slop.md`.
+## 9. Scaffold Missing Anti-Slop Contract
+**Problem**: `add-department.ts` scaffolds a minimal SYSTEM.md without an anti-slop contract section. Validator fails on `/anti-slop/i` check.
+**Fix**: After running `add-department.ts`, append the full anti-slop contract to each new department's SYSTEM.md. Never ship a department with just the scaffold output.
 
-## 10. State feedback fields stay empty without explicit prompt instructions
-**Problem**: `recentChanges`, `blockedTasks`, and `pendingEscalations` arrays in state.json will remain `[]` indefinitely unless every department cron prompt explicitly says "after every action, append to recentChanges". Agents don't infer this from CORPORATE.md or DELEGATION.md alone.
+## 10. Browser Toolset for E2E Departments
+**Problem**: QA, R&D, and CEO need browser tools for E2E smoke tests, pre-ship checks, and visual spot-checks. Default `enabled_toolsets` is `["terminal", "file"]` which blocks browser-based testing.
+**Fix**: Set `enabled_toolsets: ["terminal", "file", "browser"]` for QA, R&D, CEO cron jobs.
+
+## 11. State Feedback Fields Stay Empty
+**Problem**: `recentChanges`, `blockedTasks`, and `pendingEscalations` in state.json remain `[]` unless every department cron prompt explicitly says "after every action, append to recentChanges". Agents don't infer this from governance docs alone.
 **Fix**: Every department cron prompt must contain explicit write instructions for these fields, including the exact JSON shape: `{"dept": "X", "action": "...", "artifact": "...", "timestamp": "ISO8601"}`.
 
-## 11. Migration requires updating existing prompts
-**Problem**: When adding new departments, existing department cron prompts don't know the new departments exist. They can't route inbox messages to qa/it/devops/security if their prompts were written before those departments existed.
-**Fix**: After adding departments, append a migration notice to all existing cron prompts listing the new departments and their responsibilities.
+## 12. Schema Migration Stale References
+**Problem**: Renaming a state.json field (e.g. `gamePipeline` → `pipeline`) fixes the JSON but leaves stale references in cron prompts, scripts, and TS tools.
+**Mitigation**: After any field rename, grep ALL consumers: state.json, cron prompts, shell scripts, TS tools, SYSTEM.md files. Run `validate.ts` + `report.ts` after migration.
 
-## 9. Schema Migration Stale References
-**Problem**: Renaming a state.json field (e.g. `gamePipeline` → `pipeline`) fixes the JSON but leaves stale references in cron job prompts, data-collection scripts, and TS tools. Agents then read/write the wrong field name, causing silent data loss.
-**Mitigation**: After any state.json field rename, check ALL consumers:
-1. `state.json` itself
-2. All cron job prompts (`grep gamePipeline ~/.hermes/cron/jobs.json`)
-3. Data-collection shell scripts (`~/.hermes/scripts/`)
-4. TS tool scripts (report.ts, validate.ts, scaffold.ts)
-5. Department SYSTEM.md files (if they reference field names)
-Run `validate.ts` + `report.ts` after migration to catch remaining mismatches.
+## 13. New Department Checklist Gaps
+**Problem**: `add-department.ts` scaffolds dirs + SYSTEM.md but does NOT create the data-collection shell script, the cron job, or the state.json department entry.
+**Fix**: After scaffolding, manually create all three: shell script at `~/.hermes/scripts/arcade-<dept>.sh`, cron job with correct schedule/toolsets, and department entry in state.json.
+
+## 14. Localhost Health Checks Hide LAN Failures
+**Problem**: Department scripts that `curl localhost:PORT` report "healthy" even when LAN clients can't connect. Root cause: frontend JS hardcodes `localhost:3001` as the API URL, which resolves on the server but not on phones/tablets/other machines. From the server's perspective everything works — the bug is invisible to API-level checks.
+**Detection**: At least one department (QA or Infra) must grep frontend source for hardcoded `localhost` references. Backend URLs must be relative or use the host IP. QA/R&D should open the site with browser tools and screenshot it — comparing game count on screen vs API response catches rendering mismatches that curl never will.
+**Fix**: Give QA, R&D, CEO the `browser` toolset (pitfall #10). Add a static-analysis check to QA's SYSTEM.md: "scan index.html for hardcoded localhost references". Add visual spot-check to CEO inspection: "open site in browser, screenshot, verify game count matches API".

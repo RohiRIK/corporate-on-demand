@@ -154,4 +154,6 @@ When fixing field renames (e.g. `gamePipeline` → `pipeline`), check ALL consum
 - Adjust SYSTEM.md prompts based on actual output quality
 - Add/remove departments as the project evolves
 - Use `add-department.ts` for new departments
+- **IMPORTANT**: After `add-department.ts`, REPLACE the generated SYSTEM.md with a full version including: identity, pipeline, ownership, domain boundaries, grading rubric, and anti-slop contract. The scaffold output is minimal and will fail validation without these sections.
+- For departments that do E2E testing (QA, R&D, CEO), set `enabled_toolsets: ["terminal", "file", "browser"]` on their cron jobs.
 - Re-run alignment check (Step 6) after any structural change

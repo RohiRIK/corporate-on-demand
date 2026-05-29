@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight."
-version: 3.3.1
+version: 3.3.2
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -51,6 +51,8 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Analytics department | `references/impl-analytics-dept.md` |
 | Seasonal events / themes | `references/impl-seasonal-events.md` |
 | **Testing strategy (E2E, escalation, TDD)** | `references/impl-testing-strategy.md` |
+| **Reporting modes (MANDATORY setup)** | `references/impl-reporting-modes.md` |
+| Full changelog | `CHANGELOG.md` |
 | Newsletter, SLAs, Labs, Plugins | `references/impl-ecosystem.md` |
 
 ## Tools
@@ -61,6 +63,10 @@ SCRIPTS=~/.hermes/skills/devops/corporate-on-demand/scripts
 
 # Scaffold new project from template (game|saas|content|devtools|homelab|data)
 $BUN $SCRIPTS/scaffold.ts --name myproj --path ~/myproj --template saas
+
+# MANDATORY: Configure reporting mode before first run
+# See references/impl-reporting-modes.md for all options
+# If skipped, defaults to Mode A (all messages delivered — can be noisy)
 
 # Validate deployment
 $BUN $SCRIPTS/validate.ts --path ~/myproj
