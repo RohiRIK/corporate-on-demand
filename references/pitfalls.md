@@ -37,7 +37,19 @@
 
 ## 8. Snap Bun Sandbox
 **Problem**: Snap-installed bun (`/snap/bin/bun`) is sandboxed and cannot access paths like `~/.hermes/`. Every `bun /path/to/script.ts` returns "Module not found".
-**Mitigation**: Use the real bun binary at `~/.bun/bin/bun`. Piping also works: `cat script.ts | bun run -`.
+**Fix**: Use the real bun binary at `~/.bun/bin/bun`. Piping also works: `cat script.ts | bun run -`.
+
+## 9. add-department.ts missing anti-slop contract
+**Problem**: The `add-department.ts` scaffold generates a SYSTEM.md without the anti-slop contract section. Validator catches this as a failure (`SYSTEM.md has anti-slop contract`).
+**Fix**: After running `add-department.ts`, manually append the anti-slop contract to each new department's SYSTEM.md. The contract text lives in `references/anti-slop.md`.
+
+## 10. State feedback fields stay empty without explicit prompt instructions
+**Problem**: `recentChanges`, `blockedTasks`, and `pendingEscalations` arrays in state.json will remain `[]` indefinitely unless every department cron prompt explicitly says "after every action, append to recentChanges". Agents don't infer this from CORPORATE.md or DELEGATION.md alone.
+**Fix**: Every department cron prompt must contain explicit write instructions for these fields, including the exact JSON shape: `{"dept": "X", "action": "...", "artifact": "...", "timestamp": "ISO8601"}`.
+
+## 11. Migration requires updating existing prompts
+**Problem**: When adding new departments, existing department cron prompts don't know the new departments exist. They can't route inbox messages to qa/it/devops/security if their prompts were written before those departments existed.
+**Fix**: After adding departments, append a migration notice to all existing cron prompts listing the new departments and their responsibilities.
 
 ## 9. Schema Migration Stale References
 **Problem**: Renaming a state.json field (e.g. `gamePipeline` → `pipeline`) fixes the JSON but leaves stale references in cron job prompts, data-collection scripts, and TS tools. Agents then read/write the wrong field name, causing silent data loss.

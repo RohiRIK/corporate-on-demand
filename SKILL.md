@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight."
-version: 3.2.0
+version: 3.3.1
 author: Hermes Agent
 license: MIT
 platforms: [linux]
@@ -20,6 +20,7 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Need | Reference |
 |------|-----------|
 | **Strategic planning — start here** | `references/strategy-guide.md` |
+| Adding departments — full checklist | `references/migration-checklist.md` |
 | Folder structure, schedules, state.json, delegation | `references/architecture.md` |
 | Department pipelines & enforcement rules | `references/pipelines.md` |
 | Banned words, quality grading, slop prevention | `references/anti-slop.md` |
@@ -48,7 +49,8 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Mentorship / shadowing | `references/impl-mentorship.md` |
 | Security department | `references/impl-security-dept.md` |
 | Analytics department | `references/impl-analytics-dept.md` |
-| Seasonal events | `references/impl-seasonal-events.md` |
+| Seasonal events / themes | `references/impl-seasonal-events.md` |
+| **Testing strategy (E2E, escalation, TDD)** | `references/impl-testing-strategy.md` |
 | Newsletter, SLAs, Labs, Plugins | `references/impl-ecosystem.md` |
 
 ## Tools
