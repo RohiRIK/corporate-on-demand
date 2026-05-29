@@ -1,8 +1,8 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight."
-version: 3.3.2
-author: Hermes Agent
+version: 3.4.0
+author: Rohi Rikman
 license: MIT
 platforms: [linux]
 related_skills: [kanban-orchestrator, kanban-worker]
@@ -27,7 +27,7 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Failure modes & mitigations (7 pitfalls) | `references/pitfalls.md` |
 | Step-by-step cron setup with code examples | `references/setup.md` |
 | Template configs for different domains | `references/company-templates.md` |
-| Arcade platform case study | `references/arcade-platform.md` |
+| Arcade platform case study | `references/example-arcade-platform.md` |
 | Future ideas & expansion backlog | `references/ideas.md` |
 
 ### Implementation Guides

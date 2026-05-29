@@ -1,4 +1,6 @@
-# Arcade Platform — Reference Implementation
+# Example: Arcade Platform
+
+> **Note:** This is a real deployment example. Replace paths and IPs with your own. — Reference Implementation
 
 First deployment of Corporate-on-Demand system.
 

@@ -16,7 +16,7 @@ Options:
   --help       Show this help
 
 Example:
-  bun add-department.ts --path /home/rohi/my-project --name qa \\
+  bun add-department.ts --path ~/my-project --name qa \\
     --focus "Quality assurance and testing" --pipeline "test-plan,execute,report"`);
 }
 

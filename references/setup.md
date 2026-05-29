@@ -5,7 +5,7 @@
 Use the scaffold tool or create manually:
 ```bash
 bun ~/.hermes/skills/devops/corporate-on-demand/scripts/scaffold.ts \
-  --name my-project --path /home/rohi/my-project --template saas
+  --name my-project --path ~/my-project --template saas
 ```
 
 ## Step 2: Create Data-Collection Scripts
@@ -15,7 +15,7 @@ Each department needs a shell script in `~/.hermes/scripts/` that collects conte
 ```bash
 #!/bin/bash
 # ~/.hermes/scripts/myproject-rnd.sh
-PROJ="/home/rohi/my-project"
+PROJ="~/my-project"
 DEPT="$PROJ/departments/rnd"
 
 echo "=== CORPORATE GOVERNANCE ==="
@@ -54,7 +54,7 @@ hermes cron create \
   --schedule "25 */2 * * *" \
   --script myproject-rnd.sh \
   --prompt "You are the R&D department. Read your SYSTEM.md for identity and pipeline rules. Follow the pipeline strictly: research → pitch → spec → build. If no spec exists for your current directive, write the spec. Do NOT build yet." \
-  --workdir /home/rohi/my-project \
+  --workdir ~/my-project \
   --toolsets terminal,file \
   --deliver telegram
 
@@ -64,7 +64,7 @@ hermes cron create \
   --schedule "15 1-23/2 * * *" \
   --script myproject-uxui.sh \
   --prompt "You are the UX/UI department..." \
-  --workdir /home/rohi/my-project \
+  --workdir ~/my-project \
   --toolsets terminal,file \
   --deliver telegram
 
@@ -74,7 +74,7 @@ hermes cron create \
   --schedule "50 */2 * * *" \
   --script myproject-infra.sh \
   --prompt "You are the Infrastructure department..." \
-  --workdir /home/rohi/my-project \
+  --workdir ~/my-project \
   --toolsets terminal,file \
   --deliver telegram
 
@@ -84,7 +84,7 @@ hermes cron create \
   --schedule "0 10,22 * * *" \
   --script myproject-ceo.sh \
   --prompt "You are the CEO. Inspect all departments, grade A-F, write directives..." \
-  --workdir /home/rohi/my-project \
+  --workdir ~/my-project \
   --toolsets terminal,file,browser \
   --deliver telegram
 ```
@@ -93,7 +93,7 @@ hermes cron create \
 
 ```bash
 bun ~/.hermes/skills/devops/corporate-on-demand/scripts/validate.ts \
-  --path /home/rohi/my-project
+  --path ~/my-project
 ```
 
 ## Step 5: Add Morning Report
