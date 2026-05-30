@@ -1,0 +1,49 @@
+# Corporate-on-Demand — .gitignore for public showcase repos
+# Use this when publishing a project to a public GitHub repo.
+# Keeps department structure + meaningful artifacts, excludes operational noise.
+
+# === Temp scripts (root-level junk) ===
+tmp_*.py
+update_state_*.py
+it-rotate.py
+it-scan.py
+improve.sh
+
+# === Internal migration notes ===
+MIGRATION-LOG.md
+
+# === JSON cycle logs (bulk machine output) ===
+logs/*.json
+departments/*/logs/*.json
+# Keep README.md inside log dirs (explains log format)
+!departments/*/logs/README.md
+
+# === Processed inbox items (just noise) ===
+departments/*/inbox/done/
+
+# === Hermes internal plans ===
+.hermes/
+
+# === Throwaway department scripts ===
+departments/uxui/_update_state.py
+
+# === What STAYS (showcase value) ===
+# - All SYSTEM.md (how each dept works)
+# - CORPORATE.md, DELEGATION.md (governance)
+# - Confluence/ (decisions, pivots, upgrades)
+# - R&D pipeline (research → pitches → specs)
+# - Creative artifacts (game scripts)
+# - QA screenshots, test plans, regression reports, bug reports
+# - Board minutes (autonomous governance)
+# - CEO reviews (inspection cycles)
+# - CTO architecture + directives
+# - Security advisories, audits, hardening
+# - DevOps pipelines (CI/CD work)
+# - Infra audits + runbooks
+# - PM changelogs, reports, standards
+# - UX/UI designs, research, styleguide
+# - IT scans + fixes (housekeeping)
+# - Analytics reports
+# - state.json (shared brain)
+# - All app code (backend, frontend, docker-compose)
+# - Active inbox items (not done/)

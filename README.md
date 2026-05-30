@@ -19,6 +19,8 @@
 
 *Departments. Pipelines. Anti-slop. C-Suite oversight. Runs while you sleep.*
 
+🕹️ **[Live Demo: Arcade Platform](https://github.com/RohiRIK/arcade-platform)** — 7 games, 16 departments, fully autonomous. See Corporate on Demand in action.
+
 [![Version](https://img.shields.io/badge/version-3.6.0-blue?style=flat-square)]()
 [![Hermes](https://img.shields.io/badge/hermes--agent-skill-purple?style=flat-square)](https://hermes-agent.nousresearch.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()

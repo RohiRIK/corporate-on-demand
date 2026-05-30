@@ -65,6 +65,7 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | **Pivoting — strategic direction changes** | `references/impl-pivoting.md` |
 | **Sprint Mode — temporary org-wide acceleration** | `references/impl-sprint-mode.md` |
 | **R&D Labs — default experimentation sandbox** | `references/impl-labs.md` |
+| **Public repo showcase `.gitignore`** | `templates/gitignore-public-repo` |
 | **Upgrade live project to current skill version** | `references/impl-project-upgrade.md` |
 | Newsletter, SLAs, Plugins | `references/impl-ecosystem.md` |
 
@@ -78,10 +79,6 @@ When the skill gains new features (e.g. confluence, pivoting), deployed projects
 4. Update state.json with new tracking fields
 5. Create any new directories (e.g. `confluence/`)
 6. Use `delegate_task` for bulk SYSTEM.md updates — one subagent can patch all 10 departments
-
-## Pitfalls
-
-- **Duplicate nested skill dir**: Never create a `skills/<skill-name>/` directory inside the skill itself. Hermes resolves skill names by scanning recursively — a nested SKILL.md with the same name causes `skill_view` to fail with an ambiguity error. If found, verify it's a pure duplicate (`0 copied, N skipped` on merge check), then delete the nested dir.
 
 ## Tools
 
@@ -161,6 +158,8 @@ Every time this skill is modified (new impl guide, scaffold change, new default)
 The user audits changelog completeness. Never treat version/changelog as afterthoughts.
 
 ## Pitfalls
+
+- **README version drift**: When bumping SKILL.md version + CHANGELOG, also check README.md badges, feature tables, architecture diagrams, and department counts. README drifted from v3.2.1 to v3.6.0 unnoticed — 4 versions behind. Add README update as a checklist item alongside CHANGELOG on every version bump.
 
 - **"What can we improve?" means the LIVE PROJECT, not the skill.** Inspect the deployed project (state.json, departments/, cron jobs, artifacts) against the skill's features. Don't compare skill docs to each other.
 - **Snap bun is sandboxed.** Use `~/.bun/bin/bun` (real binary) for scripts that access paths outside the snap sandbox.

@@ -76,3 +76,7 @@
 ## 17. Publish Readiness
 **Problem**: Skills with hardcoded `/home/<user>/` paths, stale version numbers, "Hermes Agent" as author, and project-specific reference files (with real IPs/paths) fail review or confuse other users.
 **Fix**: Before publishing, run the checklist in `create-skill` skill's `references/publish.md`. Key items: grep for hardcoded home paths, verify version matches CHANGELOG, set real author, rename project-specific files to `example-*.md` with disclaimer.
+
+## 18. Skill Changes Without Version Bump + Changelog
+**Problem**: Agent modifies skill files (new impl guide, scaffold.ts update, SKILL.md routing entry) but forgets to bump the version in SKILL.md frontmatter and update CHANGELOG.md. User has to ask "did you update the version and changelog?" — this should never happen.
+**Fix**: Every skill modification — no matter how small — MUST include in the same action batch: (1) version bump in SKILL.md frontmatter, (2) CHANGELOG.md entry with what changed. Treat version+changelog as part of the atomic unit of work, not a follow-up step. If adding a new impl guide, the commit is: impl guide + SKILL.md routing + version bump + changelog entry.
