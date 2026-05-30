@@ -5,7 +5,7 @@
 First deployment of Corporate-on-Demand system.
 
 ## Project
-- Path: `/home/rohi/arcade-platform`
+- Path: `/slug/arcade-platform`
 - Stack: Node.js/Express backend (port 3001) + nginx static frontend (port 3000)
 - Docker Compose, 2 containers, auto-restart
 
