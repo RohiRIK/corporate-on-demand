@@ -17,24 +17,32 @@ Strategic oversight layer on top of existing departments. Runs on the current fi
 - Board meeting: C-Suite writes to shared `boardroom-log.md`, CEO synthesizes and distributes directives
 - CPO anti-staleness without embeddings: keyword/structure heuristics + style rotation from `style_palette` in state.json
 
-## Planned Skills (to build via create-skill workflow)
+## Scripts (BUILT — v3.4.2)
 
-Each is a standalone skill under `devops/corporate-on-demand/skills/`:
+All scripts live in `scripts/` within the skill directory. Shared `lib/utils.ts` provides arg parsing, state.json R/W with file locking, file listing, and timestamps.
 
-### 1. `csuite-report`
-Role-specific report generator.
-- `scripts/csuite-report.ts --path <project> --role ceo|cto|ciso|cpo`
-- CEO: all grades, escalations, pipeline, blocked, cross-dept health
-- CTO: R&D+Infra+IT specs, prototypes, tech debt, runbooks
-- CISO: infra audits, security inbox items, vulnerability patterns
-- CPO: UX/UI designs, staleness score, style repetition, user-facing artifacts
+### Shared Scripts (reusable by all roles + departments)
+- `read-artifacts.ts` — Scan dept artifacts. `--path <project> --dept rnd,infra --since 24h --format summary|full|count`
+- `state-rw.ts` — Atomic read/write/append for state.json with dot-notation. `--read grades.rnd` / `--write grades.rnd=B` / `--append recentChanges '{...}'`
+- `inbox-send.ts` — Write formatted inbox messages. `--to rnd --from ceo --priority high --title "..." --body "..."`
+- `inbox-digest.ts` — Summarize inbox. `--dept rnd --status pending|done|all --since 24h`
+- `activity-log.ts` — Append/query activity log. `--append --dept rnd --action "..."` / `--query --since 12h --dept rnd`
 
-### 2. `csuite-directive`
-C-Suite issues directive to a department.
-- `scripts/directive.ts --path <project> --from ceo --to rnd --priority high --title "..." --body "..."`
-- Writes formatted inbox file, updates state.json
+### Role-Specific Scripts
+- `csuite-report.ts` — `--role ceo|cto|ciso|cpo` (composes shared scripts internally)
+- `grade.ts` — CEO grades a dept. `--dept rnd --grade B --reason "..."` (updates state + writes review)
+- `board-meeting.ts` — Collects all summaries, writes minutes to `board/minutes/`
+- `staleness-check.ts` — CPO anti-staleness: age, keyword repetition, structure similarity, style palette rotation
 
-### 3. `csuite-board-meeting`
+## Deployment Checklist (for wiring into a live project)
+
+1. Add CTO/CISO/CPO cron jobs with correct schedules (CTO every 6h, CISO every 12h, CPO every 8h)
+2. Upgrade data-collection scripts to call `csuite-report.ts --role <role>` instead of raw `cat`
+3. Add `style_palette` to state.json for CPO staleness-check
+4. Update SYSTEM.md templates to reference the new scripts (agents must know the tools exist)
+5. Consider adding HR dept for SLA tracking + retrospectives, Analytics dept for user behavior
+
+## Archive — Original Planned Items (all built)
 Run a board meeting.
 - `scripts/board-meeting.ts --path <project>`
 - Collects all dept summaries, generates agenda, writes to `board/minutes/`

@@ -4,6 +4,19 @@ All notable changes to Corporate-on-Demand are documented here.
 
 ---
 
+## [3.5.0] — 2026-05-31
+
+### Added
+- Pivoting flow (`impl-pivoting.md`) — 7-gate process for strategic direction changes: proposal, impact assessment, plan, board vote, pipeline freeze, phased execution, completion
+- 4 pivot types: architecture, product, tech-stack, delivery
+- Confluence integration (`impl-confluence.md`) — 4 categories: decisions, technical, runbooks, postmortems
+- Confluence baked into scaffold.ts (dirs, CORPORATE.md, state.json, SYSTEM.md)
+
+### Fixed
+- Removed duplicate nested `skills/corporate-on-demand/` directory (was causing `skill_view` ambiguity)
+
+---
+
 ## [3.4.2] — 2026-05-31
 
 ### Added

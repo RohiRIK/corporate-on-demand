@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight."
-version: 3.4.1
+version: 3.5.0
 author: Rohi Rikman
 license: MIT
 platforms: [linux]
@@ -33,6 +33,8 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | **v2 architecture (Honker + sqlite-vec)** | `references/v2-honker-sqlite-vec.md` |
 | LanceDB + Honker event-driven architecture | `references/lancedb-honker-integration.md` |
 | **C-Suite layer (CEO/CTO/CISO/CPO) — design + planned tools** | `references/csuite-layer-plan.md` |
+| **C-Suite improvement roadmap (next steps)** | `references/improvement-roadmap-csuite.md` |
+| **Confluence — shared knowledge base (decisions, technical docs, runbooks)** | `references/impl-confluence.md` |
 
 ### Implementation Guides
 
@@ -60,13 +62,19 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Schedule optimization (QA buffer) | `references/impl-schedule-optimization.md` |
 | Publishing & distribution | `references/impl-publishing.md` |
 | Full changelog | `CHANGELOG.md` |
+| **Pivoting — strategic direction changes** | `references/impl-pivoting.md` |
 | Newsletter, SLAs, Labs, Plugins | `references/impl-ecosystem.md` |
+| **Confluence shared knowledge base** | `references/impl-confluence.md` |
 
 ## Tools
 
 ```bash
 BUN=~/.bun/bin/bun  # snap bun is sandboxed, use real binary
 SCRIPTS=~/.hermes/skills/devops/corporate-on-demand/scripts
+
+# IMPORTANT: When adding new scripts or skills to this project,
+# load the create-skill skill FIRST (skill_view name='create-skill').
+# Follow its conventions for structure, naming, and validation.
 
 # Scaffold new project from template (game|saas|content|devtools|homelab|data)
 $BUN $SCRIPTS/scaffold.ts --name myproj --path ~/myproj --template saas
@@ -122,9 +130,36 @@ $BUN $SCRIPTS/activity-log.ts --path ~/myproj --append --dept rnd --action "wrot
 $BUN $SCRIPTS/activity-log.ts --path ~/myproj --query --since 12h --dept rnd
 ```
 
+## Pitfalls
+
+- **Review the live project, not just the skill.** When the user asks "what can we improve?", inspect the actual deployed project (state.json, departments/, cron jobs, artifacts) against the skill's features. Don't just compare skill docs to each other.
+- **Snap bun is sandboxed.** Use `~/.bun/bin/bun` (real binary) for scripts that access paths outside the snap sandbox (e.g. via symlinks like `.hermes`).
+- **Use create-skill workflow for new tooling.** When adding scripts/tools to this skill, follow the create-skill workflow (SKILL.md router + references/ + scripts/, validate). Don't just dump raw files.
+- **Cron stagger overflow.** scaffold.ts uses minute offsets [0, 25, 50, 75, 100] for regular depts — 100 is invalid (cron minutes max 59). When >5 regular depts exist, offset wraps past 59. Fix: use modulo or cap at 55 with smaller increments.
+- **"What can we improve?" means the LIVE PROJECT, not the skill.** When asked about improvements, inspect the actual deployed project (state.json, departments/, artifacts, cron jobs) against the full skill feature set. Don't compare skill docs to each other — compare skill capabilities to what the project is actually using.
+- **Duplicate nested skill dir.** `skills/corporate-on-demand/SKILL.md` exists inside the skill dir itself — causes ambiguity. `skill_view` refuses with "Ambiguous skill name" but `skill_manage` resolves correctly to the top-level skill. Workaround for reading: use `skill_view(name='devops/corporate-on-demand')` with the category prefix when the bare name fails. Fix: delete `~/.hermes/skills/devops/corporate-on-demand/skills/corporate-on-demand/`.
+
 ## Examples
 
-1. **New game studio**: `scaffold.ts --template game` → creates rnd/uxui/infra/pm/board/ceo departments with game-specific SYSTEM.md files
-2. **Add QA dept**: `add-department.ts --name qa --pipeline "test-plan,execute,report"` → creates dir, SYSTEM.md, updates CORPORATE.md
-3. **Health check**: `validate.ts` → verifies all SYSTEM.md, state.json, inbox formats are correct
-4. **Daily standup**: `report.ts` → shows grades, directives, artifact counts, pipeline status
+1. **New SaaS project**: `scaffold.ts --template saas` → creates 15 departments (core 9 + devops, qa, it, security, hr, analytics)
+2. **New game studio**: `scaffold.ts --template game` → creates 13 departments (core 9 + devops, qa, it, analytics)
+3. **Add QA dept**: `add-department.ts --name qa --pipeline "test-plan,execute,report"` → creates dir, SYSTEM.md, updates CORPORATE.md
+4. **Health check**: `validate.ts` → verifies all SYSTEM.md, state.json, inbox formats are correct
+5. **Daily standup**: `report.ts` → shows grades, directives, artifact counts, pipeline status
+
+### Template → Department Mapping
+
+Core (all templates): ceo, cto, ciso, cpo, rnd, uxui, infra, pm, board
+
+| Dept | game | saas | content | devtools | homelab | data |
+|------|------|------|---------|----------|---------|------|
+| devops | ✅ | ✅ | — | ✅ | ✅ | ✅ |
+| qa | ✅ | ✅ | — | ✅ | — | ✅ |
+| it | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| security | — | ✅ | — | ✅ | ✅ | ✅ |
+| hr | — | ✅ | — | — | — | — |
+| analytics | ✅ | ✅ | ✅ | ✅ | — | ✅ |
+| editorial | — | — | ✅ | — | — | — |
+
+C-Suite SYSTEM.md auto-includes `## Tools` section with script references and `## Oversight Scope`.
+C-Suite data-collection scripts call `csuite-report.ts` instead of raw `cat`.
