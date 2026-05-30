@@ -33,12 +33,12 @@ const CSUITE_DEFS: Record<string, DeptDef> = {
 
 const DEPT_CATALOG: DeptCatalog = {
   // --- RND ---
-  game:     { rnd: { focus: "Game design, mechanics, JS/Canvas game development", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "CSS, design tokens, layout files, Docker configs" } },
-  saas:     { rnd: { focus: "Feature development, API design, backend/frontend code", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "CSS design tokens, infrastructure configs, deployment scripts" } },
-  content:  { rnd: { focus: "Publishing tools, editor features, content APIs", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Content files, editorial decisions, design tokens" } },
-  devtools: { rnd: { focus: "CLI/SDK development, API design, plugin architecture", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Documentation site, release pipeline configs" } },
-  homelab:  { rnd: { focus: "Integration development, protocol bridges, automation rules", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Docker configs, dashboard UI, network configs" } },
-  data:     { rnd: { focus: "ETL development, data transforms, pipeline logic", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox"], mustNotTouch: "Dashboard UI, orchestration configs, infrastructure" } },
+  game:     { rnd: { focus: "Game design, mechanics, JS/Canvas game development", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox", "labs"], mustNotTouch: "CSS, design tokens, layout files, Docker configs" } },
+  saas:     { rnd: { focus: "Feature development, API design, backend/frontend code", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox", "labs"], mustNotTouch: "CSS design tokens, infrastructure configs, deployment scripts" } },
+  content:  { rnd: { focus: "Publishing tools, editor features, content APIs", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox", "labs"], mustNotTouch: "Content files, editorial decisions, design tokens" } },
+  devtools: { rnd: { focus: "CLI/SDK development, API design, plugin architecture", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox", "labs"], mustNotTouch: "Documentation site, release pipeline configs" } },
+  homelab:  { rnd: { focus: "Integration development, protocol bridges, automation rules", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox", "labs"], mustNotTouch: "Docker configs, dashboard UI, network configs" } },
+  data:     { rnd: { focus: "ETL development, data transforms, pipeline logic", pipeline: ["research", "pitch", "spec", "build"], subdirs: ["research", "pitches", "specs", "prototypes", "inbox", "labs"], mustNotTouch: "Dashboard UI, orchestration configs, infrastructure" } },
 };
 
 // Helper to add dept definitions for a specific department across templates

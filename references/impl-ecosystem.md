@@ -99,48 +99,11 @@ Formal response-time commitments between departments, tracked in state.json. Exa
 
 ## 3. R&D Labs / Skunkworks
 
-### Concept
-A sandbox for experimental work. R&D can prototype freely in a `labs/` folder without going through the full pitch→spec→build pipeline. But labs output NEVER goes to production directly — it must graduate through the normal pipeline.
+## 3. R&D Labs / Skunkworks
 
-### Directory Structure
-
-```
-departments/rnd/labs/
-  experiment-001-physics-engine/
-    README.md          # What this explores
-    prototype.ts       # Throwaway code
-    findings.md        # What was learned
-  experiment-002-multiplayer/
-    README.md
-    ...
-```
-
-### Rules
-- **No pitch/spec needed**: Labs are for exploration, not delivery
-- **Budget**: Labs work costs tokens like anything else
-- **Graduation path**: If an experiment shows promise:
-  1. R&D writes findings.md with recommendation
-  2. PM creates a formal spec based on findings
-  3. Normal pipeline: spec → build → QA → ship
-- **Cleanup**: Abandoned experiments get a `status: abandoned` in README.md with reason
-
-### Labs README Template
-
-```markdown
-# Experiment: [Name]
-**Status**: exploring | promising | graduated | abandoned
-**Started**: YYYY-MM-DD
-**Goal**: [What question are we answering?]
-
-## Approach
-[What we're trying]
-
-## Findings
-[What we learned — updated as we go]
-
-## Recommendation
-[Continue / Graduate to spec / Abandon — and why]
-```
+> **Promoted to core R&D feature.** See `references/impl-labs.md` for the
+> full spec. Labs is now a default R&D capability — scaffold.ts creates
+> the `labs/` directory automatically.
 
 ---
 

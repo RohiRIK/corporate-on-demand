@@ -17,14 +17,14 @@
 
 **Autonomous multi-agent corporate system for self-evolving projects**
 
-*Departments. Pipelines. Anti-slop. CEO oversight. Runs while you sleep.*
+*Departments. Pipelines. Anti-slop. C-Suite oversight. Runs while you sleep.*
 
-[![Version](https://img.shields.io/badge/version-3.2.1-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-3.6.0-blue?style=flat-square)]()
 [![Hermes](https://img.shields.io/badge/hermes--agent-skill-purple?style=flat-square)](https://hermes-agent.nousresearch.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
-[![Departments](https://img.shields.io/badge/departments-11%2B-orange?style=flat-square)]()
-[![Ideas](https://img.shields.io/badge/ideas-20-yellow?style=flat-square)]()
-[![Docs](https://img.shields.io/badge/docs-32%20files-brightgreen?style=flat-square)]()
+[![Departments](https://img.shields.io/badge/departments-16-orange?style=flat-square)]()
+[![Impl Guides](https://img.shields.io/badge/impl%20guides-25%2B-yellow?style=flat-square)]()
+[![Docs](https://img.shields.io/badge/docs-45%2B%20files-brightgreen?style=flat-square)]()
 
 </div>
 
@@ -32,54 +32,44 @@
 
 ## What is this?
 
-A [Hermes Agent](https://hermes-agent.nousresearch.com) skill that turns cron jobs into an autonomous corporation. Each department is an AI agent running on a schedule — with its own identity, mandatory pipeline, quality contract, and inbox. A CEO agent inspects everything twice daily and issues directives.
+A [Hermes Agent](https://hermes-agent.nousresearch.com) skill that turns cron jobs into an autonomous corporation. Each department is an AI agent running on a schedule — with its own identity, mandatory pipeline, quality contract, and inbox. A full C-Suite (CEO, CTO, CISO, CPO) oversees everything, and a Board provides strategic direction.
 
 **The result**: your project improves itself while you sleep. You wake up to a morning report of what happened overnight.
 
 ```
                               ┌─────────────────┐
                               │    👤 Human      │
-                              │  (morning report │
-                              │   @ 08:00)       │
+                              │  morning report  │
+                              │   @ 08:00        │
                               └────────┬─────────┘
                                        │ reads
                               ┌────────▼─────────┐
                               │   🤵 CEO Agent   │
-                              │  inspects 10:00  │
-                              │  inspects 22:00  │
+                              │  inspects 2x/day │
                               │  grades A-F      │
                               │  issues directives│
+                              │  activates sprints│
                               └────────┬─────────┘
                                        │ oversees
-                    ┌──────────────────┼──────────────────┐
-                    │                  │                   │
-           ┌────────▼──────┐  ┌───────▼───────┐  ┌───────▼───────┐
-           │  🏛️ Board     │  │  state.json   │  │  📬 Inboxes   │
-           │  coordinates  │  │  shared brain  │  │  cross-dept   │
-           │  sets agenda  │  │  directives    │  │  communication│
-           └───────┬───────┘  │  pipeline      │  └───────────────┘
-                   │          │  grades        │
-    ┌──────────────┼──────────│──────────────┐
-    │              │          │              │
-┌───▼───┐    ┌────▼───┐  ┌──▼────┐   ┌────▼───┐
-│ 🔬 R&D │    │ 🎨 UX  │  │ 🔧    │   │ 📋 PM  │
-│       │    │  /UI   │  │ Infra │   │        │
-│research│    │research│  │ audit │   │ review │
-│  ↓    │    │  ↓    │  │  ↓    │   │  ↓     │
-│ pitch │    │design │  │runbook│   │changelog│
-│  ↓    │    │  ↓    │  │  ↓    │   │  ↓     │
-│ spec  │    │ build │  │execute│   │standards│
-│  ↓    │    │       │  │       │   │         │
-│ build │    │       │  │       │   │         │
-└───────┘    └───────┘  └───────┘   └─────────┘
-  :25 */2h     :15 odd    :50 */2h    :40 odd
+              ┌────────────────────────┼────────────────────────┐
+              │                        │                        │
+     ┌────────▼──────┐       ┌────────▼────────┐      ┌───────▼───────┐
+     │  C-Suite       │       │  state.json     │      │  📬 Inboxes   │
+     │  CTO · CISO    │       │  shared brain   │      │  cross-dept   │
+     │  CPO · CFO     │       │  pipeline       │      │  communication│
+     └────────┬───────┘       │  grades · pivot │      └───────────────┘
+              │               │  sprint mode    │
+              │               └─────────────────┘
+    ┌─────────┼─────────────────────────────────────┐
+    │         │         │         │         │        │
+┌───▼──┐ ┌───▼──┐ ┌───▼───┐ ┌──▼───┐ ┌───▼──┐ ┌──▼────┐
+│🔬 R&D│ │🎨 UX │ │🔧Infra│ │📋 PM │ │🏛Board│ │🎭Crea-│
+│+Labs │ │ /UI  │ │      │ │      │ │      │ │ tive  │
+└──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └───────┘
 
-           ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-             Advanced departments (add as needed)
-           │                                     │
-            🛡️ QA    🔒 Security   📊 Analytics
-           │ 🖥️ IT    👷 DevOps    👥 HR         │
-           └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
+┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌───────┐
+│🛡️ QA │ │🖥️ IT │ │👷DevOp│ │🔒Sec │ │📊Anal│ │💰 CFO │
+└──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └───────┘
 ```
 
 ---
@@ -95,39 +85,49 @@ $BUN scripts/scaffold.ts --name my-arcade --path ~/my-arcade --template game
 
 Templates: `game` | `saas` | `content` | `devtools` | `homelab` | `data`
 
-### 2. Validate the setup
+### 2. Configure reporting mode (MANDATORY)
+
+```bash
+# See references/impl-reporting-modes.md
+# Default is Mode A (all messages delivered) — usually too noisy
+```
+
+### 3. Validate the setup
 
 ```bash
 $BUN scripts/validate.ts --path ~/my-arcade
-# 33 checks: SYSTEM.md, state.json, inboxes, pipelines, boundaries
 ```
 
-### 3. Set up cron jobs
+### 4. Set up cron jobs
 
 See [`references/setup.md`](references/setup.md) for the full cron setup with Hermes Agent.
 
-### 4. Watch it run
+### 5. Watch it run
 
-Morning report arrives at 08:00 on Telegram. CEO inspects at 10:00 and 22:00. Departments run every 2 hours overnight. You wake up to a changelog.
+Morning report arrives at 08:00 on Telegram. CEO inspects twice daily. Departments run every 2h. You wake up to a changelog.
 
 ---
 
-## Features at a Glance
+## Features
 
 | Feature | What it does |
 |---------|-------------|
-| 🏢 **Department system** | Each agent has identity, scope, pipeline, and domain boundaries |
+| 🏢 **16 departments** | Operational (R&D, UX/UI, Infra, PM, Board, QA, IT, DevOps, Security, Analytics, Creative) + C-Suite (CEO, CTO, CISO, CPO, CFO) |
 | 📋 **Mandatory pipelines** | R&D: research→pitch→spec→build. No skipping steps. |
 | 🚫 **Anti-slop contract** | Banned words list, concrete output rules, CEO grades A-F |
 | 📬 **Inbox communication** | Cross-department tasks via structured inbox files |
-| 🧠 **Shared state** | `state.json` — directives, pipeline status, grades, escalations |
-| 🤵 **CEO oversight** | Twice-daily inspection, corrective directives, quality enforcement |
-| 📰 **Morning report** | Daily briefing of overnight work delivered to Telegram |
-| ⚡ **Fast-track** | CEO can accelerate high-priority projects through the pipeline |
+| 🧠 **Shared state** | `state.json` — directives, pipeline status, grades, pivot tracking |
+| 🤵 **C-Suite oversight** | CEO inspects + grades. CTO reviews architecture. CISO audits security. CPO guards product quality. CFO tracks budgets. |
+| 📰 **Morning/Evening reports** | Daily briefings delivered to Telegram |
+| ⚡ **Fast-track** | CEO accelerates a single project — 2 pipeline steps per cycle |
+| 🚀 **Sprint Mode** | Temporary org-wide acceleration — 6 levers: cron boost, parallel tracks, multi fast-track, C-suite bump, daily standups, scope lock. CEO/PM/Board can propose. Max 5 days. |
+| 🔄 **Pivoting** | 7-gate process for strategic direction changes. Proposal → assessment → plan → board vote → freeze → execution → sign-off |
+| 🔬 **R&D Labs** | Default experimentation sandbox. No pitch/spec needed. Graduation path to production pipeline. |
+| 📚 **Confluence** | Shared knowledge base — decisions, technical docs, runbooks, postmortems |
 | 🎉 **Gibbush days** | Pipeline-free experimentation cycles to prevent staleness |
 | 🚨 **Incident response** | P1/P2/P3 severity, incident mode, postmortems |
-| 📊 **KPI dashboard** | Objective metrics per department, not just gut-feel grading |
-| 🔧 **20 expansion ideas** | Full implementation guides ready to activate |
+| 📊 **KPI dashboard** | Objective metrics per department |
+| 🔧 **Project upgrade** | 5-gate flow to upgrade existing projects when skill evolves |
 
 ---
 
@@ -144,7 +144,7 @@ Stage 2: Growing       ──→  + Board + QA (7 depts)
                               │
 Stage 3: Mature        ──→  + IT + DevOps + Security (10 depts)
                               │
-Stage 4: Enterprise    ──→  + HR + Analytics + specialized teams (11+)
+Stage 4: Enterprise    ──→  + C-Suite (CTO/CISO/CPO/CFO) + Analytics + Creative (16 depts)
 ```
 
 ---
@@ -158,21 +158,33 @@ your-project/
 ├── departments/
 │   ├── CORPORATE.md            # Master governance doc
 │   ├── DELEGATION.md           # Cross-dept communication protocol
-│   ├── ceo/
-│   │   ├── SYSTEM.md           # CEO identity & inspection workflow
-│   │   ├── directives/         # CEO directives archive
-│   │   ├── reviews/            # Inspection reports
-│   │   └── inbox/              # Escalations from departments
+│   ├── ceo/                    # CEO oversight + directives
+│   ├── cto/                    # Technical oversight
+│   ├── ciso/                   # Security posture
+│   ├── cpo/                    # Product quality
+│   ├── cfo/                    # Budget tracking
 │   ├── rnd/
 │   │   ├── SYSTEM.md           # R&D identity & pipeline
-│   │   ├── research/           # Game/feature research docs
+│   │   ├── research/           # Research docs
 │   │   ├── pitches/            # Pitch documents
 │   │   ├── specs/              # Implementation specs
+│   │   ├── labs/               # Experimentation sandbox (default)
 │   │   └── inbox/              # Tasks from other depts
 │   ├── uxui/                   # Design, CSS, user experience
 │   ├── infra/                  # Docker, health, networking
 │   ├── pm/                     # Documentation, changelogs
-│   └── board/                  # Strategy, meeting minutes
+│   ├── board/                  # Strategy, meeting minutes
+│   ├── qa/                     # Testing, quality assurance
+│   ├── it/                     # File management, maintenance
+│   ├── devops/                 # CI/CD, deployment pipelines
+│   ├── security/               # Vulnerability audits
+│   ├── analytics/              # Metrics, data analysis
+│   └── creative/               # Game scripts, visual direction
+├── confluence/
+│   ├── decisions/              # Strategic decisions + pivot docs
+│   ├── technical/              # Technical documentation
+│   ├── runbooks/               # Operational runbooks
+│   └── postmortems/            # Incident postmortems
 ├── state.json                  # Shared coordination brain
 ├── logs/                       # Per-cycle JSON logs
 └── docker-compose.yml          # Infrastructure
@@ -184,10 +196,19 @@ your-project/
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/scaffold.ts` | Scaffold entire project from template |
-| `scripts/validate.ts` | Run 33 structural checks on deployment |
-| `scripts/report.ts` | Generate status report with grades and metrics |
-| `scripts/add-department.ts` | Add a department to an existing project |
+| `scaffold.ts` | Scaffold entire project from template |
+| `validate.ts` | Run structural checks on deployment |
+| `report.ts` | Generate status report with grades and metrics |
+| `add-department.ts` | Add a department to an existing project |
+| `csuite-report.ts` | C-Suite role-specific reports |
+| `grade.ts` | CEO grades a department |
+| `board-meeting.ts` | Run a board meeting — collect summaries, write minutes |
+| `inbox-send.ts` | Send inbox messages between departments |
+| `inbox-digest.ts` | Digest a department's inbox |
+| `read-artifacts.ts` | Read/scan department artifacts |
+| `state-rw.ts` | Read/write state.json fields |
+| `activity-log.ts` | Append or query activity log |
+| `staleness-check.ts` | CPO staleness checker for UX/UI |
 
 ```bash
 BUN=~/.bun/bin/bun
@@ -202,9 +223,15 @@ $BUN $SCRIPTS/validate.ts --path ~/myproj
 # Report
 $BUN $SCRIPTS/report.ts --path ~/myproj
 
-# Add department
-$BUN $SCRIPTS/add-department.ts --path ~/myproj --name qa \
-  --focus "Testing and regression" --pipeline "test-plan,execute,report"
+# Grade a department
+$BUN $SCRIPTS/grade.ts --path ~/myproj --dept rnd --grade B --reason "Good specs"
+
+# Board meeting
+$BUN $SCRIPTS/board-meeting.ts --path ~/myproj
+
+# Send inbox message
+$BUN $SCRIPTS/inbox-send.ts --path ~/myproj --to rnd --from ceo --priority high \
+  --title "Auth refactor" --body "Details"
 ```
 
 ---
@@ -219,38 +246,56 @@ $BUN $SCRIPTS/add-department.ts --path ~/myproj --name qa \
 | [`architecture.md`](references/architecture.md) | Folder structure, schedules, state.json schema |
 | [`pipelines.md`](references/pipelines.md) | Mandatory pipeline rules per department |
 | [`anti-slop.md`](references/anti-slop.md) | Quality contract, banned words, CEO grading |
-| [`pitfalls.md`](references/pitfalls.md) | 8 failure modes with mitigations |
+| [`pitfalls.md`](references/pitfalls.md) | Failure modes with mitigations |
 | [`setup.md`](references/setup.md) | Step-by-step cron setup guide |
 | [`company-templates.md`](references/company-templates.md) | 6 project templates |
 
 ### Implementation Guides
 
-| Guide | Effort | Impact |
-|-------|--------|--------|
-| [`impl-cross-dept-meetings.md`](references/impl-cross-dept-meetings.md) | Low | ⬆️⬆️⬆️ |
-| [`impl-fast-track.md`](references/impl-fast-track.md) | Low | ⬆️⬆️⬆️ |
-| [`impl-incident-response.md`](references/impl-incident-response.md) | Low | ⬆️⬆️⬆️ |
-| [`impl-dept-creation.md`](references/impl-dept-creation.md) | Med | ⬆️⬆️⬆️ |
-| [`impl-qa-dept.md`](references/impl-qa-dept.md) | Med | ⬆️⬆️⬆️ |
-| [`impl-kpi-dashboard.md`](references/impl-kpi-dashboard.md) | Med | ⬆️⬆️ |
-| [`impl-devops-dept.md`](references/impl-devops-dept.md) | Med | ⬆️⬆️ |
-| [`impl-it-dept.md`](references/impl-it-dept.md) | Med | ⬆️⬆️ |
-| [`impl-gibbush.md`](references/impl-gibbush.md) | Low | ⬆️⬆️ |
-| [`impl-dept-budgets.md`](references/impl-dept-budgets.md) | Low | ⬆️⬆️ |
-| [`impl-retrospectives.md`](references/impl-retrospectives.md) | Low | ⬆️⬆️ |
-| [`impl-security-dept.md`](references/impl-security-dept.md) | Med | ⬆️⬆️ |
-| [`impl-seasonal-events.md`](references/impl-seasonal-events.md) | Low | ⬆️ |
-| [`impl-mentorship.md`](references/impl-mentorship.md) | Low | ⬆️ |
-| [`impl-analytics-dept.md`](references/impl-analytics-dept.md) | Med | ⬆️ |
-| [`impl-hr-dept.md`](references/impl-hr-dept.md) | Med | ⬆️ |
-| [`impl-ecosystem.md`](references/impl-ecosystem.md) | Med | ⬆️ |
+| Guide | What |
+|-------|------|
+| [`impl-sprint-mode.md`](references/impl-sprint-mode.md) | 🚀 Temporary org-wide acceleration (6 levers, max 5 days) |
+| [`impl-pivoting.md`](references/impl-pivoting.md) | 🔄 7-gate strategic direction changes |
+| [`impl-labs.md`](references/impl-labs.md) | 🔬 R&D experimentation sandbox (default) |
+| [`impl-confluence.md`](references/impl-confluence.md) | 📚 Shared knowledge base |
+| [`impl-project-upgrade.md`](references/impl-project-upgrade.md) | 🔧 5-gate project upgrade flow |
+| [`impl-cross-dept-meetings.md`](references/impl-cross-dept-meetings.md) | Cross-department meetings |
+| [`impl-fast-track.md`](references/impl-fast-track.md) | Single-project acceleration |
+| [`impl-incident-response.md`](references/impl-incident-response.md) | P1/P2/P3 incident handling |
+| [`impl-dept-creation.md`](references/impl-dept-creation.md) | CEO creates new departments |
+| [`impl-qa-dept.md`](references/impl-qa-dept.md) | QA department setup |
+| [`impl-devops-dept.md`](references/impl-devops-dept.md) | DevOps department setup |
+| [`impl-it-dept.md`](references/impl-it-dept.md) | IT department setup |
+| [`impl-security-dept.md`](references/impl-security-dept.md) | Security department setup |
+| [`impl-analytics-dept.md`](references/impl-analytics-dept.md) | Analytics department setup |
+| [`impl-hr-dept.md`](references/impl-hr-dept.md) | HR department setup |
+| [`impl-kpi-dashboard.md`](references/impl-kpi-dashboard.md) | KPI metrics dashboard |
+| [`impl-dept-budgets.md`](references/impl-dept-budgets.md) | Department budget tracking |
+| [`impl-testing-strategy.md`](references/impl-testing-strategy.md) | 7-layer testing strategy |
+| [`impl-reporting-modes.md`](references/impl-reporting-modes.md) | Configure what delivers to Telegram |
+| [`impl-schedule-optimization.md`](references/impl-schedule-optimization.md) | QA buffer + cron stagger |
+| [`impl-gibbush.md`](references/impl-gibbush.md) | Pipeline-free experimentation days |
+| [`impl-retrospectives.md`](references/impl-retrospectives.md) | Department retrospectives |
+| [`impl-mentorship.md`](references/impl-mentorship.md) | Cross-department mentorship |
+| [`impl-seasonal-events.md`](references/impl-seasonal-events.md) | Seasonal themes and events |
+| [`impl-ecosystem.md`](references/impl-ecosystem.md) | Newsletter, SLAs, plugin framework |
+| [`impl-publishing.md`](references/impl-publishing.md) | Publishing and distribution |
+
+### C-Suite & Governance
+
+| Doc | What |
+|-----|------|
+| [`csuite-layer-plan.md`](references/csuite-layer-plan.md) | C-Suite design + tools |
+| [`improvement-roadmap-csuite.md`](references/improvement-roadmap-csuite.md) | C-Suite improvement roadmap |
 
 ### Reference
 
 | Doc | What |
 |-----|------|
-| [`arcade-platform.md`](references/arcade-platform.md) | Live case study — arcade platform deployment |
-| [`ideas.md`](references/ideas.md) | Full backlog of 20 expansion ideas |
+| [`example-arcade-platform.md`](references/example-arcade-platform.md) | Live case study — arcade platform |
+| [`ideas.md`](references/ideas.md) | Expansion ideas backlog |
+| [`migration-checklist.md`](references/migration-checklist.md) | Department migration checklist |
+| [`pre-publish-checklist.md`](references/pre-publish-checklist.md) | Pre-publish quality gates |
 
 ---
 
@@ -265,7 +310,6 @@ Every department signs this contract. CEO enforces it.
 - ❌ No placeholder code (`// TODO: implement`)
 - ❌ No generic variable names (`data`, `temp`, `result`)
 - ✅ Every change has a measurable before/after
-- ✅ Every game must be fun for 2+ minutes
 - ✅ Every doc answers "what, why, how" concretely
 
 CEO grades each department A-F. Consecutive D/F grades trigger corrective directives.
@@ -274,52 +318,28 @@ CEO grades each department A-F. Consecutive D/F grades trigger corrective direct
 
 ## Case Study: Arcade Platform
 
-A browser-based arcade running on Docker in a homelab. 3 initial games (Snake, Pong, Breakout), 6 departments running autonomously, evolving 24/7.
+A browser-based arcade running on Docker in a homelab. 7 games (Snake, Pong, Breakout, Tetris, Space Invaders, Pac-Man, Frogger), 16 departments running autonomously, evolving 24/7.
 
-**Overnight results** (first night):
-- R&D: researched Tetris, wrote pitch, advanced pipeline
-- Infra: baseline health audit, container restart runbook
-- Board: 5 meeting cycles with cross-department directives, escalated UX/UI for stalling
-- The system self-governed — Board applied pressure before CEO even inspected
+**Results**:
+- R&D autonomously built 4 additional games beyond the initial 3
+- QA maintains 17+ consecutive clean cycles, zero bugs
+- Creative department produces game scripts and visual direction
+- Board self-governs — applies pressure before CEO even inspects
+- Active pivot (`arcade-evolution`) managing LittleJS framework migration across all departments
 
-See [`references/arcade-platform.md`](references/arcade-platform.md) for the full deployment reference.
+See [`references/example-arcade-platform.md`](references/example-arcade-platform.md) for the full deployment reference.
 
 ---
 
 ## Changelog
 
-### v3.2.1 — 2026-05-29
-**Strategic planning guide**
-- Added `references/strategy-guide.md` — 7-step decision framework
-- Maturity model: Stage 0 (idea) → Stage 4 (enterprise)
-- Department selection matrix with "when to add" triggers
-- Mechanism decision matrix (19 mechanisms, effort/impact)
-- Cron schedule templates for small/medium/large orgs
-- Growth and shrinking triggers
-- 6 example builds (arcade, SaaS, homelab, content, CLI, data)
-
-### v3.2.0 — 2026-05-29
-**17 implementation guides**
-- Full implementation docs for all 20 ideas
-- Each guide: SYSTEM.md template, state.json schema, step-by-step setup, guards
-- Departments: DevOps, IT, HR, QA, Security, Analytics
-- Mechanisms: cross-dept meetings, fast-track, dept creation, gibbush, incident response, KPI dashboard, budgets, retrospectives, mentorship, seasonal events
-- Ecosystem: newsletter, SLAs, R&D labs, plugin framework
-
-### v2.0.0 — 2026-05-28
-**Initial release — Corporate-on-Demand**
-- Core architecture: departments, pipelines, anti-slop, CEO oversight
-- 4 TypeScript tools: scaffold, validate, report, add-department
-- 6 project templates: game, SaaS, content, devtools, homelab, data
-- 8 pitfalls with mitigations
-- Arcade platform case study
-- 20 expansion ideas backlog
+See [`CHANGELOG.md`](CHANGELOG.md) for the full version history. Current version: **v3.6.0**.
 
 ---
 
 ## Requirements
 
-- [Hermes Agent](https://hermes-agent.nousresearch.com) (for cron job orchestration)
+- [Hermes Agent](https://hermes-agent.nousresearch.com) or [OpenClaw](https://github.com/AizelNetwork/OpenClaw) (for cron job orchestration)
 - [Bun](https://bun.sh) runtime (for TypeScript tools)
 - Docker & Docker Compose (for project deployment)
 - A Telegram bot (for reports — optional)
@@ -334,8 +354,8 @@ MIT — use it, fork it, build your own corporation.
 
 <div align="center">
 
-*Built with [Hermes Agent](https://hermes-agent.nousresearch.com) — the AI that runs while you sleep.*
+*Powered by caffeine and questionable life choices ☕️*
 
-**[Strategy Guide](references/strategy-guide.md)** · **[Architecture](references/architecture.md)** · **[Anti-Slop](references/anti-slop.md)** · **[Ideas](references/ideas.md)**
+**[Strategy Guide](references/strategy-guide.md)** · **[Architecture](references/architecture.md)** · **[Anti-Slop](references/anti-slop.md)** · **[Changelog](CHANGELOG.md)**
 
 </div>

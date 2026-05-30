@@ -12,6 +12,7 @@ Strategic oversight layer on top of existing departments. Runs on the current fi
 | **CTO** | Technical: R&D + Infra + IT specs, prototypes, runbooks, tech debt | Every 8-12h |
 | **CISO** | Security: infra audits, security inbox items, vulnerability patterns | Every 8-12h |
 | **CPO** | Product: UX/UI designs, staleness detection, style repetition, user-facing artifacts | Every 8-12h |
+| **CFO** | Budgets: scope tokens per dept per cycle, spend tracking, ROI analysis, reallocation | Every 8-12h |
 
 - CTO oversees R&D + Infra + IT (not just R&D)
 - Board meeting: C-Suite writes to shared `boardroom-log.md`, CEO synthesizes and distributes directives
@@ -36,11 +37,12 @@ All scripts live in `scripts/` within the skill directory. Shared `lib/utils.ts`
 
 ## Deployment Checklist (for wiring into a live project)
 
-1. Add CTO/CISO/CPO cron jobs with correct schedules (CTO every 6h, CISO every 12h, CPO every 8h)
+1. Add CTO/CISO/CPO/CFO cron jobs with correct schedules (CTO every 6h, CISO every 8h, CPO every 8h, CFO every 8h)
 2. Upgrade data-collection scripts to call `csuite-report.ts --role <role>` instead of raw `cat`
 3. Add `style_palette` to state.json for CPO staleness-check
-4. Update SYSTEM.md templates to reference the new scripts (agents must know the tools exist)
-5. Consider adding HR dept for SLA tracking + retrospectives, Analytics dept for user behavior
+4. Add `budgets` field to state.json for CFO (tokensPerCycle per dept, lastAllocation)
+5. Update SYSTEM.md templates to reference the new scripts (agents must know the tools exist)
+6. Consider adding Analytics dept for platform metrics and trends
 
 ## Archive — Original Planned Items (all built)
 Run a board meeting.

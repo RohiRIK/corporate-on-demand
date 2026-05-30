@@ -4,6 +4,24 @@ All notable changes to Corporate-on-Demand are documented here.
 
 ---
 
+## [3.6.0] — 2026-05-31
+
+### Added
+- Sprint Mode (`impl-sprint-mode.md`) — temporary org-wide acceleration with 6 configurable levers: cron boost, parallel tracks, multi fast-track, C-suite cadence bump, daily standups, scope lock
+- CEO/PM/Board can propose Sprint Mode organically through normal cycles
+- Max 5-day duration with auto-expiry, Board governance, mandatory retrospective
+- state.json `sprintMode` schema with full lever configuration
+- R&D Labs (`impl-labs.md`) — promoted from ecosystem extra to default R&D capability. Experimentation sandbox with graduation path, abandonment tracking, CEO/CTO oversight
+- Labs auto-created by scaffold.ts for all R&D departments across all 6 templates
+- Labs section removed from `impl-ecosystem.md`, replaced with pointer to `impl-labs.md`
+
+### Changed
+- README.md full rewrite — updated architecture diagram (C-Suite, Creative, Labs, Sprint Mode), features table (16 features), maturity model (Stage 4 Enterprise), project structure (16 depts, confluence/, labs/), tools table (13 scripts), documentation map (25+ impl guides), case study (7 games/16 depts), changelog section replaced with pointer to CHANGELOG.md
+- Requirements: added OpenClaw as alternative orchestrator to Hermes Agent
+- Badges updated: version 3.6.0, 16 departments, 25+ impl guides, 45+ docs
+
+---
+
 ## [3.5.0] — 2026-05-31
 
 ### Added
@@ -11,6 +29,7 @@ All notable changes to Corporate-on-Demand are documented here.
 - 4 pivot types: architecture, product, tech-stack, delivery
 - Confluence integration (`impl-confluence.md`) — 4 categories: decisions, technical, runbooks, postmortems
 - Confluence baked into scaffold.ts (dirs, CORPORATE.md, state.json, SYSTEM.md)
+- Project upgrade flow (`impl-project-upgrade.md`) — checklist for upgrading existing live projects to current skill version
 
 ### Fixed
 - Removed duplicate nested `skills/corporate-on-demand/` directory (was causing `skill_view` ambiguity)

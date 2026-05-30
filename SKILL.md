@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
-description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight."
-version: 3.5.0
+description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight. Also use when upgrading an existing corporate project to match a newer skill version."
+version: 3.6.0
 author: Rohi Rikman
 license: MIT
 platforms: [linux]
@@ -63,8 +63,25 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Publishing & distribution | `references/impl-publishing.md` |
 | Full changelog | `CHANGELOG.md` |
 | **Pivoting — strategic direction changes** | `references/impl-pivoting.md` |
-| Newsletter, SLAs, Labs, Plugins | `references/impl-ecosystem.md` |
-| **Confluence shared knowledge base** | `references/impl-confluence.md` |
+| **Sprint Mode — temporary org-wide acceleration** | `references/impl-sprint-mode.md` |
+| **R&D Labs — default experimentation sandbox** | `references/impl-labs.md` |
+| **Upgrade live project to current skill version** | `references/impl-project-upgrade.md` |
+| Newsletter, SLAs, Plugins | `references/impl-ecosystem.md` |
+
+## Upgrading Existing Projects
+
+When the skill gains new features (e.g. confluence, pivoting), deployed projects don't get them automatically. Upgrade checklist:
+
+1. Compare project's CORPORATE.md / SYSTEM.md files against current skill — check for missing sections
+2. Patch CORPORATE.md with new sections
+3. Patch every department SYSTEM.md with new sections
+4. Update state.json with new tracking fields
+5. Create any new directories (e.g. `confluence/`)
+6. Use `delegate_task` for bulk SYSTEM.md updates — one subagent can patch all 10 departments
+
+## Pitfalls
+
+- **Duplicate nested skill dir**: Never create a `skills/<skill-name>/` directory inside the skill itself. Hermes resolves skill names by scanning recursively — a nested SKILL.md with the same name causes `skill_view` to fail with an ambiguity error. If found, verify it's a pure duplicate (`0 copied, N skipped` on merge check), then delete the nested dir.
 
 ## Tools
 
@@ -130,14 +147,31 @@ $BUN $SCRIPTS/activity-log.ts --path ~/myproj --append --dept rnd --action "wrot
 $BUN $SCRIPTS/activity-log.ts --path ~/myproj --query --since 12h --dept rnd
 ```
 
+## Skill Modification Checklist
+
+Every time this skill is modified (new impl guide, scaffold change, new default), complete ALL of these in the same action:
+
+1. ☐ Write the feature (impl guide, script, scaffold change)
+2. ☐ Add routing entry in SKILL.md workflow routing table
+3. ☐ Bump `version` in SKILL.md frontmatter
+4. ☐ Add CHANGELOG.md entry (same version)
+5. ☐ Update README.md if affected (badges, features table, doc map, project structure)
+6. ☐ Check if live projects need upgrading (`impl-project-upgrade.md` 5-gate flow)
+
+The user audits changelog completeness. Never treat version/changelog as afterthoughts.
+
 ## Pitfalls
 
-- **Review the live project, not just the skill.** When the user asks "what can we improve?", inspect the actual deployed project (state.json, departments/, cron jobs, artifacts) against the skill's features. Don't just compare skill docs to each other.
-- **Snap bun is sandboxed.** Use `~/.bun/bin/bun` (real binary) for scripts that access paths outside the snap sandbox (e.g. via symlinks like `.hermes`).
-- **Use create-skill workflow for new tooling.** When adding scripts/tools to this skill, follow the create-skill workflow (SKILL.md router + references/ + scripts/, validate). Don't just dump raw files.
-- **Cron stagger overflow.** scaffold.ts uses minute offsets [0, 25, 50, 75, 100] for regular depts — 100 is invalid (cron minutes max 59). When >5 regular depts exist, offset wraps past 59. Fix: use modulo or cap at 55 with smaller increments.
-- **"What can we improve?" means the LIVE PROJECT, not the skill.** When asked about improvements, inspect the actual deployed project (state.json, departments/, artifacts, cron jobs) against the full skill feature set. Don't compare skill docs to each other — compare skill capabilities to what the project is actually using.
-- **Duplicate nested skill dir.** `skills/corporate-on-demand/SKILL.md` exists inside the skill dir itself — causes ambiguity. `skill_view` refuses with "Ambiguous skill name" but `skill_manage` resolves correctly to the top-level skill. Workaround for reading: use `skill_view(name='devops/corporate-on-demand')` with the category prefix when the bare name fails. Fix: delete `~/.hermes/skills/devops/corporate-on-demand/skills/corporate-on-demand/`.
+- **"What can we improve?" means the LIVE PROJECT, not the skill.** Inspect the deployed project (state.json, departments/, cron jobs, artifacts) against the skill's features. Don't compare skill docs to each other.
+- **Snap bun is sandboxed.** Use `~/.bun/bin/bun` (real binary) for scripts that access paths outside the snap sandbox.
+- **Use create-skill workflow for new tooling.** Follow create-skill conventions (SKILL.md router + references/ + scripts/, validate). Don't dump raw files.
+- **Explain-then-execute.** When adding a new capability (Sprint Mode, Labs, new dept), explain the plan and get confirmation before writing files. The user wants to review scope first.
+- **Gate-skipping during pivots.** The 7-gate pivot flow is strictly sequential. Complete the transition checklist before advancing `pivot.phase`. Skipping causes departments to miss assessments or votes.
+- **Inconsistent script variable names.** Scripts use `PROJ` or `PROJECT` for project path. Bulk-patching must handle both. New scripts should use `PROJ` (majority convention).
+- **Pivot-blind cron prompts.** Data-collection scripts should check `state.json pivot.active` and inject pivot context when true. Without this, departments ignore pivots unless CEO manually updates every directive.
+- **Cron stagger overflow.** scaffold.ts minute offsets can wrap past 59 with >5 depts. Fix: modulo or cap at 55 with smaller increments.
+- **Duplicate nested skill dir.** Never create `skills/<skill-name>/` inside the skill itself. Causes `skill_view` ambiguity. Fix: delete nested dir.
+- **Skill update ≠ project upgrade.** After adding a feature to the skill, live projects don't get it automatically. Always check if projects need the 5-gate upgrade flow.
 
 ## Examples
 

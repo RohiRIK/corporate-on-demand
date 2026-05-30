@@ -2,6 +2,21 @@
 
 Strategic direction changes that alter how the product works — architecture, tech stack, product model, or delivery method.
 
+## Pivot Scope Evolution
+
+A pivot can grow beyond its original technical scope. Listen for PRODUCT signals from the user:
+- "make the games better" = quality bar pivot, not just architecture
+- "we need a creative department" = organizational change embedded in the pivot
+- "I don't need TypeScript" = framework preference correction
+
+When the user updates pivot scope:
+1. Rewrite the pivot doc entirely (not just patch) — the vision changed
+2. Create any new departments the expanded scope implies (SYSTEM.md + inbox + artifacts + cron + state.json entries — all in one pass, never partial)
+3. Reset Gate 2 tracking — old impact assessments are void
+4. Send fresh inbox notifications to ALL departments (including new ones)
+5. Update CEO directives in state.json for every department
+6. Framework selection: user prefers lightweight pure-JS over TS-first or heavy frameworks unless explicitly requested
+
 ## Pivot Types
 
 | Type | Scope | Example |
@@ -91,13 +106,21 @@ If rejected: pivot doc moves to `confluence/decisions/REJECTED-PIVOT-<name>.md` 
     "active": true,
     "name": "modular-arcade",
     "type": "architecture",
-    "phase": 1,
+    "phase": "gate-5-freeze",
+    "executionPhase": null,
     "startedCycle": 15,
     "frozenDepartments": ["rnd", "uxui", "qa"],
-    "exemptDepartments": ["infra", "security"]
+    "exemptDepartments": ["infra", "security"],
+    "tracking": {
+      "gate2_requested": ["rnd", "qa", "devops", "it", "uxui"],
+      "gate2_responded": [],
+      "gate2_deadline_cycle": 17
+    }
   }
 }
 ```
+
+> **Note:** `phase` uses gate-prefixed strings (`gate-1-proposal`, `gate-2-impact-assessment`, etc.) to make the current position unambiguous. `executionPhase` is a number (1, 2, 3...) only set during Gate 6.
 
 ### Gate 6 — Phased Execution
 **Who:** Department heads execute their tasks
@@ -138,6 +161,51 @@ If rejected: pivot doc moves to `confluence/decisions/REJECTED-PIVOT-<name>.md` 
 | DevOps/Infra | Infrastructure changes, deployment pipeline updates |
 | IT | Naming/standards compliance for new structure |
 | Security | Security review of architectural changes |
+
+## Operator Gate Transitions
+
+Before advancing `pivot.phase` in state.json, the operator MUST complete ALL items for that transition. **HARD RULE: Never skip a gate. Never advance phase without completing the checklist.**
+
+### Gate 1 → Gate 2
+- [ ] Pivot doc written at `confluence/decisions/PIVOT-<name>.md` with all required fields
+- [ ] `state.json pivot.phase` = `"gate-2-impact-assessment"`
+- [ ] Inbox sent to ALL affected departments (use `inbox-send.ts`, subject prefix `[PIVOT:<name>]`)
+- [ ] CEO directives updated for affected departments mentioning the pivot
+- [ ] Verify: each dept's next cron cycle will see the inbox
+
+### Gate 2 → Gate 3
+- [ ] All affected depts responded OR 2 cycles elapsed per dept
+- [ ] Track in `state.json pivot.tracking.gate2_responded[]` — compare against `gate2_requested[]`
+- [ ] PM has consolidated responses into execution plan sections in the pivot doc
+- [ ] `state.json pivot.phase` = `"gate-3-plan"`
+
+### Gate 3 → Gate 4
+- [ ] Execution plan complete with phases, owners, checkpoints, and kill criteria
+- [ ] Board meeting scheduled (use `board-meeting.ts`)
+- [ ] `state.json pivot.phase` = `"gate-4-vote"`
+
+### Gate 4 → Gate 5
+- [ ] Board vote recorded in meeting minutes (majority required)
+- [ ] If rejected: move doc to `REJECTED-PIVOT-<name>.md`, set `pivot.active = false`, STOP
+- [ ] `state.json pivot.phase` = `"gate-5-freeze"`
+- [ ] CEO directive sent to ALL departments announcing freeze
+
+### Gate 5 → Gate 6
+- [ ] Pipeline freeze confirmed — no new features in progress
+- [ ] `state.json pivot.frozenDepartments[]` populated
+- [ ] Phase 1 tasks assigned to department heads via inbox
+- [ ] `state.json pivot.phase` = `"gate-6-execution"`, `pivot.executionPhase` = `1`
+
+### Gate 6 → Gate 7
+- [ ] All execution phases complete, all checkpoints passed
+- [ ] QA validation report for final phase exists
+- [ ] `state.json pivot.phase` = `"gate-7-signoff"`
+
+### Gate 7 → Done
+- [ ] All success criteria met (checked against pivot doc)
+- [ ] `pivot.active` = `false`, freeze lifted
+- [ ] Retrospective written to `confluence/postmortems/PIVOT-<name>-retro.md`
+- [ ] All SYSTEM.md and CORPORATE.md updated to reflect new architecture
 
 ## Anti-Patterns
 
