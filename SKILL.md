@@ -4,8 +4,8 @@ description: "Use when building an autonomous multi-agent system with department
 version: 3.6.0
 author: Rohi Rikman
 license: MIT
-platforms: [linux]
-related_skills: [kanban-orchestrator, kanban-worker]
+platforms: [linux, macos, windows]
+related_skills: []
 metadata:
   hermes:
     tags: [cron, autonomous, multi-agent, orchestration, governance]
@@ -28,10 +28,8 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Step-by-step cron setup with code examples | `references/setup.md` |
 | Template configs for different domains | `references/company-templates.md` |
 | Arcade platform case study | `references/example-arcade-platform.md` |
-| Future ideas & expansion backlog | `references/ideas.md` |
-| Honker + sqlite-vec v2 architecture research | `references/honker-sqlite-vec-integration.md` |
-| **v2 architecture (Honker + sqlite-vec)** | `references/v2-honker-sqlite-vec.md` |
-| LanceDB + Honker event-driven architecture | `references/lancedb-honker-integration.md` |
+
+
 | **C-Suite layer (CEO/CTO/CISO/CPO) — design + planned tools** | `references/csuite-layer-plan.md` |
 | **C-Suite improvement roadmap (next steps)** | `references/improvement-roadmap-csuite.md` |
 | **Confluence — shared knowledge base (decisions, technical docs, runbooks)** | `references/impl-confluence.md` |
@@ -65,6 +63,7 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | **Pivoting — strategic direction changes** | `references/impl-pivoting.md` |
 | **Sprint Mode — temporary org-wide acceleration** | `references/impl-sprint-mode.md` |
 | **R&D Labs — default experimentation sandbox** | `references/impl-labs.md` |
+| **Public showcase — publishing a project repo** | `references/impl-public-showcase.md` |
 | **Public repo showcase `.gitignore`** | `templates/gitignore-public-repo` |
 | **Upgrade live project to current skill version** | `references/impl-project-upgrade.md` |
 | Newsletter, SLAs, Plugins | `references/impl-ecosystem.md` |
@@ -144,33 +143,14 @@ $BUN $SCRIPTS/activity-log.ts --path ~/myproj --append --dept rnd --action "wrot
 $BUN $SCRIPTS/activity-log.ts --path ~/myproj --query --since 12h --dept rnd
 ```
 
-## Skill Modification Checklist
-
-Every time this skill is modified (new impl guide, scaffold change, new default), complete ALL of these in the same action:
-
-1. ☐ Write the feature (impl guide, script, scaffold change)
-2. ☐ Add routing entry in SKILL.md workflow routing table
-3. ☐ Bump `version` in SKILL.md frontmatter
-4. ☐ Add CHANGELOG.md entry (same version)
-5. ☐ Update README.md if affected (badges, features table, doc map, project structure)
-6. ☐ Check if live projects need upgrading (`impl-project-upgrade.md` 5-gate flow)
-
-The user audits changelog completeness. Never treat version/changelog as afterthoughts.
-
 ## Pitfalls
 
-- **README version drift**: When bumping SKILL.md version + CHANGELOG, also check README.md badges, feature tables, architecture diagrams, and department counts. README drifted from v3.2.1 to v3.6.0 unnoticed — 4 versions behind. Add README update as a checklist item alongside CHANGELOG on every version bump.
-
-- **"What can we improve?" means the LIVE PROJECT, not the skill.** Inspect the deployed project (state.json, departments/, cron jobs, artifacts) against the skill's features. Don't compare skill docs to each other.
-- **Snap bun is sandboxed.** Use `~/.bun/bin/bun` (real binary) for scripts that access paths outside the snap sandbox.
-- **Use create-skill workflow for new tooling.** Follow create-skill conventions (SKILL.md router + references/ + scripts/, validate). Don't dump raw files.
-- **Explain-then-execute.** When adding a new capability (Sprint Mode, Labs, new dept), explain the plan and get confirmation before writing files. The user wants to review scope first.
 - **Gate-skipping during pivots.** The 7-gate pivot flow is strictly sequential. Complete the transition checklist before advancing `pivot.phase`. Skipping causes departments to miss assessments or votes.
-- **Inconsistent script variable names.** Scripts use `PROJ` or `PROJECT` for project path. Bulk-patching must handle both. New scripts should use `PROJ` (majority convention).
 - **Pivot-blind cron prompts.** Data-collection scripts should check `state.json pivot.active` and inject pivot context when true. Without this, departments ignore pivots unless CEO manually updates every directive.
+- **Inconsistent script variable names.** Scripts use `PROJ` or `PROJECT` for project path. Bulk-patching must handle both. New scripts should use `PROJ` (majority convention).
 - **Cron stagger overflow.** scaffold.ts minute offsets can wrap past 59 with >5 depts. Fix: modulo or cap at 55 with smaller increments.
-- **Duplicate nested skill dir.** Never create `skills/<skill-name>/` inside the skill itself. Causes `skill_view` ambiguity. Fix: delete nested dir.
-- **Skill update ≠ project upgrade.** After adding a feature to the skill, live projects don't get it automatically. Always check if projects need the 5-gate upgrade flow.
+- **Labs is a default R&D capability, not optional.** When creating an R&D department (scaffold or manual), always include `labs/` directory and Labs section in SYSTEM.md. See `impl-labs.md`.
+- **Skill update ≠ project upgrade.** After adding a feature to the skill, live projects don't get it automatically. Always check if projects need the 5-gate upgrade flow (`impl-project-upgrade.md`).
 
 ## Examples
 
