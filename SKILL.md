@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight. Also use when upgrading an existing corporate project to match a newer skill version."
-version: 3.7.0
+version: 3.8.0
 author: Rohi Rikman
 license: MIT
 platforms: [linux, macos, windows]
@@ -64,6 +64,7 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | **Public showcase — publishing a project repo** | `references/impl-public-showcase.md` |
 | **Public repo showcase `.gitignore`** | `templates/gitignore-public-repo` |
 | **Upgrade live project to current skill version** | `references/impl-project-upgrade.md` |
+| **Self-improving prompts (distill CEO feedback into prompt lines)** | `references/impl-self-improving-prompts.md` |
 | Newsletter, SLAs, Plugins | `references/impl-ecosystem.md` |
 
 ## Upgrading Existing Projects

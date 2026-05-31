@@ -4,6 +4,19 @@ All notable changes to Corporate-on-Demand are documented here.
 
 ---
 
+## [3.8.0] — 2026-05-31
+
+### Added
+- **Self-improving prompts** — the org distills recurring CEO feedback into versioned SYSTEM.md prompt lines instead of letting a model freely rewrite prompts. Spec at `references/spec-self-improving-prompts.md`, impl guide at `references/impl-self-improving-prompts.md`
+- Separation of duties: HR detects recurring corrections and grade trends, CTO drafts the one-line patch, CEO/Board approves. Hard rule — no department edits its own SYSTEM.md
+- Owner-role SYSTEM.md identity lines (HR Prompt Signal / CTO Prompt Drafting / CEO Prompt Approval), authored with prompt-engineering standards: the two real gates (no self-editing, safety gates need human sign-off) stay forceful; the rest positive-framed
+- Guardrails: prompt versioning, grade-trend before/after, revert-on-regression (0.15 over watch window), immutable safety gates, anchored grading to frozen golden refs + the human morning report
+- Loop is **dormant until the v2 SQLite backbone lands** — it mines grades/directives/prompt-versions from `project.db`. Track A (prompt/governance docs) is built now; Track B (6 TS scripts) is deferred
+
+### Changed
+- `impl-retrospectives.md` — retro step 3 (SYSTEM.md updates) now points to the disciplined self-improving-prompts loop once v2 is available
+- `references/ideas.md` — moved the entire remaining backlog (Gibbush, HR, KPI, Retrospectives, Mentorship, Seasonal, Newsletter, SLAs, Plugins) into the Shipped table to match their live impl guides; added a "Specced — awaiting v2 backbone" section for self-improving prompts
+
 ## [3.7.0] — 2026-05-31
 
 ### Changed

@@ -45,7 +45,7 @@ Output path: `departments/<dept>/retros/YYYY-MM-DD.md`
 After all departments complete:
 1. Read all `departments/*/retros/<date>.md`
 2. Write `retros/<date>-company.md` with cross-cutting themes
-3. Update any SYSTEM.md files if process changes are warranted
+3. Update any SYSTEM.md files if process changes are warranted. Once the v2 DB lands, this step runs the disciplined version — the self-improving-prompts loop (`impl-self-improving-prompts.md`): HR surfaces recurring corrections, CTO drafts the patch, CEO approves, one versioned change per department.
 4. Update state.json: move depts to `completed_depts`, set `next_retro`
 
 ## Retro Document Template
