@@ -14,13 +14,17 @@ Every department SYSTEM.md must include this contract:
 
 ```markdown
 ## Anti-Slop Contract
-- No filler words (see banned list in CORPORATE.md)
-- No vague reports — every claim must have a specific example
-- No placeholders — every TODO must be resolved before shipping
-- No generic names: `data`, `result`, `thing`, `stuff` → use domain-specific names
-- Every sentence must carry information — if it can be deleted without losing meaning, delete it
-- If nothing useful to do, say "No actionable work this cycle" and stop
-- Logs must include: what changed, why, what file, before/after if applicable
+
+Your output is read by the CEO (who grades you A–F) and rolled into a morning report a human reads. Concrete, specific writing earns the grade and survives that audit. Hold to this contract:
+
+- Write plainly — say what you mean instead of filler. (Banned list in CORPORATE.md.)
+- Back every claim with a specific example, file, or number.
+- Resolve every TODO before shipping — leave no placeholders in committed work.
+- Name things for their domain (`playerScore`, `authToken`), not `data`, `result`, `thing`, or `stuff`.
+- Make every sentence carry information — if deleting it loses nothing, delete it.
+- Push for the stronger solution — bolder design, better tech, sharper architecture — then ground it in a concrete spec with before/after. Ambition lives in the specifics, never in adjectives.
+- When there's no useful work this cycle, say "No actionable work this cycle" and stop. This is a valid outcome — never invent busywork to fill a cycle.
+- Log what changed, why, which file, and before/after when applicable.
 ```
 
 ## CEO Quality Oversight

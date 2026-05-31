@@ -21,7 +21,7 @@
 
 🕹️ **[Live Demo: Arcade Platform](https://github.com/RohiRIK/arcade-platform)** — 7 games, 16 departments, fully autonomous. See Corporate on Demand in action.
 
-[![Version](https://img.shields.io/badge/version-3.6.0-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-3.7.0-blue?style=flat-square)]()
 [![Hermes](https://img.shields.io/badge/hermes--agent-skill-purple?style=flat-square)](https://hermes-agent.nousresearch.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 [![Departments](https://img.shields.io/badge/departments-16-orange?style=flat-square)]()
@@ -335,7 +335,7 @@ See [`references/example-arcade-platform.md`](references/example-arcade-platform
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full version history. Current version: **v3.6.0**.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full version history. Current version: **v3.7.0**.
 
 ---
 

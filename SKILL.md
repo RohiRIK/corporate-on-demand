@@ -1,7 +1,7 @@
 ---
 name: corporate-on-demand
 description: "Use when building an autonomous multi-agent system with department structure, mandatory pipelines, anti-slop governance, and CEO oversight. Also use when upgrading an existing corporate project to match a newer skill version."
-version: 3.6.0
+version: 3.7.0
 author: Rohi Rikman
 license: MIT
 platforms: [linux, macos, windows]
@@ -28,11 +28,9 @@ Autonomous multi-agent system: specialized departments as staggered cron jobs, e
 | Step-by-step cron setup with code examples | `references/setup.md` |
 | Template configs for different domains | `references/company-templates.md` |
 | Arcade platform case study | `references/example-arcade-platform.md` |
-
-
-| **C-Suite layer (CEO/CTO/CISO/CPO) — design + planned tools** | `references/csuite-layer-plan.md` |
-| **C-Suite improvement roadmap (next steps)** | `references/improvement-roadmap-csuite.md` |
-| **Confluence — shared knowledge base (decisions, technical docs, runbooks)** | `references/impl-confluence.md` |
+| C-Suite layer (CEO/CTO/CISO/CPO) — design + planned tools | `references/csuite-layer-plan.md` |
+| C-Suite improvement roadmap (next steps) | `references/improvement-roadmap-csuite.md` |
+| Confluence — shared knowledge base (decisions, technical docs, runbooks) | `references/impl-confluence.md` |
 
 ### Implementation Guides
 

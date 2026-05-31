@@ -4,6 +4,25 @@ All notable changes to Corporate-on-Demand are documented here.
 
 ---
 
+## [3.7.0] — 2026-05-31
+
+### Changed
+- Prompt-engineering pass across all live agent prompts (Tier A) and router/process docs (Tier B), applying Anthropic Claude 4.x best practices: positive framing over prohibition, added motivation/context, and discriminating genuine governance gates (kept forceful) from decorative emphasis (reframed)
+- `anti-slop.md` — Anti-Slop Contract rewritten with positive framing, grading/audit motivation, and an "ambition lives in the specifics, never in adjectives" line that pushes bolder solutions without tripping the banned-buzzword list
+- `pipelines.md` — R&D/UX/Infra enforcement now actively scout and pitch stronger technology (frameworks, architectures, modern CSS, observability) with concrete before/after and migration cost; spec/domain gates kept intact
+- `company-templates.md` — added **Onboarding Combinations** menu: 11 ready-made org presets (department + C-tier sets) from Spike to Enterprise; stack stays dynamic (R&D pitches upgrades) rather than hardcoded
+- `example-arcade-platform.md` — rewritten as an evolution story (lean Day-1 org/stack → growing toward Game Studio combination + LittleJS migration), matching the "org and stack upgrade themselves" design
+- `setup.md` — slimmed to delegate org-shape decisions to `strategy-guide.md` + the combinations menu; added product-derived prompt-tailoring directive with before/after example; refreshed skeleton cron prompts
+- `strategy-guide.md` — combinations cross-link, per-department impl-guide column, C-tier/Editorial pointers, and a "tailor each department to the product" principle
+- `impl-security-dept.md` — Harden step now proposes stronger defenses proactively, not just flags what's broken
+- `impl-devops-dept.md` — design-pipeline step now pitches stronger CI/CD (caching, parallel runs, better runners) with before/after
+
+### Fixed
+- `SKILL.md` — repaired broken Workflow Routing table (C-Suite/Confluence rows were orphaned outside the table by a stray blank line)
+- `impl-project-upgrade.md` — replaced fragile `python3 -c` JSON validation with `jq empty`, aligning with repo tooling conventions
+
+---
+
 ## [3.6.0] — 2026-05-31
 
 ### Added

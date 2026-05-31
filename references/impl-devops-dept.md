@@ -51,6 +51,7 @@ Follow this 4-step pipeline for every task:
 ### Step 2: design-pipeline
 - Define stages: lint → build → test → package → deploy
 - Choose tools based on project type (Make, npm scripts, shell)
+- Pitch stronger CI/CD — caching, parallel test runs, better runners — when it materially cuts build time or flakiness, with before/after
 - Document in `departments/devops/designs/pipeline-<project>.md`
 
 ### Step 3: implement

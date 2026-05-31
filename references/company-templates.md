@@ -4,6 +4,34 @@ Pre-built configurations for different project types. Use with `scaffold.ts --te
 
 ---
 
+## Onboarding Combinations — pick your starting org
+
+Onboarding is a menu: pick the combination closest to your product, scaffold it, and grow from there. Each combination is an *org shape* — which departments and which C-tier roles to deploy on day one. **CEO is always present.** Stages map to `strategy-guide.md` (start lean, add departments on growth triggers).
+
+**The stack is never fixed.** These combinations choose people, not technology. Every R&D department continuously evaluates the landscape and pitches a stronger framework whenever one materially helps (see `pipelines.md` and `anti-slop.md`). A project that starts on a default stack is expected to upgrade itself over time — that is the design, not a failure. The live arcade platform did exactly this (see `example-arcade-platform.md`).
+
+| # | Combination | Best for | Departments (CEO always on) | C-tier | Start stage |
+|---|-------------|----------|------------------------------|--------|-------------|
+| 1 | **Spike** | Brand-new idea, any type | R&D, Infra | — | 0 — fast-track, research→build |
+| 2 | **MVP** | First working product | R&D, UX/UI, Infra, PM | — | 1 — full pipeline + anti-slop |
+| 3 | **Game Starter** | Early browser game / arcade | R&D, UX/UI, Infra, PM, Creative | — | 1 |
+| 4 | **Game Studio** | Multi-game platform | R&D, UX/UI, Infra, PM, Board, QA, DevOps, IT, Analytics, Creative | CTO, CPO | 3–4 |
+| 5 | **SaaS Launch** | SaaS MVP with users | R&D, UX/UI, Infra, PM, QA | CTO | 1–2 |
+| 6 | **SaaS Scale** | Growing SaaS | + Board, DevOps, Security, IT, Analytics, HR | CTO, CISO, CPO, CFO | 3–4 |
+| 7 | **DevTools** | CLI / SDK / library | R&D, PM, Infra, QA, DevOps | CTO | 1–2 |
+| 8 | **Content** | Blog / docs / CMS | R&D, UX/UI, Editorial, PM, Board | CPO | 1–2 |
+| 9 | **Homelab** | Self-hosted services | R&D, Infra, Security, UX/UI | — | 0–1 (Security early — network-exposed) |
+| 10 | **Data Pipeline** | ETL / analytics | R&D, Infra, QA, PM, Analytics, Security | CTO, CISO | 1–2 |
+| 11 | **Enterprise** | Multi-product org | All departments + multiple R&D teams | CTO, CISO, CPO, CFO | 4 |
+
+**Grow path:** every combination is a starting point. Add departments and C-tier roles as the project hits the growth triggers in `strategy-guide.md` — e.g. Spike → MVP → SaaS Launch → SaaS Scale mirrors a SaaS maturing from idea to enterprise.
+
+---
+
+## Department Focus by Project Type
+
+The sections below describe each department's *responsibility* per project type, its pipeline, and example CEO directives. Any technology named is a **starting point only** — R&D pitches upgrades as better tools appear, so don't treat these as fixed.
+
 ## 1. Game Studio (`--template game`)
 
 The original Corporate-on-Demand use case — an arcade platform with multiple browser games.

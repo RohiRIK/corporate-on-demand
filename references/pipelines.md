@@ -11,7 +11,7 @@ Every department follows a strict pipeline. Steps **cannot be skipped**. Each st
 | spec | specs/ | Implementation spec with pseudocode, file changes, test plan | Must reference a pitch |
 | build | (codebase) | Working code committed to repo | Must reference a spec |
 
-**Enforcement**: If the agent's prompt detects no spec exists for the current task, it MUST write the spec. It MUST NOT build. The prompt must say: *"If no spec exists for your current directive, write the spec. Do NOT build yet."*
+**Enforcement**: The agent's prompt must enforce the spec gate. Use this wording: *"If a spec exists for your current directive, build to it. If none exists yet, write the spec this cycle and stop there — do not start building."* In the research and pitch steps, actively scout for stronger technology — better frameworks, architectures, libraries, or patterns than the current stack (e.g. moving a static frontend to Next.js/SvelteKit, swapping a hand-rolled store for a real state library). Pitch the upgrade whenever it materially raises quality, with concrete trade-offs and migration cost.
 
 ## UX/UI Pipeline: `research → design → build`
 
@@ -21,7 +21,7 @@ Every department follows a strict pipeline. Steps **cannot be skipped**. Each st
 | design | designs/ | Mockup description, exact CSS changes, interaction notes, before/after | Must reference research |
 | build | (codebase) | Implemented design changes | Must reference a design doc |
 
-**Enforcement**: Design docs must include current state, proposed state, and exact CSS/HTML changes. No "make it look better" — every change must be specified.
+**Enforcement**: Specify every change exactly — current state, proposed state, exact CSS/HTML. "Make it look better" is not a design. Beyond fixing what's broken, push the craft: propose distinctive layouts and modern CSS (container queries, `:has()`, grid, scroll-driven animation, view transitions) and motion that elevates key moments. When a framework or tooling upgrade would materially raise quality, pitch it with before/after and migration cost. Ambition lives in the specifics — name the actual technique, never reach for "cutting-edge."
 
 ## Infra Pipeline: `audit → runbook → execute`
 
@@ -31,7 +31,7 @@ Every department follows a strict pipeline. Steps **cannot be skipped**. Each st
 | runbook | runbooks/ | Step-by-step procedure with rollback plan | Required for new procedures |
 | execute | (infrastructure) | Applied changes per runbook | Must follow a runbook |
 
-**Enforcement**: No infrastructure changes without measurement first. Every new procedure gets a runbook with explicit rollback steps. Existing runbooks can be executed directly.
+**Enforcement**: Measure first; apply changes only against that measurement. Every new procedure gets a runbook with explicit rollback steps. Existing runbooks can be executed directly. When a stronger approach exists — better deployment flow, real observability, caching, infra-as-code — propose it with the measurement that justifies it.
 
 ## PM Pipeline: `review → changelog/standards/report`
 
@@ -40,7 +40,7 @@ Every department follows a strict pipeline. Steps **cannot be skipped**. Each st
 | review | (reads logs/) | Reads all recent department logs | Always first |
 | output | changelogs/ OR standards/ OR reports/ | Compiled changelog, updated standards, or status report | Must be based on actual log data |
 
-**Enforcement**: PM never invents information. Everything in changelogs and reports must trace back to a log entry or artifact.
+**Enforcement**: Everything in changelogs and reports traces back to a real log entry or artifact — PM reports only what happened.
 
 ## Board Pipeline: `synthesize → coordinate → document`
 
