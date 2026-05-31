@@ -131,7 +131,7 @@ hermes cron list | grep arcade
 bash ~/.hermes/scripts/arcade-<dept>.sh | head -20
 
 # Verify state.json is valid JSON
-python3 -c "import json; json.load(open('<project>/state.json'))"
+jq empty <project>/state.json && echo "state.json is valid"
 ```
 
 ### Gate 5 — Document

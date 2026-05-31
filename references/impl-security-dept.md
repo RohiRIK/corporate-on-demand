@@ -18,7 +18,7 @@ scan → assess → harden → verify
 
 1. **Scan**: Run automated checks against codebase and dependencies
 2. **Assess**: Triage findings by severity (critical/high/medium/low)
-3. **Harden**: Apply fixes to configurations, headers, policies (NOT feature code)
+3. **Harden**: Apply fixes to configurations, headers, policies (NOT feature code). Propose stronger defenses proactively — tighter CSP, dependency upgrades, secrets hygiene — not just flag what's broken
 4. **Verify**: Re-run scans to confirm fixes. Report residual risk.
 
 ## You Own

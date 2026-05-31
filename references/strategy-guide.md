@@ -17,6 +17,8 @@ Decision framework for building the right organization based on project needs. S
 
 If your project doesn't fit — use the closest template and customize departments.
 
+**Next:** once classified, pick a ready-made org from the **Onboarding Combinations** menu in `company-templates.md` — it pairs each product type with a department + C-tier set. The steps below help you adjust that combination as you grow.
+
 ---
 
 ## Step 2: Maturity Stage
@@ -107,30 +109,36 @@ Your project's maturity determines which departments and mechanisms you need.
 
 ### Core (always needed)
 
-| Department | Why | When to add |
-|-----------|-----|-------------|
-| **CEO** | Quality oversight, direction, grades | Stage 0 — always |
-| **R&D** | Builds the actual product | Stage 0 — always |
-| **Infra** | Keeps it running (Docker, health, networking) | Stage 0 — always |
+| Department | Why | When to add | Guide |
+|-----------|-----|-------------|-------|
+| **CEO** | Quality oversight, direction, grades | Stage 0 — always | csuite-layer-plan.md |
+| **R&D** | Builds the actual product | Stage 0 — always | pipelines.md |
+| **Infra** | Keeps it running (Docker, health, networking) | Stage 0 — always | pipelines.md |
 
 ### Standard (most projects need these)
 
-| Department | Why | When to add |
-|-----------|-----|-------------|
-| **UX/UI** | Design, CSS, user experience | Stage 1 — when you have users |
-| **PM** | Documentation, changelogs, standards | Stage 1 — when you ship changes |
-| **Board** | Coordination, strategic decisions | Stage 2 — when 3+ depts exist |
-| **QA** | Testing, regression, bug reports | Stage 2 — when you have features to break |
+| Department | Why | When to add | Guide |
+|-----------|-----|-------------|-------|
+| **UX/UI** | Design, CSS, user experience | Stage 1 — when you have users | pipelines.md |
+| **PM** | Documentation, changelogs, standards | Stage 1 — when you ship changes | pipelines.md |
+| **Board** | Coordination, strategic decisions | Stage 2 — when 3+ depts exist | pipelines.md |
+| **QA** | Testing, regression, bug reports | Stage 2 — when you have features to break | impl-qa-dept.md |
 
 ### Advanced (add based on need)
 
-| Department | Why | When to add |
-|-----------|-----|-------------|
-| **IT** | System health, script maintenance, cleanup | Stage 3 — when corporate system is complex |
-| **DevOps** | CI/CD, build automation, releases | Stage 3 — when deployment is non-trivial |
-| **Security** | Vulnerability scanning, hardening | Stage 3 — when exposed to network |
-| **Analytics** | Usage tracking, data-driven decisions | Stage 3 — when you have real users |
-| **HR** | Performance trends, onboarding | Stage 4 — when 8+ departments exist |
+| Department | Why | When to add | Guide |
+|-----------|-----|-------------|-------|
+| **IT** | System health, script maintenance, cleanup | Stage 3 — when corporate system is complex | impl-it-dept.md |
+| **DevOps** | CI/CD, build automation, releases | Stage 3 — when deployment is non-trivial | impl-devops-dept.md |
+| **Security** | Vulnerability scanning, hardening | Stage 3 — when exposed to network | impl-security-dept.md |
+| **Analytics** | Usage tracking, data-driven decisions | Stage 3 — when you have real users | impl-analytics-dept.md |
+| **HR** | Performance trends, onboarding | Stage 4 — when 8+ departments exist | impl-hr-dept.md |
+
+> **C-tier (CEO/CTO/CISO/CPO/CFO):** see `csuite-layer-plan.md`. **Editorial** (content platforms): see `company-templates.md`.
+
+### Tailor each department to the product
+
+A combination gives you the org *shape*. Make each department specific before deploying: read the product, then write its SYSTEM.md identity and cron prompt around that product's domain and goals (see `setup.md`). Keep technology open — instruct R&D to scout and pitch better frameworks rather than locking a stack. The org shape is chosen once; the tech keeps upgrading itself.
 
 ---
 

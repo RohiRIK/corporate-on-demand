@@ -2,14 +2,28 @@
 
 > **Note:** This is a real deployment example. Replace paths and IPs with your own. — Reference Implementation
 
-First deployment of Corporate-on-Demand system.
+First deployment of Corporate-on-Demand — and a live example of how an org *and its stack* evolve over time.
+
+## Evolution at a Glance
+
+This project started lean and upgraded itself, exactly as the system intends:
+
+| Phase | Org | Stack |
+|-------|-----|-------|
+| Day 1 (default start) | 6 departments (CEO, R&D, UX/UI, Infra, PM, Board), no C-tier | Node.js/Express + nginx static frontend, hand-rolled vanilla-JS canvas games |
+| Now (evolving) | Growing toward the **Game Studio** combination (+ QA, DevOps, IT, Analytics, Creative, CTO, CPO) | Migrating to **LittleJS** via the active `arcade-evolution` pivot — R&D pitched the upgrade, the board approved it |
+
+The stack was never fixed: R&D scouted a stronger engine, pitched it with before/after, and the org is now migrating. This is the design, not a one-off. See `pipelines.md` (tech-scouting enforcement) and `impl-pivoting.md`.
 
 ## Project
 - Path: `/slug/arcade-platform`
-- Stack: Node.js/Express backend (port 3001) + nginx static frontend (port 3000)
-- Docker Compose, 2 containers, auto-restart
+- Started: Node.js/Express backend (port 3001) + nginx static frontend (port 3000), Docker Compose, 2 containers, auto-restart
+- Migrating: LittleJS-based games, in progress via the `arcade-evolution` pivot
 
-## Department Structure
+## Department Structure (initial — Day 1)
+
+The lean starting org below grows toward the Game Studio combination (`company-templates.md`) as the project matures.
+
 ```
 departments/
 ├── CORPORATE.md, DELEGATION.md

@@ -1,5 +1,7 @@
 # Setup Guide
 
+Keep this lean. The *what* — which departments and C-tier you need — is decided in `strategy-guide.md` (classify your project + maturity) and the **Onboarding Combinations** menu in `company-templates.md`. Pick the combination closest to your product, then follow the steps below to wire it up.
+
 ## Step 1: Scaffold the Project
 
 Use the scaffold tool or create manually:
@@ -45,6 +47,11 @@ Make executable: `chmod +x ~/.hermes/scripts/myproject-rnd.sh`
 
 ## Step 3: Create Cron Jobs
 
+**Tailor every prompt to the product — the prompts below are skeletons, not boilerplate.** Before deploying, read the product (README, spec, existing code) and rewrite each department's prompt around *that product* — its domain and goals. A tailored prompt outperforms a generic one because the agent inherits real context instead of guessing it. Keep the stack open: tell R&D to scout and pitch better frameworks rather than hardcoding one.
+
+> **Generic (weak):** "You are the R&D department. Follow research → pitch → spec → build."
+> **Product-derived (strong):** "You are R&D for a browser arcade platform (Docker, canvas games mid-migration to LittleJS). Follow research → pitch → spec → build. Scout stronger game tech and pitch a migration when it raises framerate or dev velocity, with concrete before/after."
+
 Use Hermes cron to create staggered jobs:
 
 ```python
@@ -57,7 +64,7 @@ hermes cron create \
   --name myproject-rnd \
   --schedule "20 */2 * * *" \
   --script myproject-rnd.sh \
-  --prompt "You are the R&D department. Read your SYSTEM.md for identity and pipeline rules. Follow the pipeline strictly: research → pitch → spec → build. If no spec exists for your current directive, write the spec. Do NOT build yet." \
+  --prompt "You are the R&D department. Read your SYSTEM.md for identity and pipeline rules. Follow the pipeline strictly: research → pitch → spec → build. If a spec exists for your current directive, build to it; if none exists, write the spec this cycle and stop there. In research and pitches, scout stronger tech and pitch upgrades that materially raise quality, with concrete trade-offs." \
   --workdir ~/my-project \
   --toolsets terminal,file,browser \
   --deliver telegram
@@ -67,7 +74,7 @@ hermes cron create \
   --name myproject-uxui \
   --schedule "10 1-23/2 * * *" \
   --script myproject-uxui.sh \
-  --prompt "You are the UX/UI department..." \
+  --prompt "You are the UX/UI department. Read your SYSTEM.md. Follow research → design → build. Specify every change exactly — current state, proposed state, exact CSS/HTML. Push the craft: distinctive layouts, modern CSS, purposeful motion, and pitch framework/tooling upgrades when they materially raise quality. Name the technique, never say 'cutting-edge.'" \
   --workdir ~/my-project \
   --toolsets terminal,file,browser \
   --deliver telegram
@@ -97,7 +104,7 @@ hermes cron create \
   --name myproject-ceo \
   --schedule "0 10,22 * * *" \
   --script myproject-ceo.sh \
-  --prompt "You are the CEO. Inspect all departments, grade A-F, write directives..." \
+  --prompt "You are the CEO. Inspect all departments, grade A-F, write directives. Reward concrete, ambitious work — real tech upgrades, fully specified designs, measurable before/after — and penalize filler and vague reports." \
   --workdir ~/my-project \
   --toolsets terminal,file,browser \
   --deliver telegram
