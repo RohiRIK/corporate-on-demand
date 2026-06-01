@@ -110,6 +110,30 @@ hermes cron create \
   --deliver telegram
 ```
 
+## Step 3.5: Seed Workflow Library
+
+The scaffold does NOT create `confluence/workflows/`. Create it manually after scaffolding:
+
+```bash
+mkdir -p ~/my-project/confluence/workflows
+```
+
+Seed with initial workflow documents. At minimum:
+- `README.md` — index with selection table (which context → which workflow)
+- `tdd.md` — Test-Driven Development (bug fixes, new mechanics, refactoring)
+- `e2e-first.md` — E2E-First (new features, UI changes, user-facing work)
+- `spike.md` — Spike/Exploration (unknown approaches, research)
+
+For game projects, also add:
+- `creative-pipeline.md` — game migration with creative polish
+- `qa-game-verification.md` — per-game browser verification checklist
+- `qa-release-gate.md` — 3 blocking gates before release
+- `qa-bug-report.md` — structured bug report format
+
+See `references/qa-workflow-templates.md` for ready-to-use QA templates.
+
+**Why this matters:** HR and PM depend on workflows existing to do their jobs. Without seeded workflows, the workflow bridge and gap analysis processes have nothing to work with. PM will identify gaps, but initial workflows should exist from day 1.
+
 ## Step 4: Validate
 
 ```bash

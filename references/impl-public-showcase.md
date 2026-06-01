@@ -54,6 +54,26 @@ False positives: budget "tokens" (in-game resource tracking) are not secrets.
 5. Send CEO directive to DevOps for GitHub Pages setup
 6. Link the live demo in the skill's README
 
+## README.md Ownership
+
+For public repos, README.md is the public face and must be actively maintained:
+
+**Owner:** PM department (primary), QA (validation)
+
+**PM responsibilities:**
+1. Write and maintain README.md — accurate, professional, concise
+2. After every architecture change or pivot phase, verify accuracy
+3. Grep for stale references before committing (banned words: localhost, docker, backend, etc.)
+4. Add README review to PM's cycle checklist
+
+**QA responsibilities:**
+1. After PM updates README, validate: no stale references, all URLs work, department count matches, architecture description is current
+2. Add README validation to regression checklist
+
+**Confluence decision:** Write a `confluence/decisions/` doc defining the README standard — what must be included, what's banned, quality expectations. This is the source of truth PM follows.
+
+**Common README staleness:** After migrating from Docker/backend to static (e.g. GitHub Pages), the README still references localhost, docker compose, backend API, config panels. PM must rewrite, not just patch — the old structure doesn't apply.
+
 ## CEO Directive Template
 DevOps should receive a directive covering:
 - Enable GitHub Pages (main branch)

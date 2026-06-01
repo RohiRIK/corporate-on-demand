@@ -40,7 +40,46 @@ Checks:
 - No 5xx errors
 ```
 
+**Static sites (no backend):** If the project runs as pure static files (e.g. GitHub Pages), skip API checks. Instead verify: `changelog.json` loads, game count in HTML matches expected, no `/api/` references in source.
+
 **Escalation**: If API fails → P1 to Infra. If game missing from API but in pipeline.built → P1 to R&D.
+
+### Layer 2.5: CI E2E with Playwright (MANDATORY for interactive content)
+Automated browser tests in CI — catches bugs that grep and API checks miss.
+
+**When**: Every push to main. Blocking — merge fails if tests fail.
+
+**Why this exists**: The Arcade Platform shipped Pac-Man with a broken spawn point (player inside a wall, completely unplayable) for 32 QA cycles and 197 department cycles. QA only grepped HTML for `launchGame` and checked HTTP status. Nobody opened a browser. This layer ensures a real browser verifies every interactive feature.
+
+**CI workflow (GitHub Actions):**
+```yaml
+# .github/workflows/e2e-tests.yml
+- Install Playwright (chromium)
+- Serve static site locally (or use live URL post-deploy)
+- Run Playwright test suite
+- Fail the workflow if any test fails
+```
+
+**Per-game test requirements:**
+```
+For each game/interactive feature:
+1. Navigate to site
+2. Click the game card / launch button
+3. Wait for canvas to appear
+4. Verify canvas is NOT blank (pixel sampling)
+5. Send keyboard input (arrow keys, space, etc.)
+6. Verify game state changes (score, position, canvas pixels change)
+7. Assert zero JS console errors
+```
+
+**Key rule**: "Game launches and responds to input" is the minimum bar. If a game has a canvas and arrow key controls, the test MUST press arrow keys and verify the canvas changes.
+
+**Department ownership:**
+- **DevOps**: CI workflow, Playwright infrastructure
+- **QA**: Write and maintain test scripts
+- **R&D**: Fix games that fail tests
+
+**Anti-pattern**: Do NOT substitute `grep launchGame index.html` for Playwright. That checks code exists, not that it works. A game can have a perfect `launchGame` function and still be unplayable (e.g. player spawns inside a wall).
 
 ### Layer 3: Browser E2E (QA + R&D, after changes)
 Open the actual site in a browser, interact, screenshot.
@@ -243,15 +282,37 @@ Examples:
 
 ### R&D Addition
 ```markdown
+## Hard Gate: No Code Without Tests (BLOCKING — not guidance)
+
+Every code change MUST have at least one automated test that verifies it works.
+
+| Change Type | Test Requirement |
+|-------------|-----------------|
+| Bug fix | Write failing test FIRST (TDD). Test must fail without fix, pass with fix. |
+| New feature/game | Write E2E test that exercises the feature. Test must pass before shipping. |
+| Refactor | Existing tests must pass. If no tests exist for the area, write them first. |
+| Config/build change | Smoke test verifying the build succeeds and site loads. |
+
+### Enforcement
+- Your outbox report MUST include: "Tests added: [list]" or "Tests updated: [list]"
+- If you ship code with "Tests: none" → QA rejects immediately, P1 escalation to CEO
+- QA will verify: does the test actually test what it claims? They run it and confirm it fails when the code is broken.
+
+### Anti-Patterns
+- ❌ "I tested manually in the browser" — that's a self-check, not a test. Self-checks are ADDITIONAL, never a replacement.
+- ❌ "The game works on my machine" — without an automated test, it doesn't count.
+- ❌ "It's a small change, no test needed" — small changes cause big bugs. Pac-Man was "just a maze array."
+
 ## Pre-Ship Checklist
 Before marking a game as "built" in pipeline:
-1. Open http://localhost:3000 in browser
-2. Click your new/modified game
-3. Screenshot — verify it loads and renders
-4. Check: no hardcoded localhost in your code (grep -r "localhost" your-file)
-5. Verify acceptance criteria from spec all pass
-6. If any fail: fix before shipping. Do NOT ship broken code.
-7. Log self-check result in your cycle log
+1. Verify your automated test passes (see Hard Gate above)
+2. Open http://localhost:3000 in browser
+3. Click your new/modified game
+4. Screenshot — verify it loads and renders
+5. Check: no hardcoded localhost in your code (grep -r "localhost" your-file)
+6. Verify acceptance criteria from spec all pass
+7. If any fail: fix before shipping. Do NOT ship broken code.
+8. Log self-check result AND test names in your cycle log
 ```
 
 ### QA Addition

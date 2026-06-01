@@ -2,7 +2,7 @@
 
 The org sharpens its own department SYSTEM.md prompts over time by distilling recurring CEO feedback into permanent prompt lines. Every change is versioned, measured, and reversible.
 
-> **Status:** Dormant until the v2 SQLite backbone lands (`plan-v2-honker-sqlite-vec.md`). The loop reads measured artifact history — grades, directives, prompt versions — from `project.db`. Without that table history there is no signal to mine, so keep this loop off until v2 ships. Spec: `spec-self-improving-prompts.md`.
+> **Status:** The basic loop (HR detects recurring corrections → CTO drafts → CEO approves) works NOW using state.json grades and CEO directives. Advanced analytics (prompt versioning, grade-trend correlation, slop-score creep detection, auto-revert) require the v2 SQLite backbone (`plan-v2-honker-sqlite-vec.md`). The deferred scripts below are v2-gated; the manual SYSTEM.md sections and HR cron cycle are not. Spec: `spec-self-improving-prompts.md`.
 
 ## The Idea
 

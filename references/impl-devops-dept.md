@@ -64,6 +64,60 @@ Follow this 4-step pipeline for every task:
 - Confirm all stages pass
 - Update `state.json` CI status fields
 
+## Git Deploy Ownership
+
+When the project has a GitHub Pages workflow (or any push-triggered CI), DevOps owns the commit+push cycle. Options:
+
+1. **Separate no-agent cron** (recommended): A lightweight script that commits changed files and pushes every N hours. Dumb, predictable, alerts on failure. Keep it separate from the DevOps analysis cron so deploy failures don't block reporting.
+2. **Inline in DevOps script**: Add git commit+push at the end of the data-collection script. Simpler but couples deploy with analysis.
+
+The user's expectation: if there's a GitHub Actions workflow that deploys on push, some autonomous process must push. DevOps is the natural owner. Don't leave git push as a manual step — that defeats the autonomous design.
+
+### Enabling GitHub Pages via CLI
+
+If the user hasn't enabled Pages in the repo settings (common — the UI is confusing):
+
+```bash
+# Enable Pages with GitHub Actions as build source
+gh api repos/OWNER/REPO/pages -X POST -f build_type=workflow
+
+# Trigger the workflow manually after enabling
+gh workflow run <workflow_id>
+
+# Check status
+gh api repos/OWNER/REPO/pages | jq '.status, .html_url'
+```
+
+No branch protection needed for solo repos with autonomous push. Protection would block the deploy cron.
+
+### Deploy Script Template (no-agent cron)
+
+```bash
+#!/usr/bin/env bash
+# arcade-deploy.sh — commit + push changed files
+set -euo pipefail
+cd ~/arcade-platform
+if [ -z "$(git status --porcelain)" ]; then exit 0; fi
+git add -A
+git commit -m "auto: $(date -u +%Y-%m-%dT%H:%M:%SZ) cycle artifacts"
+git push origin main
+```
+
+Schedule: `0 */4 * * *` (every 4h) or similar. Use `no_agent=true` on the cron job since no LLM reasoning is needed.
+
+## Post-Deploy Smoke Test
+
+When the project has a public-facing site (GitHub Pages, etc.), DevOps should add a post-deploy verification. This can be:
+- A step in the deploy script that curls the live URL and checks for expected content / absence of forbidden content
+- A separate QA directive triggered after deploy
+
+Minimum checks:
+1. HTTP 200 from the production URL
+2. Response body does NOT contain known-bad strings (e.g. "Backend offline", admin panel markers)
+3. Response body DOES contain expected markers (e.g. game titles, nav elements)
+
+This ensures broken deploys are caught autonomously, not by the user browsing the site.
+
 ## Cron Setup
 
 DevOps runs on a cron cycle to collect pipeline health data:
