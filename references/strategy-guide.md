@@ -1,5 +1,7 @@
 # Corporate-on-Demand — Strategic Planning Guide
 
+> **TL;DR** — 4 steps: (1) classify project (game/saas/content/devtools/homelab/data), (2) pick maturity stage (0–4 — adds depts and mechanisms as you grow), (3) pick a ready-made org from the Onboarding Combinations menu in `company-templates.md`, (4) tune schedules and reporting mode. **Tailor each department's SYSTEM.md to your product** — don't ship the generic template. Stack stays dynamic: R&D pitches upgrades; CTO approves. When in doubt, smaller org = fewer cycles = lower token cost.
+
 Decision framework for building the right organization based on project needs. Start here before scaffolding.
 
 ---

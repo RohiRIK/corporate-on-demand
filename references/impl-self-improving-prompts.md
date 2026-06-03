@@ -2,7 +2,7 @@
 
 The org sharpens its own department SYSTEM.md prompts over time by distilling recurring CEO feedback into permanent prompt lines. Every change is versioned, measured, and reversible.
 
-> **Status:** The basic loop (HR detects recurring corrections → CTO drafts → CEO approves) works NOW using state.json grades and CEO directives. Advanced analytics (prompt versioning, grade-trend correlation, slop-score creep detection, auto-revert) require the v2 SQLite backbone (`plan-v2-honker-sqlite-vec.md`). The deferred scripts below are v2-gated; the manual SYSTEM.md sections and HR cron cycle are not. Spec: `spec-self-improving-prompts.md`.
+> **Status (v3.9.1):** The full loop is **ACTIVE** for *task prompts* — the actual LLM instructions departments send at runtime (DM templates, pitch templates, checklist phrasings). Driven by DSPy (Stanford, MPL-2.0) for iterative improvement, DeepEval (Apache 2.0) for v1-vs-v2 judging, and Promptfoo (MIT) for CI/pre-publish regression gating. LLM-agnostic — works with any model. See `references/impl-prompt-optimization.md` for the full workflow. **SYSTEM.md identity lines** ("You are the CEO", "You grade A-F") stay verbatim — they are not optimizable. Advanced longitudinal analytics (grade-trend correlation, slop-score creep detection, auto-revert) still benefit from the v2 SQLite backbone (`plan-v2-honker-sqlite-vec.md`) but are not required for the basic loop to run. Spec: `spec-self-improving-prompts.md`.
 
 ## The Idea
 

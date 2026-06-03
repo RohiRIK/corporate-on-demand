@@ -1,5 +1,7 @@
 # QA Department Implementation
 
+> **TL;DR** — QA verifies R&D builds meet acceptance criteria, finds bugs, delegates fixes. Now also runs **DeepEval v1-vs-v2 comparison** when HR surfaces a DSPy-eligible prompt candidate, and **Promptfoo regression check** in the pre-publish gate. Sections: Mission, Owns, Must NOT Touch, Pipeline (test-plan → execute → report), Acceptance Criteria, Browser E2E (Layer 3 — most-skipped, most-catches), Pre-publish Regression (DeepEval + Promptfoo).
+
 ## Overview
 
 The QA department runs **after R&D builds** to verify games and features meet acceptance criteria. QA does not fix bugs — it finds them, documents them, and delegates fixes back to R&D or UX.
@@ -169,3 +171,34 @@ QA maintains acceptance criteria per game/feature in `departments/qa/acceptance/
 - [ ] Keyboard accessible
 - [ ] Game over state triggers correctly
 ```
+
+## Pre-publish Regression (v3.9.1+)
+
+When a `[PROMPT-CANDIDATE]` from HR is marked `DSPY-ELIGIBLE: true`, QA owns the **DeepEval v1-vs-v2 comparison** and the **Promptfoo regression gate** before any prompt is promoted to canonical.
+
+### DeepEval Comparison
+
+```bash
+# CTO writes the v2 prompt via DSPy GEPA, saves to confluence/workflows/<task>.v2.md
+# QA runs:
+bun scripts/prompt-eval.ts --path <project> \
+  --v1 confluence/workflows/<task>.v1.md \
+  --v2 confluence/workflows/<task>.v2.md \
+  --test-set programs/<task>/data/test.jsonl \
+  --threshold 0.05
+```
+
+Output: `V1: 0.62, V2: 0.84, improvement: +0.22, RECOMMEND MERGE` (or `DO NOT MERGE`).
+QA reports the result to CEO via outbox. CEO approves only if `RECOMMEND MERGE`.
+
+### Promptfoo Regression Gate
+
+Before any prompt-promotion commit lands in the canonical SYSTEM.md, run:
+
+```bash
+bun scripts/prompt-regression.ts --path <project> --prompts confluence/workflows/ --baseline <prev-version>
+```
+
+If any prompt regresses below the threshold (default 0.7), the script sends a P0 inbox to DevOps and exits 1. Block the merge until the regression is resolved.
+
+See `references/impl-prompt-optimization.md` for the full workflow.

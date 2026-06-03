@@ -1,5 +1,7 @@
 # Sprint Mode Implementation
 
+> **TL;DR** — Sprint Mode is **temporary org-wide acceleration** (max 5 days) for pivots and time-sensitive initiatives. 6 configurable levers: cron boost, data scope, auto-wake, multi fast-track, priority escalation, freeze non-critical. CEO/PM/Board can propose; CEO/Board approve. **Hard caveat: cron overrides are declarative, not automatic** — the operator (user or orchestrator) must update real cron jobs to match `state.json sprintMode.cronOverrides`, or Sprint Mode is cosmetic. Track token budget as Lever 0 (proposed in v3.10.0) — Sprint Mode multiplies per-cycle cost.
+
 ## Overview
 
 Sprint Mode is a **temporary organizational acceleration** that any senior

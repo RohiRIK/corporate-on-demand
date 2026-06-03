@@ -1,5 +1,7 @@
 # HR Department Implementation
 
+> **TL;DR** — HR is the **institutional memory** of the corporation: trend analysis, onboarding docs, and (for self-improving prompts) the **Prompt Signal** role. Mandatory system section: **Workflow Bridge** — every cycle, scan `confluence/decisions/` and `confluence/workflows/`, then write approved rules directly into affected department SYSTEM.md files. Do not gate through CTO + CEO — that's the slow path. Sections: Mission, Owns, Must NOT Touch, Pipeline, Workflow Bridge, Prompt Signal (only if self-improving prompts enabled), Sprint Mode check.
+
 ## Mission
 
 Track department performance over time, identify trends, produce health reports, and maintain onboarding documentation for new departments. HR is the institutional memory of the corporation.
@@ -342,6 +344,16 @@ Every retro cycle (or continuously via trend analysis), HR surfaces prompt impro
 - Grade trend across the last few prompt versions per department
 - CEO corrections that repeated 3+ times to the same department — a pattern asking for a standing instruction the dept doesn't have yet
 - Rising slop-score indicating a prompt is going stale
+
+### Task prompts vs identity lines
+
+When a `[PROMPT-CANDIDATE]` is for a **task prompt** (e.g. a DevOps DM template, an R&D pitch template, a QA checklist phrasing), the full DSPy/DeepEval/Promptfoo loop can run — see `references/impl-prompt-optimization.md`. HR's job in that case:
+1. Write the `[PROMPT-CANDIDATE]` to CTO inbox as usual
+2. Mark it as `DSPY-ELIGIBLE: true` in the inbox body
+3. CTO writes the DSPy program; QA runs DeepEval; CEO approves
+4. HR promotes the new version to canonical and archives the old one
+
+When a candidate is for an **identity line** ("You are the CEO", "You grade A-F"), keep it as a manual SYSTEM.md edit — not optimizable.
 
 ### Output Format
 When a candidate is found, HR writes to CTO's inbox:

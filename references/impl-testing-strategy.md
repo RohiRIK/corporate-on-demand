@@ -1,5 +1,7 @@
 # Testing Strategy — Detection, Escalation, and Self-Healing
 
+> **TL;DR** — 7-layer testing framework: (1) Static analysis, (2) API contract, (3) Browser E2E, (4) Visual regression, (5) LAN accessibility, (6) Acceptance-driven dev, (7) CEO spot-check. **The two layers that catch the most real bugs and are skipped most often:** Layer 3 (browser E2E with Playwright — grep-only misses interactive content bugs, see pitfall A40) and Layer 5 (LAN check — localhost hides `localhost:PORT` hardcoded in frontend, see pitfall A14). Escalation: P1 next cycle, P2 within 24h, P3 within week. Screenshot lifecycle: active → archive → compress → delete.
+
 Multi-layer testing framework for Corporate-on-Demand projects. Departments detect, report, escalate, and fix issues autonomously.
 
 ---

@@ -1,5 +1,7 @@
 # IT Department Implementation
 
+> **TL;DR** — IT is the **janitor and validator**: state.json schema, script health, inbox format enforcement, log rotation, orphan files. When underutilized, expand charter with: inbox watchdog (P0/P1 stuck > 2 cycles → escalate), `npm outdated` dependency audit, state.json vs reality cross-check, doc freshness. Sections: Mission, Owns, Must NOT Touch, Pipeline, Inbox Watchdog, Dependency Audit, Sprint Mode check.
+
 ## Mission
 
 Maintain the health, integrity, and hygiene of the corporate infrastructure: scripts, state files, inbox formats, and artifact organization. IT is the janitor and validator — it fixes operational plumbing so other departments can focus on their missions.

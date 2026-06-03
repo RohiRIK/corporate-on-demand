@@ -89,8 +89,25 @@ btn.addEventListener('touchstart', e => { e.preventDefault(); fireKeyDown(); });
 btn.addEventListener('touchend', e => { e.preventDefault(); fireKeyUp(); });
 ```
 
+### 4. No touch/pointer input at all (keyboard/mouse only)
+
+Some games only handle `keydown` + `mousemove`/`click` — zero touch support. On iOS there's no mouse and no physical keyboard, so the game loads visually but is completely unplayable (paddle won't move, ball won't launch). This is different from broken touch dispatch — there's nothing TO dispatch.
+
+Quick audit:
+```bash
+# Find games with NO touch/pointer handling
+for f in frontend/public/js/games/*.js; do
+  if ! grep -qiE 'touch|pointer|Pointer' "$f"; then
+    echo "NO TOUCH: $f"
+  fi
+done
+```
+
+Fix: add `touchmove`/`touchstart` listeners that map to the same state as keyboard (e.g. paddle position from touch X coordinate, tap to launch ball).
+
 ### Mobile QA Checklist
 
+- [ ] Game has touch/pointer event handlers (grep for `touch|pointer`)
 - [ ] Touch D-pad buttons appear when game launches
 - [ ] Each direction button works (not just UP)
 - [ ] Fire/action button works (Space Invaders 🔫, etc.)

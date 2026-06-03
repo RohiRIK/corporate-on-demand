@@ -21,12 +21,12 @@
 
 🕹️ **[Live Demo: Arcade Platform](https://github.com/RohiRIK/arcade-platform)** — 7 games, 16 departments, fully autonomous. See Corporate on Demand in action.
 
-[![Version](https://img.shields.io/badge/version-3.8.0-blue?style=flat-square)]()
+[![Version](https://img.shields.io/badge/version-3.9.1-blue?style=flat-square)]()
 [![Hermes](https://img.shields.io/badge/hermes--agent-skill-purple?style=flat-square)](https://hermes-agent.nousresearch.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 [![Departments](https://img.shields.io/badge/departments-16-orange?style=flat-square)]()
-[![Impl Guides](https://img.shields.io/badge/impl%20guides-25%2B-yellow?style=flat-square)]()
-[![Docs](https://img.shields.io/badge/docs-45%2B%20files-brightgreen?style=flat-square)]()
+[![Impl Guides](https://img.shields.io/badge/impl%20guides-33%2B-yellow?style=flat-square)]()
+[![Docs](https://img.shields.io/badge/docs-51%2B%20files-brightgreen?style=flat-square)]()
 
 </div>
 
@@ -119,7 +119,7 @@ Morning report arrives at 08:00 on Telegram. CEO inspects twice daily. Departmen
 | 🚫 **Anti-slop contract** | Banned words list, concrete output rules, CEO grades A-F |
 | 📬 **Inbox communication** | Cross-department tasks via structured inbox files |
 | 🧠 **Shared state** | `state.json` — directives, pipeline status, grades, pivot tracking |
-| 🤵 **C-Suite oversight** | CEO inspects + grades. CTO reviews architecture. CISO audits security. CPO guards product quality. CFO tracks budgets. |
+| 🤵 **C-Suite oversight** | CEO inspects + grades. CTO reviews architecture + department relevance. CISO audits security. CPO guards product quality. CFO tracks budgets. |
 | 📰 **Morning/Evening reports** | Daily briefings delivered to Telegram |
 | ⚡ **Fast-track** | CEO accelerates a single project — 2 pipeline steps per cycle |
 | 🚀 **Sprint Mode** | Temporary org-wide acceleration — 6 levers: cron boost, parallel tracks, multi fast-track, C-suite bump, daily standups, scope lock. CEO/PM/Board can propose. Max 5 days. |
@@ -130,6 +130,28 @@ Morning report arrives at 08:00 on Telegram. CEO inspects twice daily. Departmen
 | 🚨 **Incident response** | P1/P2/P3 severity, incident mode, postmortems |
 | 📊 **KPI dashboard** | Objective metrics per department |
 | 🔧 **Project upgrade** | 5-gate flow to upgrade existing projects when skill evolves |
+| 🧠 **Self-improving prompts** | Distill recurring CEO feedback into versioned prompt lines (HR→CTO→CEO). Dormant until v2 DB. |
+| 🛡 **External PT** | Weekly OpenCode + DeepSeek scan, Security owns triage. |
+| 🧬 **Prompt optimization (v3.9.1)** | DSPy + DeepEval + Promptfoo — the skill improves its own task prompts. HR→CTO→CEO loop, LLM-agnostic. |
+
+### Token Optimization (v3.9.0)
+
+The skill used to load its full pitfall list on every cron cycle. v3.9.0 changed that:
+
+- **SKILL.md** — 228 → 185 lines. Routing table trimmed to 2–4 word tags. Only the 3 universal pitfalls (A30, A31, A32) stay inline.
+- **60+ pitfalls** — Moved to `references/pitfalls.md`, organized A. universal / B. games / C. static hosting / D. cross-refs. Domain-specific pitfalls no longer pollute non-applicable projects.
+- **Top 5 largest impl guides** — `impl-hr-dept`, `impl-sprint-mode`, `impl-testing-strategy`, `impl-it-dept`, `strategy-guide` all have TL;DR sections. Agents can bail at the TL;DR if the doc isn't relevant.
+- **Pitfalls deduplicated** — "Cron prompt ≠ SYSTEM.md" appeared twice; "Pre-push QA gate" and "Auto-deploy cron bypass" were split. Merged.
+
+### Prompt Optimization (v3.9.1)
+
+The skill can now **improve its own task prompts** through the HR→CTO→CEO loop using LLM-agnostic open-source tools:
+
+- **DSPy** (Stanford, MPL-2.0) — the iterative "revisit and re-improve" engine. GEPA optimizer reflects on what worked, proposes better instructions, iterates.
+- **DeepEval** (Apache 2.0) — the v1-vs-v2 judge. Custom GEval metric decides if v2 actually beats v1.
+- **Promptfoo** (MIT) — the pre-publish regression gate. Blocks deploys on prompt regression.
+
+Three new scripts: `prompt-optimize.ts`, `prompt-eval.ts`, `prompt-regression.ts`. See [`references/impl-prompt-optimization.md`](references/impl-prompt-optimization.md) for the workflow.
 
 ---
 
@@ -282,6 +304,18 @@ $BUN $SCRIPTS/inbox-send.ts --path ~/myproj --to rnd --from ceo --priority high 
 | [`impl-seasonal-events.md`](references/impl-seasonal-events.md) | Seasonal themes and events |
 | [`impl-ecosystem.md`](references/impl-ecosystem.md) | Newsletter, SLAs, plugin framework |
 | [`impl-publishing.md`](references/impl-publishing.md) | Publishing and distribution |
+| [`impl-dev-workflows.md`](references/impl-dev-workflows.md) | TDD, E2E-first, spike — apply to ALL departments |
+| [`impl-clevel-accountability.md`](references/impl-clevel-accountability.md) | CEO state writes, CTO gates, Board merger |
+| [`impl-role-expansion.md`](references/impl-role-expansion.md) | Fill gaps in underutilized departments |
+| [`impl-readme-ownership.md`](references/impl-readme-ownership.md) | PM owns README, QA validates |
+| [`impl-self-improving-prompts.md`](references/impl-self-improving-prompts.md) | Distill CEO feedback into versioned prompt lines |
+| [`impl-external-pt.md`](references/impl-external-pt.md) | Weekly OpenCode + DeepSeek PT, Security triage |
+| [`impl-prompt-optimization.md`](references/impl-prompt-optimization.md) | DSPy + DeepEval + Promptfoo — skill improves its own task prompts |
+| [`arcade-platform-changelog-2026-06.md`](references/arcade-platform-changelog-2026-06.md) | 11 process lessons from live ops |
+| [`browser-game-testing.md`](references/browser-game-testing.md) | Browser E2E patterns, mobile QA checklist |
+| [`qa-workflow-templates.md`](references/qa-workflow-templates.md) | Game verification, release gate, bug report |
+| [`sprint-mode-upgrade-checklist.md`](references/sprint-mode-upgrade-checklist.md) | CEO SYSTEM.md sprintMode schema checklist |
+| [`impl-directive-status-check.md`](references/impl-directive-status-check.md) | Post-escalation diagnostic |
 
 ### C-Suite & Governance
 
@@ -335,7 +369,7 @@ See [`references/example-arcade-platform.md`](references/example-arcade-platform
 
 ## Changelog
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full version history. Current version: **v3.8.0**.
+See [`CHANGELOG.md`](CHANGELOG.md) for the full version history. Current version: **v3.9.1**.
 
 ---
 

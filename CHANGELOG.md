@@ -4,6 +4,63 @@ All notable changes to Corporate-on-Demand are documented here.
 
 ---
 
+## [3.9.1] — 2026-06-03
+
+### Added
+- **Prompt optimization layer** — `references/impl-prompt-optimization.md`. Three LLM-agnostic open-source tools wired into the corporate cycle: **DSPy** (Stanford, MPL-2.0) drives the "revisit and re-improve" loop via GEPA optimizer; **DeepEval** (Apache 2.0) judges v1-vs-v2 with custom GEval metrics; **Promptfoo** (MIT) blocks regressions in pre-publish. This **activates the dormant self-improving-prompts flow** from v3.8.0 — HR/CTO/CEO can now actually run the loop on task prompts (DM templates, pitch templates, checklist phrasings) without waiting for the v2 SQLite backbone.
+- **3 new scripts** — `scripts/prompt-optimize.ts` (DSPy wrapper, Bun→Python subprocess), `scripts/prompt-eval.ts` (DeepEval v1-vs-v2 comparison), `scripts/prompt-regression.ts` (Promptfoo pre-publish gate, sends P0 inbox on regression).
+- **Pre-publish regression check** — `references/pre-publish-checklist.md` adds step 9: run `prompt-regression.ts` before publishing any version. Catches prompt regressions that grep-only smoke tests miss.
+- **HR's task-prompt path** — `references/impl-hr-dept.md` "Prompt Signal" section now distinguishes task prompts (DSPy-eligible) from identity lines (manual edit). HR marks candidates as `DSPY-ELIGIBLE: true` when appropriate.
+
+### Changed
+- `references/impl-self-improving-prompts.md` — status updated from "dormant" to "ACTIVE for task prompts (v3.9.1)". The loop now runs on DSPy/DeepEval/Promptfoo instead of waiting for v2 DB.
+- Pitfall A49 ("Workflows connected without CEO review") — explicit cross-reference: any new workflow created via DSPy GEPA still requires CEO review before HR integration. The optimizer proposes; humans approve.
+
+### Why this fits
+- **Replaces the Waza alternative.** The Microsoft VSCode Chat Customizations extension uses Waza, which is locked to GitHub Copilot. DSPy/DeepEval/Promptfoo are LLM-agnostic — works with Anthropic, OpenAI, Ollama, or our OpenCode + DeepSeek setup.
+- **Activates dormant flow.** v3.8.0's self-improving-prompts spec was waiting for the v2 DB. DSPy's GEPA provides the same iterative-improvement loop without needing a DB.
+- **Fits the existing org.** Maps onto HR→CTO→CEO roles already defined: HR detects, CTO drafts DSPy program, QA runs DeepEval judge, CEO approves, DevOps runs Promptfoo regression.
+
+### LLM-agnosticism
+Verified working with: OpenAI, Anthropic Claude, Ollama (local), OpenCode + DeepSeek (our default for corporate-on-demand projects). Judge model and executor model should differ to avoid bias.
+
+---
+
+## [3.9.0] — 2026-06-02
+
+### Added
+- **DB migration spec** — `references/spec-v2-db-migration.md`. Consolidated 4 prior research docs into a single spec for the v2 SQLite + Honker + sqlite-vec backbone. 5 pillars: Mail System, Knowledge Base, Ticket System, Dashboard, Communication Protocol. Implementation deferred until the v2 project lands.
+- **C-Level accountability & merger** — `references/impl-clevel-accountability.md`. CEO mandatory state writes, CTO gate authority (P0 deploy block, arch review gate, tech debt register), Board expanded agenda (security/product/budget as agenda items). Schedule: CEO 2x→3x/day, CTO 6h→4h.
+- **Dev workflows library** — `references/impl-dev-workflows.md`. Structured workflows (TDD, E2E-first, spike) apply to ALL departments, not just R&D/QA. HR bridges workflows into SYSTEM.md; PM runs continuous workflow authorship process.
+- **QA workflow templates** — `references/qa-workflow-templates.md`. Game verification, release gate, bug report templates.
+- **Browser game testing patterns** — `references/browser-game-testing.md`. Pixel checks, failure signatures, mobile QA checklist. Includes "no touch/pointer input at all" audit pattern.
+- **Directive status check** — `references/impl-directive-status-check.md`. Post-escalation diagnostic to verify SYSTEM.md was actually patched.
+- **Role expansion** — `references/impl-role-expansion.md`. Fill gaps in underutilized departments (Infra/IT/DevOps).
+- **README ownership** — `references/impl-readme-ownership.md`. PM owns README, QA validates.
+- **Sprint Mode upgrade checklist** — `references/sprint-mode-upgrade-checklist.md`. Ensures CEO SYSTEM.md has the full `sprintMode` schema.
+- **Gap analysis** — `references/gap-analysis-upgrade-plan.md`. Track A/B/C priority for live-project upgrades.
+- **8 new scripts** — `fast-track.ts`, `inbox-stale.ts`, `metrics.ts`, `pivot.ts`, `retro.ts`, `sprint.ts`, `upgrade.ts`, `wake-dept.ts`.
+- **Process improvement lessons** — `references/arcade-platform-changelog-2026-06.md`. 11 lessons from live Arcade Platform ops, organized as systemic patterns that will repeat in any deployment.
+- **External PT via OpenCode** — `references/impl-external-pt.md`. Weekly external penetration testing with a different AI model. Security owns triage.
+
+### Changed
+- **Token-optimized SKILL.md** — 228 → 185 lines. Routing table descriptions trimmed to 2–4 words. All 60+ pitfalls moved out of SKILL.md into `references/pitfalls.md` (now organized A. universal / B. games / C. static hosting / D. cross-refs). SKILL.md keeps the 3 universal patterns every agent must know cold (A30, A31, A32).
+- **Pitfalls deduplicated** — The two near-identical "Cron prompt ≠ SYSTEM.md" pitfalls merged into one (A31). The pre-push QA gate / auto-deploy-cron pair merged.
+- **Domain-specific pitfalls segregated** — Game/touch and static-hosting/Docker pitfalls moved to B and C sections of `pitfalls.md` so they don't pollute the agent's decision space for non-game, non-static projects.
+- **Top 5 largest impl guides got TL;DRs** — `impl-hr-dept.md` (446), `impl-sprint-mode.md` (392), `impl-testing-strategy.md` (384), `impl-it-dept.md` (285), `strategy-guide.md` (291). Agents can bail at the TL;DR if the doc isn't relevant.
+- **README** — Updated to v3.9.0; added Token Optimization section showing the pitfall/routing-table/TL;DR reductions.
+
+### Removed
+- 4 superseded DB research docs: `honker-sqlite-vec-integration.md`, `lancedb-honker-integration.md`, `plan-v2-honker-sqlite-vec.md`, `v2-honker-sqlite-vec.md` (rolled into `spec-v2-db-migration.md`).
+
+### Token impact
+- SKILL.md body: 228 → 185 lines (~19% smaller)
+- Pitfall prose loaded per cycle: ~50 lines (just the 3 universal patterns) instead of ~50 bullets
+- Routing table: descriptions collapsed to 2–4 word tags
+- Implication guide loads: agent can stop at TL;DR (~5 lines) when the doc isn't the right one
+
+---
+
 ## [3.8.0] — 2026-05-31
 
 ### Added

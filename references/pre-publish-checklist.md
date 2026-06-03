@@ -15,6 +15,11 @@ Run before `hermes skills publish` or pushing to a public registry.
 6. **License** — frontmatter has `license:` field
 7. **README.md** — exists, describes what the skill does, install instructions
 8. **CHANGELOG.md** — exists, latest version matches frontmatter
+9. **Promptfoo regression check** — no prompt regressed below threshold
+   ```bash
+   bun scripts/prompt-regression.ts --path . --prompts references/ --baseline <prev-version>
+   ```
+   See `references/impl-prompt-optimization.md` § "Three scripts" for setup. Fails the publish if any prompt regresses.
 
 ## Example disclaimer header for project-specific files
 ```markdown
