@@ -221,23 +221,37 @@ const commands: Record<
     const config = configFrom(flags);
     const workspace = readWorkspace(config);
     const { makeDocker, isRunning } = await import("./docker");
+    const { formatLiveness, supervisorLiveness } = await import("./liveness");
     const running = await isRunning(config);
+    // Container state and schedule state are DIFFERENT claims. The container
+    // blocks in `tail -f` and stays "up" after the supervisor dies, so a single
+    // "running" line would let a dead schedule read as a healthy one.
+    const liveness = supervisorLiveness(config.stateDir);
     print(
       config,
       {
         workspace: config.workspaceFile,
         company: workspace.company.name,
         running,
+        liveness: liveness.state,
+        supervisorJobs: liveness.heartbeat?.jobs ?? null,
         workers: allWorkers(workspace).map((w) => w.name),
         crons: workspace.crons.map((c) => c.name),
       },
       () =>
         [
-          `${workspace.company.name} — ${running ? "running" : "not running"}`,
+          `${workspace.company.name} — container ${running ? "up" : "down"}`,
+          `  ${formatLiveness(liveness)}`,
           `  workers  ${allWorkers(workspace).map((w) => w.name).join(", ") || "none"}`,
           `  crons    ${workspace.crons.map((c) => c.name).join(", ") || "none"}`,
         ].join("\n"),
     );
+    // A dead supervisor is a runtime failure, not a status line to scroll past.
+    if (running && liveness.state !== "live") {
+      throw new RuntimeFailure(
+        `the container is up but the supervisor is not live (${liveness.state}); the schedule is not running`,
+      );
+    }
   },
 
   /** Show resolved configuration and where each value came from. */

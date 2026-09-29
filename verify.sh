@@ -31,7 +31,11 @@ fail() { printf '  FAIL  %s\n' "$1"; FAILED=1; }
 unset COD_WORKSPACE COD_STATE_DIR COD_IMAGE 2>/dev/null || true
 
 step "typecheck"
-if bunx tsc --noEmit; then
+# `bun x`, not `bunx`. There is no bunx binary on this host, so verify.sh only
+# worked when an interactive shell happened to have a shim on PATH - and then it
+# failed for anyone else, including CI and this script's own subprocess. The
+# same applies to the test runner below.
+if bun x tsc --noEmit; then
   pass "tsc --noEmit"
 else
   fail "tsc reported type errors"

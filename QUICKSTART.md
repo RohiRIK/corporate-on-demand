@@ -100,6 +100,29 @@ expression never costs you the whole schedule.
 Nicknames that do work: `@yearly`, `@annually`, `@monthly`, `@weekly`,
 `@daily`, `@midnight`, `@hourly`.
 
+## Is the schedule actually running?
+
+`cod status` answers container state and schedule state **separately**, because
+they are different claims:
+
+```
+$ cod status
+acme — container up
+  supervisor: live, 1 job(s): heartbeat (seen 4s ago)
+```
+
+If the supervisor dies while the container stays up — which is what happens,
+since the container blocks deliberately — the heartbeat goes stale and the
+command **exits 1**:
+
+```
+  supervisor: STALE (last seen 200s ago, 0 job(s): none) - the container is
+  up but the schedule is not running
+```
+
+A container that is `up` is not evidence that anything is scheduled. Stale
+after 90 seconds without a heartbeat.
+
 ## Tear down
 
 ```sh

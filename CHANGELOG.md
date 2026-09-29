@@ -38,6 +38,14 @@ not yet tagged or released.
 - **`verify.sh`** and **`scripts/cleanroom.sh`** — the first gates typecheck,
   tests and build inputs; the second runs the full flow from an empty directory
   through to a real agent producing output.
+- **`cod logs` and `cod results`** — `logs` reads the JSONL event log (the
+  answer to "what happened"); `results` reads one persisted file per run (what
+  ran, when, and whether it worked). Both survive the container.
+- **Bounded output, bounded concurrency, honest liveness** — captured process
+  output is capped at 4 MB keeping the tail; at most `maxConcurrent` (default 2)
+  scheduled jobs run at once; `cod status` reports supervisor liveness
+  separately from container state and exits 1 when a container is up but the
+  schedule is dead.
 - **`docs/OPEN_QUESTIONS.md`** — records what is deliberately deferred (model
   routing, merge policy, budget ceilings, cron visibility, cross-agent locking)
   and why each one was pushed out of this pass.

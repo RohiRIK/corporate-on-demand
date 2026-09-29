@@ -6,12 +6,13 @@
  * register anything when Bun.cron is unavailable — see scheduler.ts.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Workspace } from "./workspace";
 import { echoTask } from "./task";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
+import { heartbeatPath, type Heartbeat } from "./liveness";
 import { assertCronSupport, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
@@ -24,6 +25,32 @@ const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
  * another and a run would go missing with nothing to indicate it.
  */
 let runSeq = 0;
+
+/**
+ * Write proof of life.
+ *
+ * The container blocks in `tail -f`, so it stays "up" long after the supervisor
+ * dies. This file is the only thing that distinguishes a running schedule from
+ * a dead one, and `cod status` reads it to refuse to call a dead supervisor
+ * healthy. Written on start and on every tick.
+ */
+function beat(jobs: readonly string[]): void {
+  const heartbeat: Heartbeat = {
+    runId: RUN_ID,
+    startedAt: STARTED_AT,
+    seenAt: Date.now(),
+    jobs,
+    maxConcurrent: parsedMaxConcurrent,
+  };
+  try {
+    writeFileSync(heartbeatPath(STATE_DIR), `${JSON.stringify(heartbeat, null, 2)}\n`, "utf8");
+  } catch (error) {
+    log(`could not write the heartbeat: ${(error as Error).message}`, "warn");
+  }
+}
+
+const STARTED_AT = Date.now();
+let parsedMaxConcurrent = 2;
 
 /**
  * The supervisor's run id, fixed for the life of the process.
@@ -73,10 +100,16 @@ function main(): void {
     process.exit(1);
   }
 
+  parsedMaxConcurrent = parsed.data.maxConcurrent;
+  const jobNames = parsed.data.crons.filter((c) => c.enabled).map((c) => c.name);
+  beat(jobNames);
+  log(`heartbeat written for ${jobNames.length} job(s), run ${RUN_ID}`);
+
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {
     report: log,
     maxConcurrent: parsed.data.maxConcurrent,
     run: async (cron): Promise<void> => {
+      beat(jobNames);
       const startedAt = Date.now();
       // Recorded in a `finally` so a FAILED job leaves a trace. A failure that
       // vanishes is exactly what makes a schedule untrustworthy - you cannot
@@ -122,6 +155,7 @@ function main(): void {
 
   const shutdown = (): void => {
     log("stopping");
+    beat([]);
     for (const handle of handles) handle.stop();
     process.exit(0);
   };
