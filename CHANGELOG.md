@@ -70,6 +70,22 @@ not yet tagged or released.
   JavaScript; the entrypoint also discarded the reason a workspace failed to
   parse, replacing it with a bare "refusing to guess".
 
+### Added in the current pass
+
+- **Per-job git worktrees** (`src/worktree.ts`) — one worktree and one branch per
+  job, so two agents cannot collide on a path. Verified before implementation:
+  five concurrent commits across five worktrees, all clean; git refuses two
+  worktrees on one branch.
+- **git inside the container**, with a repository initialised in `/work` on
+  first start and left alone afterwards. `/work` is a **named volume**, so
+  commits and worktrees survive `cod down && cod up` — measured, the container's
+  writable layer is destroyed by `docker rm`.
+- **Bounded restarts** — `on-failure:5` instead of `unless-stopped`, so a
+  supervisor that crashes on startup cannot loop for ever.
+- **In-flight job tracking** (`src/inflight.ts`) — a job announces itself before
+  it runs, so a crash mid-job is named on the next start instead of vanishing.
+  Follows the vocabulary Temporal and Celery use for the same problem.
+
 ### Known limitations
 
 - **A scheduled job runs an `echo`, not real work.** The full path is real — a

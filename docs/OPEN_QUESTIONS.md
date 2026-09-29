@@ -43,6 +43,14 @@ what happens when it disagrees with the `builder`.
 Worth deciding alongside real task execution, since a review policy written
 against an `echo` would be a policy about nothing.
 
+## Closed: crash recovery
+
+A job now announces itself in flight *before* it runs (`src/inflight.ts`), so a
+crash leaves a detectable mark rather than silence. Anything still in flight
+past the timeout is named by name on the next start. Restarts are bounded, so a
+crash loop cannot churn the host for ever. Both follow the vocabulary Temporal
+and Celery use for the same problem.
+
 ## 3. Budget ceilings
 
 `spend limits` appear in the original v3.8.0 skill. There are none here, and
@@ -62,12 +70,22 @@ A GUI was discussed and explicitly deferred. If it returns, the requirement is
 a view of *the schedule and its results* — not an agent-activity dashboard.
 `opencode web` is the latter and does not satisfy it.
 
-## 5. Cross-agent coordination on a shared mount
+## Closed: cross-agent coordination
 
-One container, one filesystem, one uid. Two agents writing the same path
-concurrently race, and the last writer wins. The supervisor serialises
-*scheduled* work; nothing serialises two agents dispatched at once.
+Resolved with **per-job git worktrees** (`src/worktree.ts`). Each job gets its
+own checkout on its own branch, so two agents writing the same path cannot
+collide. Verified empirically before it was written: five concurrent commits
+across five worktrees, 1000 files, all clean; and git refuses two worktrees on
+one branch, so the rule is enforced rather than documented.
 
-Decide whether to add a work-claim or lock mechanism, or accept the race and
-document it per job. This only becomes reachable once agents run concurrently
-for real, which is why it is not part of the echo stage.
+What is *not* decided: what happens to a finished job's branch. `releaseWorktree`
+removes the working directory and keeps the branch, because merging is policy
+and discarding someone's work unasked is worse. That policy is the next
+question when real agents run.
+
+## 6. Restart backoff
+
+Restarts are bounded (`on-failure:5`) so a supervisor that crashes on startup
+cannot loop for ever, and Docker adds its own ~10s guard. What is not decided is
+whether a bounded crash should *back off* before retrying rather than retrying
+five times quickly, and whether five is the right number.

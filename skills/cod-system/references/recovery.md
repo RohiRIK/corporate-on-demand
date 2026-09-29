@@ -83,7 +83,29 @@ Step 3 is the part that answers "where did it stop" - and it is the same shape
 as the liveness check: distinguish "never happened" from "started and died",
 because those are different problems.
 
-## Not yet implemented
+## Implemented
 
-Steps 1-4 above. Today a crash mid-job leaves only the last log line, and this
-document is the record of that gap rather than a description of a fix.
+Steps 1-3 are done, in `src/inflight.ts`:
+
+1. A marker is written **before** the job runs (`beginJob`).
+2. It is removed when the job settles, successfully or not (`settleJob`).
+3. On startup the supervisor reports anything still in flight past the timeout,
+   by name, with how long it was stuck:
+
+   ```
+   ERROR ABANDONED: "nightly" (builder) was in flight for 90696946s and
+   never finished - the supervisor died mid-job: run the build
+   ```
+
+Step 4 — re-queueing — is deliberately **not** done. Re-running work is a
+policy decision that has not been made, and a system that silently re-runs jobs
+is worse than one that reports them.
+
+## Restart bounds
+
+`on-failure:5`, verified locally. Docker's own docs add a second guard: a
+restart policy only engages after a container has been up ~10 seconds, which
+exists specifically to stop a container that never starts from looping.
+
+What is not decided: whether a bounded crash should back off between attempts,
+and whether five is the right number.
