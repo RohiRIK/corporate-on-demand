@@ -56,7 +56,7 @@ else
 fi
 
 step "build inputs"
-for f in docker/Dockerfile.sandbox docker/entrypoint.sh scripts/cleanroom.sh; do
+for f in docker/Dockerfile.sandbox docker/entrypoint.sh scripts/cleanroom.sh ops/cod-workspace@.service; do
   if [ -f "$f" ]; then pass "$f"; else fail "$f is missing"; fi
 done
 

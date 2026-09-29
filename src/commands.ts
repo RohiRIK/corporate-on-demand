@@ -45,6 +45,8 @@ export interface CommandFlags {
   readonly cron?: string | undefined;
   /** Show only failed runs. */
   readonly failed?: boolean | undefined;
+  /** Confirm a destructive `cod purge`. */
+  readonly purge?: boolean | undefined;
 }
 
 export type Print = (config: Config, data: unknown, table: () => string) => void;
@@ -316,7 +318,37 @@ const commands: Record<
   },
 
   /**
-   * Read the event log.
+   /**
+    * Remove a workspace's work volume, and everything committed in it.
+    *
+    * The counterpart to `down`, which deliberately KEEPS the volume so an
+    * agent's commits survive a restart. Refuses without `--purge`, because the
+    * difference between the two is closing a laptop and throwing it away.
+    */
+   async purge(_positionals, flags, print) {
+     const config = configFrom(flags);
+     const { purgeVolume } = await import("./purge");
+     // `down` before `purge`: Docker refuses to remove a volume a container is
+     // still using, and the container is normally still up - that is the whole
+     // reason the volume exists.
+     const { makeDocker } = await import("./docker");
+     const stopIfRunning = async (): Promise<boolean> => makeDocker().down(config);
+     const result = await purgeVolume(config.workspaceFile, {
+       confirmed: flags.purge === true,
+       stop: stopIfRunning,
+     });
+     print(
+       config,
+       result,
+       () => {
+         if (!result.removed) return `left ${result.volume} alone: ${result.reason ?? "unknown reason"}`;
+         const stopped = result.stopped === true ? " (stopped the container first)" : "";
+         return `removed ${result.volume} and every commit in it${stopped}`;
+       },
+     );
+   },
+
+   /** Read the event log.
    *
    * This is the answer to "what happened". The file lives in the state
    * directory, so it survives the container: run a job, destroy the container,

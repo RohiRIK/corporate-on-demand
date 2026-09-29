@@ -85,4 +85,19 @@ WORKDIR /work
 # what lets an agent read a bind-mounted repository owned by another uid.
 RUN git config --global --add safe.directory '*' || true
 
+# Git identity, image-wide.
+#
+# Without this, an agent that runs `git init` in ANY directory outside /work
+# cannot commit: "Author identity unknown". That failure is invisible - the
+# agent's work simply does not save and nothing says why. The entrypoint sets
+# an identity on /work, but that covers one path; a clone, a subdirectory, or a
+# scratch repo is still broken.
+#
+# Image-wide rather than per-repo on purpose, and it is not a credential: it is
+# a name for commits authored inside an ephemeral container that has no
+# credential of any kind.
+RUN git config --global user.email "agent@cod.local" \
+    && git config --global user.name "cod agent" \
+    && git config --global commit.gpgsign false
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -94,6 +94,34 @@ describe("image inputs", () => {
     expect(workVolume({ workspaceFile: "/a/cod.json" })).toBe(a);
   });
 
+  test("git identity is set image-wide, so an agent can commit anywhere", async () => {
+    // Measured gap: with no identity, an agent that `git init`s a scratch
+    // directory gets "Author identity unknown" and its work does not save - with
+    // nothing in the log saying why. The entrypoint set an identity on /work
+    // only, which left every other path broken.
+    const dockerfile = await Bun.file(DOCKERFILE).text();
+    expect(dockerfile).toContain("user.email");
+    expect(dockerfile).toContain("user.name");
+    // Not a credential: it names commits authored in an ephemeral container
+    // that has no credential of any kind.
+    expect(dockerfile).toMatch(/--global user\.email/);
+  });
+
+  test("a systemd unit starts a workspace on boot", async () => {
+    // --restart on-failure survives a DAEMON restart, not a HOST reboot: after
+    // a reboot the container is simply gone. This is the last fundamental gap.
+    const unit = await Bun.file("ops/cod-workspace@.service").text();
+    expect(unit).toContain("cod up");
+    expect(unit).toContain("cod down");
+    expect(unit).toContain("WantedBy=multi-user.target");
+    // ExecStartPre in [Unit] is silently IGNORED by systemd rather than
+    // failing, so a misplaced directive is a runtime surprise. Caught by
+    // `systemd-analyze verify`.
+    const serviceSection = unit.slice(unit.indexOf("[Service]"), unit.indexOf("[Install]"));
+    expect(unit.slice(0, unit.indexOf("[Service]"))).not.toContain("ExecStartPre");
+    expect(serviceSection).toContain("ExecStartPre");
+  });
+
   test("the entrypoint initialises a git repo, and never reinitialises one", async () => {
     // `git worktree add` needs a repository. Without this, the per-job worktree
     // design in src/worktree.ts has nothing to branch from and every job shares

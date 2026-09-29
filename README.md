@@ -15,7 +15,7 @@ One container per workspace. On-device cron. No API key.
 
 [![Bun](https://img.shields.io/badge/bun-1.3.12-white?style=flat-square&logo=bun)](https://bun.sh)
 [![opencode](https://img.shields.io/badge/opencode-1.18.31-blue?style=flat-square)](https://github.com/sst/opencode)
-[![Tests](https://img.shields.io/badge/tests-189%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-199%20passing-brightgreen?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 
 </div>
@@ -65,6 +65,7 @@ for what that does and does not mean, and for the worktree design that fixes it.
 | `cod results` | persisted job results — what ran, and did it work |
 | `cod image` | build the workspace image |
 | `cod doctor` | host checks, with the fix for anything missing |
+| `cod purge` | remove the work volume and every commit in it (`--purge` confirms) |
 | `cod config show` | resolved configuration and where each value came from |
 
 Exit codes: `0` success, `1` retryable runtime failure, `2` deterministic usage
@@ -78,7 +79,7 @@ Not claimed — measured, and re-checked by `scripts/cleanroom.sh` on every run:
 - a cron job firing on a real minute boundary, inside a real container
 - an agent producing real output, at **zero cost**, with no credential on disk
 - 11 security controls read back off a live container via `docker inspect`
-- **189 tests**, clean strict typecheck
+- **199 tests**, clean strict typecheck
 
 ## Documentation
 
@@ -95,6 +96,16 @@ than as bugs.
 | [scheduling](skills/cod-system/references/scheduling.md) | cron, concurrency, and the syntax that bites |
 | [recovery](skills/cod-system/references/recovery.md) | what happens when the supervisor dies |
 | [invariants](skills/cod-system/references/invariants.md) | the rules most changes are measured against |
+
+## Running on boot
+
+Docker's `--restart on-failure:5` survives a **daemon** restart, not a **host**
+reboot — after a reboot the container is simply gone. A systemd unit closes that:
+
+```sh
+sudo install -m 644 ops/cod-workspace@.service /etc/systemd/system/
+sudo systemctl enable --now cod-workspace@acme.service
+```
 
 ## Verifying it yourself
 

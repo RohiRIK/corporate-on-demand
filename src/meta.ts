@@ -16,6 +16,7 @@ COMMANDS:
   supervise Run the in-container cron supervisor
   logs      Read the event log — the answer to "what happened"
   results   Read persisted job results — what ran, and did it work
+  purge     Remove the work volume and every commit in it (--purge confirms)
   config    Show resolved configuration and where each value came from
   doctor    Check that the host can run a container
   help      Show this help
@@ -31,6 +32,7 @@ OPTIONS:
       --last <n>          Show at most n events or results
       --cron <name>       Filter results to one job
       --failed            Show only failed runs
+      --purge             Confirm the destructive volume purge
       --company <name>    Override the company name
       --purpose <text>    Override the company purpose
       --workspace <path>  Workspace file, default ./cod.json

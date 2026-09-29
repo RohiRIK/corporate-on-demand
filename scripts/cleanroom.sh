@@ -132,6 +132,14 @@ fi
 step "10. down is idempotent"
 if "$CLI" down >/dev/null 2>&1; then pass "a second down is a no-op"; else fail "down is not idempotent"; fi
 
+# The work volume is kept by `cod down` on purpose, so an agent's commits
+# survive a restart. A clean-room run creates a throwaway workspace, so it must
+# clean up after itself or every run leaves a volume behind for ever.
+if [ -f "$ROOT/cod.json" ]; then
+  "$CLI" purge --purge >/dev/null 2>&1 || true
+fi
+rm -rf "$ROOT" 2>/dev/null || true
+
 printf '\n'
 if [ "$FAILED" -eq 0 ]; then
   printf 'RESULT: PASS (%s)\n' "$ROOT"
