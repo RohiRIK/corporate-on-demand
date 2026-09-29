@@ -123,19 +123,34 @@ export function buildRunArgv(spec: ContainerSpec): string[] {
   return argv;
 }
 
-/** Whether the Docker daemon answers. `docker info` succeeds with no containers. */
-export async function isDockerAvailable(runner: Runner = defaultRunner): Promise<boolean> {
+/**
+ * Every Docker call goes through this, so a missing binary or a spawn failure
+ * becomes a clean "false"/"unknown" instead of a raw ENOENT escaping to the
+ * user as a stack trace. isDockerAvailable, dockerVersion and isRunning all
+ * call the runner directly rather than through run(), so each owes its own
+ * guard — that gap is why this helper exists.
+ */
+async function tryRun(
+  runner: Runner,
+  args: string[],
+  timeoutMs: number,
+): Promise<RunResult | undefined> {
   try {
-    const result = await runner("docker", ["info", "--format", "{{.ServerVersion}}"], 10_000);
-    return result.code === 0;
+    return await runner("docker", args, timeoutMs);
   } catch {
-    return false;
+    return undefined;
   }
 }
 
+/** Whether the Docker daemon answers. `docker info` succeeds with no containers. */
+export async function isDockerAvailable(runner: Runner = defaultRunner): Promise<boolean> {
+  const result = await tryRun(runner, ["info", "--format", "{{.ServerVersion}}"], 10_000);
+  return result?.code === 0;
+}
+
 export async function dockerVersion(runner: Runner = defaultRunner): Promise<string> {
-  const result = await runner("docker", ["info", "--format", "{{.ServerVersion}}"], 10_000);
-  return result.code === 0 ? result.stdout.trim() : "unknown";
+  const result = await tryRun(runner, ["info", "--format", "{{.ServerVersion}}"], 10_000);
+  return result?.code === 0 ? result.stdout.trim() : "unknown";
 }
 
 /**
@@ -156,10 +171,16 @@ async function containerWorkspaceLabel(
   return label === "" ? undefined : label;
 }
 
+/** Whether a container of this name exists at all, labelled or not. */
+async function containerExists(name: string, runner: Runner): Promise<boolean> {
+  const result = await tryRun(runner, ["inspect", "--format", "{{.Id}}", name], 10_000);
+  return result?.code === 0;
+}
+
 export async function isRunning(config: Config, runner: Runner = defaultRunner): Promise<boolean> {
   const name = containerName(workspaceFromConfig(config));
-  const result = await runner("docker", ["inspect", "--format", "{{.State.Running}}", name], 10_000);
-  return result.code === 0 && result.stdout.trim() === "true";
+  const result = await tryRun(runner, ["inspect", "--format", "{{.State.Running}}", name], 10_000);
+  return result?.code === 0 && result.stdout.trim() === "true";
 }
 
 /** The workspace name is the basename of the workspace file. */
@@ -229,8 +250,8 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
 
       // Idempotent, but only by label: a container of the same name that we did
       // not create is a conflict, not something to adopt.
-      const state = await runner("docker", ["inspect", "--format", "{{.State.Running}}", name], 10_000);
-      if (state.code === 0 && state.stdout.trim() === "true") {
+      const state = await tryRun(runner, ["inspect", "--format", "{{.State.Running}}", name], 10_000);
+      if (state?.code === 0 && state.stdout.trim() === "true") {
         const label = await containerWorkspaceLabel(name, runner);
         if (label === wsName) return name;
         throw new UsageError(
@@ -261,10 +282,21 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
 
     async down(config: Config): Promise<boolean> {
       const name = containerName(workspaceFromConfig(config));
+      // Confirm the container is really ours before destroying it. `docker rm
+      // --force` removes whatever bears the name, and a name that merely
+      // looks like ours is not ours. Matching on the exit status rather than
+      // English stderr also survives a locale change or a Docker rewrite.
+      const label = await containerWorkspaceLabel(name, runner);
+      if (label === undefined) {
+        if (!(await containerExists(name, runner))) return false;
+        throw new UsageError(
+          `refusing to remove ${name}: it exists but carries no cod.workspace label, ` +
+            `so this CLI did not create it. Remove it yourself if you are sure.`,
+        );
+      }
       const result = await runner("docker", ["rm", "--force", name], timeoutMs);
       if (result.code !== 0) {
         const detail = result.stderr.trim();
-        if (detail.includes("No such container")) return false;
         throw new RuntimeFailure(`docker rm failed: ${detail || `exit ${result.code}`}`);
       }
       return true;

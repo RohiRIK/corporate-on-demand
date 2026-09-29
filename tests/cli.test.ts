@@ -22,7 +22,7 @@ import { loadConfig, DEFAULTS } from "../src/config";
 import { UsageError, UnsupportedRuntimeError } from "../src/errors";
 import { Workspace, allWorkers, findWorker } from "../src/workspace";
 import { loadStarterDepartment, listDepartmentTemplates } from "../src/templates";
-import { agentWorkdir, assertMountAllowed, buildRunArgv, containerName, type RunResult } from "../src/docker";
+import { agentWorkdir, assertMountAllowed, buildRunArgv, containerName, dockerVersion, isDockerAvailable, isRunning, makeDocker, type RunResult } from "../src/docker";
 
 const temps: string[] = [];
 
@@ -307,6 +307,74 @@ describe("end to end", () => {
       expect(parsed).toHaveProperty("sources.image");
     } finally {
       process.chdir(previousCwd);
+    }
+  });
+});
+
+describe("docker failure isolation", () => {
+  test("a missing docker binary is a clean failure, not a crash", async () => {
+    // Max's finding: isRunning and isDockerAvailable called the runner
+    // directly, outside the try/catch that run() provides. A missing binary
+    // escaped as a raw ENOENT instead of a named failure.
+    const exploding = async (): Promise<RunResult> => {
+      throw new Error("spawn docker ENOENT");
+    };
+    expect(await isDockerAvailable(exploding)).toBe(false);
+    expect(await isRunning({ workspaceFile: "/tmp/acme/cod.json" } as never, exploding)).toBe(false);
+  });
+
+  test("dockerVersion survives a runner that throws", async () => {
+    const exploding = async (): Promise<RunResult> => {
+      throw new Error("spawn docker ENOENT");
+    };
+    expect(await dockerVersion(exploding)).toBe("unknown");
+  });
+
+  test("down refuses to remove a container whose name is not ours", async () => {
+    // Max's finding, and the most severe: `docker rm --force <name>` destroys
+    // whatever bears that name. A crafted workspace value could name a real,
+    // unrelated container. The name is validated, and rm is only reached for a
+    // name this CLI could itself have created.
+    expect(() => containerName("cod-sandbox-$(id)-decoy")).toThrow(UsageError);
+    expect(() => containerName("-rf")).toThrow(UsageError);
+    expect(() => containerName("valid-name")).not.toThrow();
+  });
+
+  test("down refuses to remove a container this CLI did not create", async () => {
+    // The severe case: a container with our name but no cod.workspace label
+    // belongs to something else. `docker rm --force` would destroy it, so the
+    // call must never be issued.
+    const calls: string[][] = [];
+    const runner = async (_cmd: string, args: string[]): Promise<RunResult> => {
+      calls.push(args);
+      if (args[0] === "inspect" && args.join(" ").includes("cod.workspace")) {
+        return { code: 0, stdout: "", stderr: "" }; // no label
+      }
+      if (args[0] === "inspect") {
+        return { code: 0, stdout: "abc123", stderr: "" }; // it exists
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const docker = makeDocker({ runner, timeoutMs: 1000 });
+    const config = { workspaceFile: "/tmp/acme/cod.json" } as never;
+    await expect(docker.down(config)).rejects.toThrow(/did not create it/);
+    // The proof: no rm was ever attempted.
+    expect(calls.some((a) => a[0] === "rm")).toBe(false);
+  });
+
+  test("down is a clean no-op when the container is simply absent", async () => {
+    const runner = async (_cmd: string, args: string[]): Promise<RunResult> => {
+      if (args[0] === "inspect") return { code: 1, stdout: "", stderr: "no such object" };
+      return { code: 0, stdout: "", stderr: "" };
+    };
+    const docker = makeDocker({ runner, timeoutMs: 1000 });
+    const config = { workspaceFile: "/tmp/acme/cod.json" } as never;
+    expect(await docker.down(config)).toBe(false);
+  });
+
+  test("a name with shell metacharacters never reaches an argv", () => {
+    for (const hostile of ["a;rm -rf /", "a && b", "`id`", "$(id)", "a|b", "a>b"]) {
+      expect(() => containerName(hostile)).toThrow(UsageError);
     }
   });
 });
