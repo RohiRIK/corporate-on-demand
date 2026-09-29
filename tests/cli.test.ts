@@ -274,7 +274,8 @@ describe("workspace schema", () => {
         { name: "two", workers: [{ name: "w2", role: "r", model: "m" }] },
       ],
       crons: [],
-    };
+      maxConcurrent: 2,
+      };
     expect(allWorkers(workspace).map((w) => w.name)).toEqual(["w1", "w2"]);
     expect(findWorker(workspace, "w2")?.name).toBe("w2");
     expect(findWorker(workspace, "nobody")).toBeUndefined();

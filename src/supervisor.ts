@@ -75,6 +75,7 @@ function main(): void {
 
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {
     report: log,
+    maxConcurrent: parsed.data.maxConcurrent,
     run: async (cron): Promise<void> => {
       const startedAt = Date.now();
       // Recorded in a `finally` so a FAILED job leaves a trace. A failure that

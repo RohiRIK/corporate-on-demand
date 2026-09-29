@@ -9,6 +9,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_MAX_CONCURRENT } from "./limit";
 import { loadConfig, ensureStateDir, ensureParentDir, type Config } from "./config";
 import { RuntimeFailure, UsageError } from "./errors";
 import { isDockerAvailable } from "./docker";
@@ -105,6 +106,7 @@ const commands: Record<
       company: { name: companyName, purpose },
       departments: [department],
       crons: [],
+      maxConcurrent: DEFAULT_MAX_CONCURRENT,
     };
 
     const parsed = Workspace.safeParse(workspace);

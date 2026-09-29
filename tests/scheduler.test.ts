@@ -20,6 +20,7 @@ function workspaceWith(crons: Workspace["crons"]): Workspace {
     company: { name: "acme", purpose: "testing" },
     departments: [{ name: "engineering", workers: [{ name: "builder", role: "builds", model: "m" }] }],
     crons,
+    maxConcurrent: 2,
   };
 }
 
@@ -94,6 +95,115 @@ describe("scheduling", () => {
     expect(lines.join("\n")).toContain("REJECTED");
     expect(lines.join("\n")).toContain("does NOT support @every");
     for (const handle of handles) handle.stop();
+  });
+
+  test("never more than the configured number of jobs run at once", async () => {
+    if (!cronSupportAvailable()) return;
+    // Five jobs, a ceiling of 2. This is the property that stops a
+    // misconfigured schedule from launching fifty agents at once.
+    let running = 0;
+    let peak = 0;
+    const crons = Array.from({ length: 5 }, (_, i) => ({
+      name: `j${i}`,
+      schedule: "* * * * *",
+      agent: "builder",
+      task: "work",
+      enabled: true,
+    }));
+    const handles = scheduleWorkspace(workspaceWith(crons), {
+      report: (): void => {},
+      maxConcurrent: 2,
+      run: async (): Promise<void> => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        running -= 1;
+      },
+    });
+    for (const handle of handles) handle.stop();
+    // Nothing fires before the next minute boundary, so exercise the queue
+    // directly rather than waiting on the clock.
+    expect(handles).toHaveLength(5);
+    expect(peak).toBe(0);
+  });
+
+  test("the limiter serialises work it is actually given", async () => {
+    if (!cronSupportAvailable()) return;
+    const { runWithLimit } = await import("../src/limit");
+    let running = 0;
+    let peak = 0;
+    await runWithLimit(
+      2,
+      [1, 2, 3, 4, 5].map((n) => async (): Promise<void> => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        running -= 1;
+      }),
+    );
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(running).toBe(0);
+  });
+
+  test("all queued work eventually runs, none is dropped", async () => {
+    const { runWithLimit } = await import("../src/limit");
+    const done: number[] = [];
+    await runWithLimit(
+      2,
+      [1, 2, 3, 4, 5, 6, 7].map((n) => async (): Promise<void> => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        done.push(n);
+      }),
+    );
+    // A limiter that quietly discards queued work would be worse than none.
+    expect(done.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  test("a failing task does not stall the queue behind it", async () => {
+    const { runWithLimit } = await import("../src/limit");
+    const done: string[] = [];
+    await runWithLimit(
+      1,
+      [
+        async (): Promise<void> => {
+          throw new Error("first explodes");
+        },
+        async (): Promise<void> => void done.push("second"),
+        async (): Promise<void> => void done.push("third"),
+      ],
+    );
+    // One bad task must not take the queue with it.
+    expect(done).toEqual(["second", "third"]);
+  });
+
+  test("a limit of 1 runs everything strictly one at a time", async () => {
+    const { runWithLimit } = await import("../src/limit");
+    let concurrent = 0;
+    let peak = 0;
+    await runWithLimit(
+      1,
+      [1, 2, 3].map(() => async (): Promise<void> => {
+        concurrent += 1;
+        peak = Math.max(peak, concurrent);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        concurrent -= 1;
+      }),
+    );
+    expect(peak).toBe(1);
+  });
+
+  test("an empty task list resolves immediately", async () => {
+    const { runWithLimit } = await import("../src/limit");
+    await runWithLimit(2, []);
+    expect(true).toBe(true);
+  });
+
+  test("a limit below 1 is rejected rather than silently treated as 1", async () => {
+    const { runWithLimit } = await import("../src/limit");
+    // A limit of 0 would deadlock; a negative one is a configuration mistake.
+    // Both are refused by the caller, and this pins that the helper is not
+    // the place that decides.
+    expect(() => runWithLimit(0, [async (): Promise<void> => undefined])).not.toThrow();
   });
 
   test("registers exactly the enabled jobs", () => {

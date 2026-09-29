@@ -11,6 +11,7 @@
  * prove a job fires exactly once across a restart without waiting for 2am.
  */
 
+import { DEFAULT_MAX_CONCURRENT, runWithLimit } from "./limit";
 import { UnsupportedRuntimeError } from "./errors";
 import type { Cron, Workspace } from "./workspace";
 
@@ -21,6 +22,13 @@ export interface SchedulerOptions {
   readonly run?: (cron: Cron) => Promise<void>;
   /** Report a job outcome. Defaults to stdout, which the container log captures. */
   readonly report?: (line: string) => void;
+  /**
+   * How many jobs may run at once. Defaults to 2.
+   *
+   * A schedule with ten jobs at the same minute must not launch ten agents
+   * simultaneously, so every firing is queued and run under this ceiling.
+   */
+  readonly maxConcurrent?: number;
 }
 
 export interface ScheduledHandle {
@@ -59,6 +67,14 @@ export function scheduleWorkspace(
   const handles: ScheduledHandle[] = [];
   const rejected: Cron[] = [];
   const enabled = workspace.crons.filter((cron) => cron.enabled);
+  const maxConcurrent = options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
+
+  /**
+   * How many jobs are waiting for a slot. Read inside the report so a queued
+   * job says so - a queue that is invisible looks exactly like a stalled
+   * schedule, and those need different fixes.
+   */
+  let queued = 0;
 
   for (const cron of enabled) {
     // Bun.CronJob is the handle; ReturnType<typeof Bun.cron> resolves to the
@@ -66,15 +82,30 @@ export function scheduleWorkspace(
     let handle: Bun.CronJob;
     try {
       handle = Bun.cron(cron.schedule, async (): Promise<void> => {
-        const started = now();
-        report(`[cron] ${cron.name} firing at ${new Date(started).toISOString()}`);
+        // Queue rather than run directly. Ten jobs at `:00` must not become
+        // ten simultaneous agents, and a fired callback that awaits its turn
+        // is the natural place to enforce that.
+        queued += 1;
+        if (queued > maxConcurrent) {
+          report(`[cron] ${cron.name} queued (${queued - 1} already running, limit ${maxConcurrent})`);
+        }
         try {
-          await run(cron);
-          report(`[cron] ${cron.name} finished in ${now() - started}ms`);
-        } catch (error) {
-          // A failing job must not take the scheduler down with it, or one bad
-          // cron silently disables every other cron in the workspace.
-          report(`[cron] ${cron.name} failed: ${(error as Error).message}`);
+          await runWithLimit(maxConcurrent, [
+            async (): Promise<void> => {
+              const started = now();
+              report(`[cron] ${cron.name} firing at ${new Date(started).toISOString()}`);
+              try {
+                await run(cron);
+                report(`[cron] ${cron.name} finished in ${now() - started}ms`);
+              } catch (error) {
+                // A failing job must not take the scheduler down with it, or one
+                // bad cron silently disables every other cron in the workspace.
+                report(`[cron] ${cron.name} failed: ${(error as Error).message}`);
+              }
+            },
+          ]);
+        } finally {
+          queued -= 1;
         }
         // Bun.cron's stop() is void; the return type of the callback must be too.
       });

@@ -50,6 +50,10 @@ export const Workspace = z
     company: Company,
     departments: z.array(Department).min(1),
     crons: z.array(Cron).default([]),
+    // How many scheduled jobs may run at once. 0 or negative would deadlock,
+    // so the schema refuses it here rather than letting a clamp paper over a
+    // configuration mistake the user should see.
+    maxConcurrent: z.number().int().min(1).max(64).default(2),
   })
   .strict();
 export type Workspace = z.infer<typeof Workspace>;
