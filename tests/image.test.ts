@@ -118,6 +118,24 @@ describe("image inputs", () => {
     expect(argv).not.toContain("--rm");
   });
 
+  test("CI pins the runtime, and does NOT run the clean-room", async () => {
+    // A CI that can pass on a version the container does not use proves
+    // nothing, and one that goes red when a free provider is down is one
+    // people learn to ignore.
+    const ci = await Bun.file(".github/workflows/ci.yml").text();
+    expect(ci).toContain('bun-version: "1.3.12"');
+    expect(ci).toContain("--frozen-lockfile");
+    expect(ci).toContain("verify.sh");
+    // The clean-room appears only in the comment explaining why it is absent.
+    const code = ci.split("\n").filter((l) => !l.trimStart().startsWith("#")).join("\n");
+    expect(code).not.toContain("cleanroom.sh");
+  });
+
+  test("CI refuses to track the 177 MB binary", async () => {
+    const ci = await Bun.file(".github/workflows/ci.yml").text();
+    expect(ci).toContain("vendor-opencode.sh");
+  });
+
   test("the entrypoint refuses to continue without Bun.cron", async () => {
     const entrypoint = await Bun.file(ENTRYPOINT).text();
     // A scheduler that silently never fires is the failure this prevents.
