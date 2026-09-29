@@ -203,7 +203,30 @@ function main(): void {
   if (jobNames.length === 0) {
     log("no enabled cron jobs; holding the container open until one is added", "warn");
   }
-  setInterval(() => beat(jobNames), 30_000);
+  // One tick, two jobs: report liveness, then converge the ledger.
+  //
+  // Reconcile is the CEO's loop and it rides the EXISTING interval rather than
+  // a new timer - there is already a free 30s tick here, and a second one would
+  // be another thing that can drift. It is level-triggered, so running it on
+  // every pass regardless of what changed is exactly right: a proposal that
+  // landed while the process was down is promoted on the next tick rather than
+  // waiting for an event that will never come.
+  setInterval(() => {
+    beat(jobNames);
+    try {
+      const { reconcileOnce, formatReport } = require("./reconcile") as typeof import("./reconcile");
+      const report = reconcileOnce({ stateDir: STATE_DIR, actor: "supervisor" });
+      for (const line of formatReport(report)) {
+        if (line.startsWith("nothing to do")) continue;
+        log(line);
+      }
+      for (const error of report.errors) log(`reconcile ERROR ${error}`, "error");
+    } catch (error) {
+      // A reconcile failure must not take the supervisor down, or one bad
+      // ledger stops every cron in the workspace.
+      log(`reconcile failed: ${(error as Error).message}`, "error");
+    }
+  }, 30_000);
 }
 
 main();

@@ -17,6 +17,8 @@ COMMANDS:
   logs      Read the event log — the answer to "what happened"
   results   Read persisted job results — what ran, and did it work
   purge     Remove the work volume and every commit in it (--purge confirms)
+  work      The work ledger: list, propose, claim, commit
+  reconcile Run the CEO's reconciler once (also runs on the supervisor's tick)
   config    Show resolved configuration and where each value came from
   doctor    Check that the host can run a container
   help      Show this help
@@ -33,6 +35,15 @@ OPTIONS:
       --cron <name>       Filter results to one job
       --failed            Show only failed runs
       --purge             Confirm the destructive volume purge
+      --owner <name>     Who is claiming work
+      --id <id>          A work item id
+      --epoch <n>        The lease epoch being committed (the fencing token)
+      --from <agent>     The proposing department
+      --to <agent>       The agent a proposal addresses, or a claim filter
+      --goal <text>      What the work is for
+      --paths <a,b>      Comma-separated target paths (feed the novelty key)
+      --blast <0|1|2>    0 self-contained, 1 cross-department, 2 global
+      --reason <text>    A reason recorded with a commit or rejection
       --company <name>    Override the company name
       --purpose <text>    Override the company purpose
       --workspace <path>  Workspace file, default ./cod.json

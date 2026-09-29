@@ -54,6 +54,17 @@ async function main(argv: string[]): Promise<void> {
       purge: { type: "boolean" },
       company: { type: "string" },
       purpose: { type: "string" },
+      owner: { type: "string" },
+      id: { type: "string" },
+      epoch: { type: "string" },
+      from: { type: "string" },
+      to: { type: "string" },
+      goal: { type: "string" },
+      payload: { type: "string" },
+      paths: { type: "string" },
+      blast: { type: "string" },
+      kind: { type: "string" },
+      reason: { type: "string" },
     },
   });
 
@@ -84,6 +95,17 @@ async function main(argv: string[]): Promise<void> {
     cron: values.cron,
     failed: values.failed,
     purge: values.purge,
+    owner: values.owner,
+    id: values.id,
+    epoch: values.epoch,
+    from: values.from,
+    to: values.to,
+    goal: values.goal,
+    payload: values.payload,
+    paths: values.paths,
+    blast: values.blast,
+    kind: values.kind,
+    reason: values.reason,
   };
 
   await runCommand(command, positionals.slice(1), flags, print);

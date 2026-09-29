@@ -47,6 +47,28 @@ export interface CommandFlags {
   readonly failed?: boolean | undefined;
   /** Confirm a destructive `cod purge`. */
   readonly purge?: boolean | undefined;
+  /** Who is claiming. */
+  readonly owner?: string | undefined;
+  /** A work item id. */
+  readonly id?: string | undefined;
+  /** The lease epoch being committed against - the fencing token. */
+  readonly epoch?: string | undefined;
+  /** The proposing department. */
+  readonly from?: string | undefined;
+  /** The agent a proposal is addressed to, or a claim filter. */
+  readonly to?: string | undefined;
+  /** What the work is for. */
+  readonly goal?: string | undefined;
+  /** The work payload. */
+  readonly payload?: string | undefined;
+  /** Comma-separated target paths, which feed the novelty key. */
+  readonly paths?: string | undefined;
+  /** 0 self-contained, 1 cross-department, 2 global. */
+  readonly blast?: string | undefined;
+  /** A kind of work. */
+  readonly kind?: string | undefined;
+  /** A reason recorded with a commit or a rejection. */
+  readonly reason?: string | undefined;
 }
 
 export type Print = (config: Config, data: unknown, table: () => string) => void;
@@ -315,6 +337,103 @@ const commands: Record<
           `format          ${config.format}  (${config.sources.format})`,
         ].join("\n"),
     );
+  },
+
+  /**
+   * The work ledger. Read-only unless a subcommand says otherwise.
+   */
+  async work(positionals, flags, print) {
+    const config = configFrom(flags);
+    const { openWork, listWork, claim, commit, propose } = await import("./work");
+    const sub = positionals[0] ?? "list";
+    const handle = openWork(config.stateDir);
+    try {
+      if (sub === "list") {
+        const state = typeof flags.state === "string" ? flags.state : undefined;
+        const items = listWork(handle, state as never);
+        print(
+          config,
+          items,
+          () =>
+            items.length === 0
+              ? "work ledger is empty"
+              : items
+                  .map(
+                    (r) =>
+                      `${r.id}  ${r.state.padEnd(9)} ${r.from_agent} -> ${r.to_agent}` +
+                      `  epoch=${r.lease_epoch} attempts=${r.attempts}` +
+                      (r.blast_radius === null ? "" : `  blast=${r.blast_radius}`) +
+                      (r.reason === null ? "" : `  (${r.reason})`),
+                  )
+                  .join("\n"),
+        );
+        return;
+      }
+      if (sub === "propose") {
+        const from = flags.from ?? "engineering";
+        const to = flags.to ?? from;
+        const goal = flags.goal ?? "unspecified";
+        const result = propose(handle, {
+          from,
+          to,
+          kind: flags.kind ?? "task",
+          payload: flags.payload ?? goal,
+          goal,
+          targetPaths: typeof flags.paths === "string" ? flags.paths.split(",").filter(Boolean) : [],
+          blastRadius: typeof flags.blast === "string" ? Number(flags.blast) : undefined,
+        });
+        print(
+          config,
+          result,
+          () =>
+            result.ok && result.item !== undefined
+              ? `proposed ${result.item.id} (state ${result.item.state}; it is NOT runnable until the CEO reconciles it)`
+              : `refused: ${result.reason ?? "unknown"}`,
+        );
+        return;
+      }
+      if (sub === "claim") {
+        const owner = flags.owner ?? "cli";
+        const item = claim(handle, owner, typeof flags.to === "string" ? flags.to : undefined);
+        print(
+          config,
+          item,
+          () =>
+            item === null
+              ? "nothing to claim"
+              : `claimed ${item.id} as ${owner} (lease_epoch ${item.lease_epoch}, attempt ${item.attempts})`,
+        );
+        return;
+      }
+      if (sub === "commit") {
+        const id = flags.id ?? "";
+        const epoch = Number(flags.epoch ?? "-1");
+        const outcome = commit(handle, id, epoch, flags.failed === true ? "failed" : "done", flags.reason);
+        print(
+          config,
+          outcome,
+          () =>
+            outcome.ok
+              ? `committed ${id} as ${outcome.item?.state ?? "done"}`
+              : `commit REFUSED: ${outcome.reason ?? "unknown"}`,
+        );
+        return;
+      }
+      throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim or commit`);
+    } finally {
+      handle.close();
+    }
+  },
+
+  /**
+   * Run the reconciler once. Also runs on the supervisor's own tick; this is
+   * the same function, so what you see here is exactly what the CEO does.
+   */
+  async reconcile(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const { reconcileOnce, formatReport } = await import("./reconcile");
+    const report = reconcileOnce({ stateDir: config.stateDir, actor: "cli" });
+    print(config, report, () => formatReport(report).join("\n"));
   },
 
   /**
