@@ -12,6 +12,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { redact } from "./redact";
 import type { Cron } from "./workspace";
 
 export interface JobResult {
@@ -68,7 +69,22 @@ export function recordResult(result: JobResult, options: RecordOptions): string 
     const dir = resultsDir(options.stateDir);
     mkdirSync(dir, { recursive: true });
     const path = join(dir, fileNameFor(result.startedAt, options.seq ?? 0));
-    writeFileSync(path, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+    // Every free-text field is redacted, not just `output`. An earlier version
+    // redacted output only, and a secret in the TASK text was written verbatim
+    // to the result file while the log right next to it said [REDACTED] - two
+    // files telling opposite stories about the same run.
+    //
+    // `cod.json` itself is NOT rewritten: it is the operator's own input file,
+    // and silently editing what someone wrote is worse than leaving it alone.
+    // That is why the clean-room check greps the state directory, not the
+    // workspace file.
+    const safe: JobResult = {
+      ...result,
+      task: redact(result.task).text,
+      output: redact(result.output).text,
+      ...(result.error === undefined ? {} : { error: redact(result.error).text }),
+    };
+    writeFileSync(path, `${JSON.stringify(safe, null, 2)}\n`, "utf8");
     return path;
   } catch {
     return null;

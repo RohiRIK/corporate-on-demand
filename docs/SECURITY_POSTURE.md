@@ -106,29 +106,43 @@ The container refuses to pretend instead.
 
 ## Residual risk, accepted
 
-0. **Logs contain raw job output, unredacted.** `<stateDir>/logs/cod.jsonl`
-   holds whatever a job printed, verbatim. Today that is an `echo` of a task
-   string, so the exposure is nil. The moment agents do real work, this file
-   becomes a place credentials, tokens and source can land, and **redaction
-   stops being an improvement and becomes a requirement**. It is deliberately
-   not implemented now: a redactor written before there is real output to redact
-   would be untested, and an untested redactor is a false claim of safety. Log
-   rotation bounds the file at `5 MB x 4` per workspace.
+0. **Redaction is a mitigation, not a guarantee.** Known credential shapes —
+   `sk-…`, `ghp_…`, `github_pat_…`, `xox[baprs]-…`, `AKIA…`, `AIza…`, JWTs,
+   `Bearer`/`Basic` headers, and `NAME=value` for a denylist of secret-ish
+   names — never reach the log or a result file. Verified by seeding a
+   credential into a scheduled job and grepping the state directory: zero
+   hits. **A secret quoted in prose, a novel token format, or one split across
+   two lines is not caught.** It is applied in one place, the log sink, so a
+   new call site cannot forget; but a single place is also a single point of
+   failure if it is ever bypassed.
 
-1. **Egress = exfiltration channel.** Any source file readable in the container can be POSTed
+   `cod.json` is deliberately **not** rewritten. It is the operator's own input
+   file, and silently editing what someone wrote is worse than leaving it
+   alone. So a credential typed into a task description stays in the workspace
+   file — redaction protects what the system *writes*, not what you type.
+
+1. **Log volume is bounded but content is not compressed.** `cod.jsonl` rotates
+   at 5 MB keeping 3 archives, and results are pruned to `resultRetention` (500
+   by default) with every prune reported. Size is bounded; nothing is summarised
+   or dropped by importance.
+
+2. **Egress = exfiltration channel.** Any source file readable in the container can be POSTed
    out. Mitigation would be `--network none` plus a package proxy/allowlist — explicitly out of
    scope. Accepted.
-2. **Cross-agent write corruption** from a compromised or confused agent. Detected by review,
+3. **Cross-agent write corruption** from a compromised or confused agent. Detected by review,
    not prevented.
-3. **Supply chain** on the unfiltered egress path: agents install packages by design.
-4. **Host kernel** is the trust boundary. A container escape (kernel bug, or the socket, if ever
+4. **Supply chain** on the unfiltered egress path: agents install packages by design.
+5. **Host kernel** is the trust boundary. A container escape (kernel bug, or the socket, if ever
    added) is game over. Everything above assumes the host is not itself compromised.
 
 ## The three rules
 
 1. **Never mount `/var/run/docker.sock` into this container.** No exceptions, no debugging.
 2. **Never add a credential to this workspace.** No model API key, no registry token, no `.env`.
-   This is what keeps the worst case at "source code leaves the host".
+   This is what keeps the worst case at "source code leaves the host". Redaction now strips known
+   credential shapes from anything the system *writes*, but it is pattern-based: a secret in prose
+   or in an unknown format still gets through, so redaction is a safety net and not a reason to
+   type one into `cod.json`.
 3. **Never describe prompt-level rules, the token budget, or `--network none`-removal as
    mitigations.** If it is not in the table above, it is a policy, and policies are written in
    the prompt.

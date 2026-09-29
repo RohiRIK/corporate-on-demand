@@ -7,7 +7,8 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { REDACTED } from "../src/redact";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -262,6 +263,50 @@ describe("pruneResults", () => {
     const outcome = pruneResults("/nonexistent/cod", 500);
     expect(outcome.removed).toBe(0);
     expect(outcome.remaining).toBe(0);
+  });
+});
+
+describe("results are redacted on disk", () => {
+  test("a secret in the TASK text never reaches the result file", () => {
+    // The bug this pins: output was redacted but task was not, so the result
+    // file held the secret verbatim while the log beside it said [REDACTED].
+    const dir = scratch();
+    try {
+      recordResult(
+        result({ task: "deploy with API_KEY=supersecretvalue123", output: "builder: [REDACTED]" }),
+        { stateDir: dir },
+      );
+      const onDisk = readFileSync(join(resultsDir(dir), readdirSync(resultsDir(dir))[0] as string), "utf8");
+      expect(onDisk).not.toContain("supersecretvalue123");
+      expect(onDisk).toContain(REDACTED);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a secret in the error field is redacted too", () => {
+    const dir = scratch();
+    try {
+      recordResult(result({ ok: false, error: "auth failed for sk-abcdefghijklmnopqrstuvwxyz01" }), {
+        stateDir: dir,
+      });
+      const onDisk = readFileSync(join(resultsDir(dir), readdirSync(resultsDir(dir))[0] as string), "utf8");
+      expect(onDisk).not.toContain("sk-abcdefghijklmnopqrstuvwxyz01");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("an ordinary result is written unchanged", () => {
+    const dir = scratch();
+    try {
+      recordResult(result(), { stateDir: dir });
+      const read = listResults(dir);
+      expect(read[0]?.task).toBe("run the build");
+      expect(read[0]?.output).toBe("build ok");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

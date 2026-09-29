@@ -32,6 +32,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { redact } from "./redact";
 
 export type Level = "debug" | "info" | "warn" | "error";
 
@@ -106,6 +107,36 @@ export function createLogger(options: LoggerOptions): Logger {
   };
 }
 
+/**
+ * A sink that redacts before anything is written.
+ *
+ * Redaction belongs HERE rather than at each call site. One place means a new
+ * call site cannot forget, and forgetting once is all it takes to put a
+ * credential on disk permanently.
+ */
+export function redactingSink(inner: Sink): Sink {
+  return {
+    write(event: LogEvent): void {
+      const { text, counts } = redact(event.msg);
+      if (Object.keys(counts).length > 0) {
+        // The count is reported, never silently swallowed: a log that changes
+        // under you without saying so is indistinguishable from a bug.
+        const summary = Object.entries(counts)
+          .map(([name, n]) => `${name} x${n}`)
+          .join(", ");
+        inner.write({
+          ...event,
+          msg: text,
+          fields: { ...event.fields, redacted: summary },
+          level: event.level === "info" ? "warn" : event.level,
+        });
+        return;
+      }
+      inner.write(event.msg === text ? event : { ...event, msg: text });
+    },
+  };
+}
+
 export function memorySink(): Sink & { readonly events: LogEvent[] } {
   const events: LogEvent[] = [];
   return {
@@ -135,6 +166,10 @@ export const DEFAULT_KEEP = 3;
  * a disk-full incident waiting for a busy schedule.
  */
 export function fileSink(path: string, options: FileSinkOptions = {}): Sink {
+  return redactingSink(rawFileSink(path, options));
+}
+
+function rawFileSink(path: string, options: FileSinkOptions): Sink {
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const keep = options.keep ?? DEFAULT_KEEP;
   mkdirSync(dirname(path), { recursive: true });
