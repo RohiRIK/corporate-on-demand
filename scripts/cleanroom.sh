@@ -75,10 +75,35 @@ else
 fi
 
 step "7. the agent really runs inside it, with no credentials"
-OUT=$(docker exec cod-sandbox-cod sh -lc \
-  'cd /work && opencode run --pure --format json -m opencode/space-bunny-free "reply with exactly: E2E_OK" 2>&1' || true)
-if printf '%s' "$OUT" | grep -q 'E2E_OK'; then pass "an agent produced work"; else fail "agent run: $OUT"; fi
-if printf '%s' "$OUT" | grep -q '"cost":0'; then pass "the call cost nothing"; else fail "cost was not zero"; fi
+# The free model endpoint fails intermittently ("Unexpected server error").
+# Measured: 1 failure in 3 identical calls, with the same container and the
+# same image. A check that dies on a provider blip trains you to ignore it, so
+# retry - but keep failing after the retries, because a genuine regression here
+# would also survive a handful of attempts if it were deterministic.
+AGENT_OUT=""
+attempt=1
+while [ "$attempt" -le 3 ]; do
+  AGENT_OUT=$(docker exec cod-sandbox-cod sh -lc \
+    'cd /work && opencode run --pure --format json -m opencode/space-bunny-free "reply with exactly: E2E_OK" 2>&1' || true)
+  if printf '%s' "$AGENT_OUT" | grep -q 'E2E_OK'; then
+    pass "an agent produced work (attempt $attempt)"
+    break
+  fi
+  printf '  ....  agent call failed, retrying (%s/3)\n' "$attempt"
+  attempt=$((attempt + 1))
+  sleep 3
+done
+
+if [ "$attempt" -gt 3 ]; then
+  fail "agent run failed 3 times: $AGENT_OUT"
+fi
+# Checked against the attempt that actually succeeded, so a blip cannot mask a
+# real cost regression.
+if printf '%s' "$AGENT_OUT" | grep -q '"cost":0'; then
+  pass "the call cost nothing"
+else
+  fail "cost was not zero"
+fi
 if [ ! -f "$ROOT/auth.json" ] && [ ! -f "$ROOT/.opencode/auth.json" ]; then
   pass "no credential was written to disk"
 else

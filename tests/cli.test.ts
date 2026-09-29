@@ -22,7 +22,19 @@ import { loadConfig, DEFAULTS } from "../src/config";
 import { UsageError, UnsupportedRuntimeError } from "../src/errors";
 import { Workspace, allWorkers, findWorker } from "../src/workspace";
 import { loadStarterDepartment, listDepartmentTemplates } from "../src/templates";
-import { agentWorkdir, assertMountAllowed, buildRunArgv, containerName, dockerVersion, isDockerAvailable, isRunning, makeDocker, type RunResult } from "../src/docker";
+import {
+  agentWorkdir,
+  assertMountAllowed,
+  buildRunArgv,
+  containerName,
+  dockerVersion,
+  isDockerAvailable,
+  isRunning,
+  makeCappedRunner,
+  makeDocker,
+  OUTPUT_LIMIT_BYTES,
+  type RunResult,
+} from "../src/docker";
 
 const temps: string[] = [];
 
@@ -397,6 +409,108 @@ describe("docker failure isolation", () => {
     for (const hostile of ["a;rm -rf /", "a && b", "`id`", "$(id)", "a|b", "a>b"]) {
       expect(() => containerName(hostile)).toThrow(UsageError);
     }
+  });
+});
+
+describe("output bounds", () => {
+  test("stdout above the cap is truncated and flagged", async () => {
+    const runner = makeCappedRunner(1024);
+    const result = await runner("bash", ["-lc", "for i in $(seq 1 500); do echo 0123456789012345678901234567890123456789; done"], 30_000);
+    expect(result.stdoutTruncated).toBe(true);
+    expect(result.stdout.length).toBeLessThanOrEqual(1024);
+  });
+
+  test("a small output is not flagged as truncated", async () => {
+    const runner = makeCappedRunner(1024 * 1024);
+    const result = await runner("bash", ["-lc", "echo small"], 30_000);
+    expect(result.stdoutTruncated).toBe(false);
+    expect(result.stdout.trim()).toBe("small");
+    expect(result.code).toBe(0);
+  });
+
+  test("truncation keeps the TAIL, which is where a failure shows up", async () => {
+    // The end of a failing command is the part that says why. Keeping the
+    // head would show a successful-looking beginning and hide the error.
+    const runner = makeCappedRunner(2048);
+    const result = await runner(
+      "bash",
+      ["-lc", "echo HEAD_MARKER_AAA; for i in $(seq 1 500); do echo padding-padding-padding; done; echo THE_ACTUAL_ERROR; exit 7"],
+      30_000,
+    );
+    expect(result.stdoutTruncated).toBe(true);
+    expect(result.stdout).toContain("THE_ACTUAL_ERROR");
+    // The head is what got dropped, and it is dropped COMPLETELY. An
+    // implementation that keeps the head "and some of the rest" would still
+    // pass the check above, so assert the head is gone.
+    expect(result.stdout).not.toContain("HEAD_MARKER_AAA");
+    expect(result.code).toBe(7);
+  });
+
+  test("the captured output never exceeds the cap, exactly", async () => {
+    // The first version of this returned 4412 bytes for a 2048 cap - the
+    // front-trimming had a partial-chunk special case that was wrong. A bound
+    // that is approximately honoured is not a bound.
+    const runner = makeCappedRunner(2048);
+    const result = await runner("bash", ["-lc", "for i in $(seq 1 5000); do echo xxxxxxxxxxxxxxxxxxxx; done"], 30_000);
+    expect(result.stdoutTruncated).toBe(true);
+    expect(result.stdout.length).toBe(2048);
+  });
+
+  test("capturing 40 MB does not grow the heap by 40 MB", async () => {
+    // The whole point of the cap. Measured heap growth is asserted loosely
+    // because GC timing is not deterministic, but the bound is 10x the output
+    // cap: an implementation that buffers then slices would blow straight
+    // through it, and did - it grew 70 MB before this was fixed.
+    const runner = makeCappedRunner(1024 * 1024);
+    const before = process.memoryUsage().heapUsed;
+    const result = await runner("bash", ["-lc", "for i in $(seq 1 400000); do echo yyyyyyyyyyyyyyyyyyyy; done"], 60_000);
+    const growth = process.memoryUsage().heapUsed - before;
+    expect(result.stdoutTruncated).toBe(true);
+    expect(result.stdout.length).toBe(1024 * 1024);
+    expect(growth).toBeLessThan(10 * 1024 * 1024);
+  }, 60_000);
+
+  test("the child's real exit code survives truncation", async () => {
+    const runner = makeCappedRunner(512);
+    const result = await runner(
+      "bash",
+      ["-lc", "for i in $(seq 1 500); do echo noise; done; exit 3"],
+      30_000,
+    );
+    expect(result.code).toBe(3);
+  });
+
+  test("a runaway command does not deadlock when the cap is reached", async () => {
+    // The dangerous bug: stop reading the stream but let the child keep
+    // writing. It blocks on a full pipe, and we wait for it to exit - a
+    // deadlock that a timeout would eventually paper over.
+    const runner = makeCappedRunner(256);
+    const started = Date.now();
+    const result = await runner("bash", ["-lc", "for i in $(seq 1 20000); do echo chatter; done"], 20_000);
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(result.code).toBe(0);
+  });
+
+  test("stderr is bounded independently of stdout", async () => {
+    // Each stderr line here is 42 bytes, so 500 of them is ~21 KB against a
+    // 1 KB cap - comfortably over, unlike a two-byte-per-line loop which would
+    // sit just under and silently pass.
+    const runner = makeCappedRunner(1024);
+    const result = await runner(
+      "bash",
+      ["-lc", "for i in $(seq 1 500); do echo 0123456789012345678901234567890123456789 >&2; done; echo out"],
+      30_000,
+    );
+    expect(result.stderrTruncated).toBe(true);
+    expect(result.stderr.length).toBeLessThanOrEqual(1024);
+    expect(result.stdoutTruncated).toBe(false);
+    expect(result.stdout.trim()).toBe("out");
+  });
+});
+
+describe("the cap default", () => {
+  test("is 4 MB, which is generous for real output and small for 50 jobs", () => {
+    expect(OUTPUT_LIMIT_BYTES).toBe(4 * 1024 * 1024);
   });
 });
 

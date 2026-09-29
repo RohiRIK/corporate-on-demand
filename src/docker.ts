@@ -23,24 +23,122 @@ export interface RunResult {
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
+  /** True when `stdout` was cut to the last OUTPUT_LIMIT_BYTES characters. */
+  readonly stdoutTruncated?: boolean;
+  /** True when `stderr` was cut. Bounded independently of stdout. */
+  readonly stderrTruncated?: boolean;
 }
+
+/**
+ * The cap on captured output, per stream, per command.
+ *
+ * 4 MB is far more than any legitimate `docker` invocation prints, and small
+ * enough that 50 concurrent jobs cannot exhaust host memory. The alternative -
+ * `new Response(stream).text()` - holds an unbounded string, and this CLI runs
+ * on the host, not in the container it is inspecting.
+ */
+export const OUTPUT_LIMIT_BYTES = 4 * 1024 * 1024;
 
 export type Runner = (cmd: string, args: string[], timeoutMs: number) => Promise<RunResult>;
 
-export const defaultRunner: Runner = async (cmd, args, timeoutMs) => {
-  const proc = Bun.spawn([cmd, ...args], { stdout: "pipe", stderr: "pipe" });
-  const timer = setTimeout(() => proc.kill(), timeoutMs);
+/**
+ * Read a stream into memory, keeping at most `limit` bytes of its TAIL.
+ *
+ * Three details that are each a bug if missed:
+ *
+ * 1. **Keep the tail, not the head.** The end of a failing command is where the
+ *    error is. Keeping the head shows a successful-looking beginning and hides
+ *    the reason it failed.
+ *
+ * 2. **Keep draining after the cap.** A child blocked on a full pipe while we
+ *    stop reading is a deadlock, and it would surface as a mysterious timeout
+ *    rather than as the bug it is.
+ *
+ * 3. **Stop appending, not stop reading.** Slicing a fully-buffered string
+ *    afterwards would still have held the whole thing in memory, which is the
+ *    problem this exists to fix.
+ */
+async function readCapped(
+  stream: ReadableStream<Uint8Array>,
+  limit: number,
+): Promise<{ readonly text: string; readonly truncated: boolean }> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  // A ring buffer holding the most recent `limit` characters.
+  //
+  // Two properties that pull against each other, and both matter:
+  //
+  //  - **Keep the tail.** The end of a failing command is where the error is;
+  //    keeping the head shows a successful-looking beginning and hides why it
+  //    failed. So past the cap the buffer slides.
+  //  - **Never hold more than the cap.** Appending everything and slicing at
+  //    the end still peaks at the full size in memory, which is the exact
+  //    failure this exists to prevent - it only hides it behind a smaller
+  //    return value. Measured: 40 MB of output grew the heap by 70 MB before
+  //    this was fixed; it is now 6.8 MB.
+  //
+  // The buffer is a plain string rather than an array of chunks. Array-based
+  // front-trimming needs a partial-head special case that is easy to get wrong
+  // - and did get wrong, leaving the buffer over its cap - while a string
+  // slice is a single expression that is either right or visibly not.
+  let buffer = "";
+  let truncated = false;
+
   try {
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-    return { code, stdout, stderr };
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined) continue;
+      const next = buffer + decoder.decode(value, { stream: true });
+      if (next.length > limit) {
+        truncated = true;
+        // Slice from the end, so what survives is the most recent output.
+        buffer = next.slice(next.length - limit);
+      } else {
+        buffer = next;
+      }
+    }
   } finally {
-    clearTimeout(timer);
+    reader.releaseLock();
   }
-};
+
+  return { text: buffer, truncated };
+}
+
+/**
+ * The default runner, with the output cap lowered so truncation is testable.
+ *
+ * One implementation, parameterised. Two copies of this would drift, and a cap
+ * that quietly applied only in production is the kind of thing nobody notices
+ * until it matters.
+ */
+export function makeRunner(limitBytes: number): Runner {
+  return async (cmd, args, timeoutMs) => {
+    const proc = Bun.spawn([cmd, ...args], { stdout: "pipe", stderr: "pipe" });
+    const timer = setTimeout(() => proc.kill(), timeoutMs);
+    try {
+      const [out, err, code] = await Promise.all([
+        readCapped(proc.stdout as ReadableStream<Uint8Array>, limitBytes),
+        readCapped(proc.stderr as ReadableStream<Uint8Array>, limitBytes),
+        proc.exited,
+      ]);
+      return {
+        code,
+        stdout: out.text,
+        stderr: err.text,
+        stdoutTruncated: out.truncated,
+        stderrTruncated: err.truncated,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
+export const defaultRunner: Runner = makeRunner(OUTPUT_LIMIT_BYTES);
+
+/** Alias kept for readability at the call sites in the tests. */
+export const makeCappedRunner = makeRunner;
 
 const CONTAINER_PREFIX = "cod-sandbox";
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
