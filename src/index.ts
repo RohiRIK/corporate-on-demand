@@ -45,6 +45,9 @@ async function main(argv: string[]): Promise<void> {
       format: { type: "string" },
       workspace: { type: "string" },
       yes: { type: "boolean" },
+      rebuild: { type: "boolean" },
+      company: { type: "string" },
+      purpose: { type: "string" },
     },
   });
 
@@ -66,6 +69,9 @@ async function main(argv: string[]): Promise<void> {
     workspace: values.workspace,
     yes: values.yes,
     json: values.json,
+    rebuild: values.rebuild,
+    company: values.company,
+    purpose: values.purpose,
   };
 
   await runCommand(command, positionals.slice(1), flags, print);

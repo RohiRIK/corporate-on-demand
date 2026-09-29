@@ -30,6 +30,8 @@ export interface CommandFlags {
   readonly company?: string | undefined;
   /** Override the company purpose. */
   readonly purpose?: string | undefined;
+  /** Rebuild the image even when it is already present. */
+  readonly rebuild?: boolean | undefined;
 }
 
 export type Print = (config: Config, data: unknown, table: () => string) => void;
@@ -125,17 +127,68 @@ const commands: Record<
     );
   },
 
-  /** Build the image and start the workspace container. */
+  /** Build the workspace image and start the container. */
   async up(_positionals, flags, print) {
     const config = configFrom(flags);
     const workspace = readWorkspace(config);
     if (!(await isDockerAvailable())) {
       throw new RuntimeFailure("docker is not available on this host; is the daemon running?");
     }
+    const { ensureImage } = await import("./image");
     const { makeDocker } = await import("./docker");
+
+    // Always say which case this was. A cold build takes minutes and a warm
+    // one is instant; silence makes both look like a hang.
+    const build = await ensureImage(config, { force: flags.rebuild === true });
+    const imageNote = build.outcome === "cached" ? "cached" : "built (first run, this takes minutes)";
+
     const docker = makeDocker();
     const name = await docker.up(config, workspace);
-    print(config, { started: name }, () => `started ${name}`);
+    print(
+      config,
+      { started: name, image: build.tag, outcome: build.outcome },
+      () => `image    ${build.tag} (${imageNote})\nstarted  ${name}`,
+    );
+  },
+
+  /** Build the workspace image without starting anything. */
+  async image(_positionals, flags, print) {
+    const config = configFrom(flags);
+    if (!(await isDockerAvailable())) {
+      throw new RuntimeFailure("docker is not available on this host; is the daemon running?");
+    }
+    const { ensureImage } = await import("./image");
+    const build = await ensureImage(config, { force: flags.rebuild === true });
+    print(
+      config,
+      build,
+      () =>
+        build.outcome === "cached"
+          ? `${build.tag} is already built`
+          : `${build.tag} built`,
+    );
+  },
+
+  /** Start the in-container supervisor, which registers the cron jobs. */
+  async supervise(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const { isRunning } = await import("./docker");
+    if (!(await isRunning(config))) {
+      throw new RuntimeFailure("the workspace container is not running; run `cod up` first");
+    }
+    const { containerNameFor, runSupervisor } = await import("./supervise");
+    const name = containerNameFor(config);
+    const result = await runSupervisor(config, name);
+    print(
+      config,
+      result,
+      () => `supervisor in ${name}: ${result.lines.length} line(s), exit ${result.code}`,
+    );
+    if (result.code !== 0) {
+      throw new RuntimeFailure(
+        `the supervisor exited ${result.code}: ${result.lines.join("; ") || "no output"}`,
+      );
+    }
   },
 
   /** Stop and remove the workspace container. */

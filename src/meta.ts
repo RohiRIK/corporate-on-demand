@@ -12,6 +12,8 @@ COMMANDS:
   up        Build the image and start the workspace container
   down      Stop and remove the workspace container
   status    Report container, worker and toolchain state
+  image     Build the workspace image without starting anything
+  supervise Run the in-container cron supervisor
   config    Show resolved configuration and where each value came from
   doctor    Check that the host can run a container
   help      Show this help
@@ -21,9 +23,12 @@ OPTIONS:
   -v, --version           Show the version
       --json              Print JSON instead of a table
       --yes               Accept every default; never prompt (for scripts)
+      --rebuild           Rebuild the image even when it is already present
+      --company <name>    Override the company name
+      --purpose <text>    Override the company purpose
       --workspace <path>  Workspace file, default ./cod.json
       --state <path>      State directory, default ~/.local/share/cod
-      --image <image>     Container image, default ${"oven/bun:1.3.12"}
+      --image <image>     Container image tag, default ${"cod-sandbox:1.3.12"}
       --format <fmt>      table or json
 
 EXIT CODES:

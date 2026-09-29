@@ -14,7 +14,13 @@ import { UsageError } from "./errors";
 
 export const DEFAULTS = {
   stateDir: join(homedir(), ".local", "share", "cod"),
-  image: "oven/bun:1.3.12",
+  /**
+   * The tag for the image *we build*, not the base it is built FROM. Naming it
+   * after the base image makes `docker image inspect` succeed against the base
+   * and report "cached" without anything of ours ever being built — a silent
+   * no-op that looks like success.
+   */
+  image: "cod-sandbox:1.3.12",
   format: "table",
 } as const;
 
