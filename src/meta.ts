@@ -36,7 +36,6 @@ OPTIONS:
       --failed            Show only failed runs
       --purge             Confirm the destructive volume purge
       --owner <name>     Who is claiming work
-      --id <id>          A work item id
       --epoch <n>        The lease epoch being committed (the fencing token)
       --from <agent>     The proposing department
       --to <agent>       The agent a proposal addresses, or a claim filter

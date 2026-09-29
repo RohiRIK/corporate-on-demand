@@ -49,8 +49,6 @@ export interface CommandFlags {
   readonly purge?: boolean | undefined;
   /** Who is claiming. */
   readonly owner?: string | undefined;
-  /** A work item id. */
-  readonly id?: string | undefined;
   /** The lease epoch being committed against - the fencing token. */
   readonly epoch?: string | undefined;
   /** The proposing department. */
@@ -406,7 +404,7 @@ const commands: Record<
         return;
       }
       if (sub === "commit") {
-        const id = flags.id ?? "";
+        const id = positionals[1] ?? "";
         const epoch = Number(flags.epoch ?? "-1");
         const outcome = commit(handle, id, epoch, flags.failed === true ? "failed" : "done", flags.reason);
         print(

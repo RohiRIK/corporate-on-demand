@@ -29,7 +29,7 @@
 
 import { Database } from "bun:sqlite";
 import { mkdirSync, renameSync, writeFileSync, openSync, fsyncSync, closeSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
 /**
@@ -88,6 +88,31 @@ CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 `;
 
 /**
+ * Put the database in WAL mode, verifying rather than assuming.
+ *
+ * Converting to WAL needs a brief exclusive lock, and SQLite can report BUSY
+ * for it even with busy_timeout set - busy_timeout does not govern a journal
+ * mode change. So it is retried, and then the resulting mode is READ BACK.
+ * Assuming the PRAGMA worked is how a database silently stayed in rollback
+ * mode with concurrent writers.
+ */
+function ensureWal(database: Database, attempts = 20): void {
+  for (let n = 0; n < attempts; n += 1) {
+    try {
+      database.run("PRAGMA journal_mode = WAL");
+      const mode = database.query("PRAGMA journal_mode").get() as { journal_mode?: string } | null;
+      if ((mode?.journal_mode ?? "").toLowerCase() === "wal") return;
+    } catch {
+      // Another opener is mid-conversion; fall through to the backoff.
+    }
+    // Synchronous sleep via Atomics: a spin loop would burn a core for no
+    // reason, and a busy retry is the whole point here.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5 + n * 5);
+  }
+  throw new Error("could not put the work ledger into WAL mode after repeated attempts; concurrent writers may be wedged");
+}
+
+/**
  * Open (or create) the ledger under the state directory.
  *
  * WAL is legitimate here precisely because of the constraint it imposes: it
@@ -99,18 +124,22 @@ export function openWork(stateDir: string): WorkDb {
   const dir = join(stateDir, "work");
   mkdirSync(dir, { recursive: true });
   const database = new Database(join(dir, "ledger.sqlite"), { create: true });
-  database.run("PRAGMA journal_mode = WAL");
-  // A second writer should wait rather than throw; the gate is the write lock,
-  // and busy is a normal transient state here, not an error.
-  database.run("PRAGMA busy_timeout = 5000");
+  // busy_timeout BEFORE journal_mode, and that order is not cosmetic.
+  // `PRAGMA journal_mode = WAL` is itself a WRITE, so running it first means a
+  // concurrent opener fails immediately with "database is locked" before the
+  // timeout that would have made it wait. Measured: 10 of 24 concurrent
+  // first-opens died before this was reordered.
+  database.run("PRAGMA busy_timeout = 10000");
+  ensureWal(database);
   database.run("PRAGMA foreign_keys = ON");
   database.run(SCHEMA);
-  if (database.query("SELECT n FROM epoch").get() === null) {
-    database.run("INSERT INTO epoch (n) VALUES (0)");
-  }
-  if (database.query("SELECT v FROM meta WHERE k = 'created_seq'").get() === null) {
-    database.run("INSERT INTO meta (k, v) VALUES ('created_seq', '0')");
-  }
+  // Seeding inside one transaction with INSERT OR IGNORE. The previous
+  // check-then-insert was a race: two openers both saw an empty table and one
+  // lost with a UNIQUE violation on meta.k.
+  database.transaction(() => {
+    database.run("INSERT OR IGNORE INTO epoch (n) VALUES (0)");
+    database.run("INSERT OR IGNORE INTO meta (k, v) VALUES ('created_seq', '0')");
+  })();
   return { db: database, close: (): void => database.close() };
 }
 
@@ -141,10 +170,32 @@ export function noveltyKey(dept: string, goal: string, targetPaths: readonly str
  * reason a reader NEVER sees a half-written message. Without the rename a crash
  * mid-write leaves a file that exists and is full of garbage.
  */
+/**
+ * A safe id, or an error.
+ *
+ * The id becomes a FILENAME, so an unvalidated one is a path-traversal write:
+ * an id of "../escaped" wrote outside the work directory. The same rule already
+ * exists in src/worktree.ts, and this mirrors it rather than inventing a second
+ * standard.
+ */
+const SAFE_ID = /^[A-Za-z0-9._-]{1,64}$/;
+
+export function assertSafeId(id: string): void {
+  if (SAFE_ID.test(id) && id !== "." && id !== "..") return;
+  throw new Error(`unsafe work id ${JSON.stringify(id)}: expected 1-64 chars of [A-Za-z0-9._-] and not a path segment`);
+}
+
 export function writeWorkFile(stateDir: string, item: WorkItem): string {
+  assertSafeId(item.id);
   const dir = join(stateDir, "work");
   mkdirSync(dir, { recursive: true });
   const final = join(dir, `${item.id}.json`);
+  // Belt and braces: the regex already forbids separators, but the containment
+  // check is the property that actually matters, so assert it directly.
+  const resolvedDir = resolve(dir);
+  if (resolve(final).replace(resolvedDir, "") !== resolve(final).slice(resolvedDir.length)) {
+    throw new Error(`refusing to write outside the work directory: ${item.id}`);
+  }
   const tmp = `${final}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(item, null, 2)}\n`, "utf8");
   const fd = openSync(tmp, "r");
@@ -190,6 +241,9 @@ export function propose(
     readonly id?: string | undefined;
   },
 ): ProposeResult {
+  // Validated up front, so a bad id is a clean error rather than a file written
+  // somewhere unexpected later on.
+  if (fields.id !== undefined) assertSafeId(fields.id);
   const key = noveltyKey(fields.from, fields.goal, fields.targetPaths ?? []);
   const existing = handle.db.query("SELECT * FROM work WHERE novelty_key = ?").get(key) as WorkItem | null;
   if (existing !== null) {
@@ -197,6 +251,13 @@ export function propose(
       ok: false,
       reason: `already proposed as ${existing.id} (state ${existing.state}); re-proposing identical work is refused`,
     };
+  }
+  // Non-finite or absurd radii are rejected rather than stored. `NaN` from
+  // Number("abc") previously landed as NULL, which then passed every
+  // comparison and silently dispatched global work without the CEO.
+  const radius = fields.blastRadius;
+  if (radius !== undefined && !Number.isInteger(radius)) {
+    return { ok: false, reason: `blast radius must be a whole number 0, 1 or 2 (got ${String(radius)})` };
   }
   const id = fields.id ?? `w-${Date.now().toString(36)}-${key.slice(0, 6)}`;
   const item: WorkItem = {
@@ -210,7 +271,7 @@ export function propose(
     lease_epoch: 0,
     attempts: 0,
     novelty_key: key,
-    blast_radius: fields.blastRadius ?? null,
+    blast_radius: radius ?? null,
     reason: null,
     created_seq: 0,
     started_at: null,
@@ -234,7 +295,12 @@ export function propose(
           stored.blast_radius,
           stored.created_seq,
         );
-      writeWorkFile(stateDirOf(handle), stored);
+      // Deliberately NO file here. An earlier version wrote one at propose
+      // time, and the reconciler used bare existsSync() as proof the work had
+      // been paid for - so every CLAIMED item was marked done on the next tick
+      // without running. Measured, not theoretical.
+      //
+      // The file is the record of a FINISHED result, written by commit().
     })();
   } catch (error) {
     // A UNIQUE violation here is a race with a concurrent proposer, which is
@@ -306,8 +372,36 @@ export interface CommitOutcome {
 }
 
 export function commit(handle: WorkDb, id: string, leaseEpoch: number, outcome: "done" | "failed", reason?: string): CommitOutcome {
+  // The durable record is written BEFORE the row is updated, and only here.
+  // That ordering is the whole recovery story: if the process dies between the
+  // two, the file is on disk and the reconciler can apply it. Writing it any
+  // earlier would make a file's existence meaningless.
+  const existing = get(handle, id);
+  if (existing !== null && existing.lease_epoch === leaseEpoch) {
+    try {
+      writeWorkFile(stateDirOf(handle), {
+        ...existing,
+        state: outcome,
+        reason: reason ?? null,
+      });
+    } catch {
+      // A file we cannot write must not block the commit; the row is the
+      // coordination truth and the file is the durable one. Losing the file
+      // degrades recovery, it does not corrupt state.
+    }
+  }
+
+  // lease_epoch is BUMPED here, and that is load-bearing twice over.
+  //
+  //  - It CONSUMES the epoch. A retried ack or a second writer holding the same
+  //    epoch now matches zero rows instead of overwriting the first result.
+  //  - It makes a RECLAIM fence the worker it reclaimed. A worker that overran
+  //    its budget was never killed; without this bump it still held a valid
+  //    epoch and could overwrite the reclaim verdict with its own success.
   const result = handle.db
-    .query("UPDATE work SET state = ?, reason = ?, lease_owner = NULL WHERE id = ? AND lease_epoch = ? RETURNING *")
+    .query(
+      "UPDATE work SET state = ?, reason = ?, lease_owner = NULL, lease_epoch = lease_epoch + 1 WHERE id = ? AND lease_epoch = ? RETURNING *",
+    )
     .get(outcome, reason ?? null, id, leaseEpoch) as WorkItem | null;
   if (result === null) {
     const current = get(handle, id);

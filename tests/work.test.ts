@@ -12,8 +12,8 @@
  */
 
 import { describe, expect, test, afterEach } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openWork, propose, claim, commit, listWork, get, noveltyKey, writeWorkFile, type WorkItem } from "../src/work";
@@ -85,18 +85,32 @@ describe("propose", () => {
     handle.close();
   });
 
-  test("every proposal leaves a readable file, because the files are the truth", () => {
+  test("a finished proposal leaves a readable file, because the files are the truth", () => {
+    // The file records a FINISHED result, so it appears at commit rather than
+    // at propose. Writing it at propose is what made its mere existence a
+    // false "done" signal; see the regression suite below.
     const { dir, id } = seeded("durable");
-    const file = join(dir, "work", `${id}.json`);
-    expect(existsSync(file)).toBe(true);
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as WorkItem;
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const handle = openWork(dir);
+    const claimed = claim(handle, "w");
+    if (claimed === null) throw new Error("nothing claimed");
+    commit(handle, id, claimed.lease_epoch, "done", "finished");
+    handle.close();
+    const parsed = JSON.parse(readFileSync(join(dir, "work", `${id}.json`), "utf8")) as WorkItem;
     expect(parsed.id).toBe(id);
+    expect(parsed.state).toBe("done");
     expect(parsed.novelty_key.length).toBe(32);
   });
 
   test("no .tmp file is left behind", () => {
     // The tmp+rename recipe: a leftover tmp is a half-written record.
     const { dir, id } = seeded();
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const handle = openWork(dir);
+    const claimed = claim(handle, "w");
+    if (claimed === null) throw new Error("nothing claimed");
+    commit(handle, id, claimed.lease_epoch, "done");
+    handle.close();
     expect(existsSync(join(dir, "work", `${id}.json.tmp`))).toBe(false);
   });
 });
@@ -149,7 +163,7 @@ describe("claim", () => {
     handle.close();
   });
 
-  test("REAL CONCURRENCY: eight processes race for one item, exactly one wins", () => {
+  test("eight CONCURRENT processes race for one item, exactly one wins", async () => {
     // The mechanism is SQLite's write lock, so this must be separate processes.
     // Eight in-process promises would not exercise it at all.
     const { dir, id } = seeded();
@@ -165,12 +179,25 @@ describe("claim", () => {
     const scriptPath = join(scratch(), "racer.ts");
     require("node:fs").writeFileSync(scriptPath, script);
 
-    const runs = Array.from({ length: 8 }, (_, n) =>
-      spawnSync(process.execPath, ["run", scriptPath, dir, `p${n}`], { encoding: "utf8", timeout: 60_000 }),
+    // spawn ASYNC and let them all start before any can finish. The previous
+    // version used spawnSync in a loop, so the eight processes ran one after
+    // another and nothing was ever racing - the "REAL CONCURRENCY" label was
+    // false. The property is real; the test was not proving it.
+    const runs = await Promise.all(
+      Array.from({ length: 8 }, (_, n) =>
+        new Promise<{ out: string }>((resolve) => {
+          const child = spawn(process.execPath, ["run", scriptPath, dir, `p${n}`]);
+          let out = "";
+          child.stdout.on("data", (chunk) => {
+            out += String(chunk);
+          });
+          child.on("close", () => resolve({ out }));
+        }),
+      ),
     );
-    const winners = runs.filter((r) => (r.stdout ?? "").startsWith("GOT:"));
+    const winners = runs.filter((r) => r.out.startsWith("GOT:"));
     expect(winners.length).toBe(1);
-    expect(winners[0]?.stdout).toBe(`GOT:${id}`);
+    expect(winners[0]?.out).toBe(`GOT:${id}`);
   });
 });
 
@@ -327,8 +354,9 @@ describe("reconcileOnce", () => {
     const handle = openWork(dir);
     const claimed = claim(handle, "w");
     if (claimed === null) throw new Error("nothing claimed");
-    // The durable record landed, then the process died before the ack.
-    writeWorkFile(dir, { ...claimed, payload: "the finished output" });
+    // The durable record of a FINISHED result landed, then the process died
+    // before it could update the row. The file is the only evidence.
+    writeWorkFile(dir, { ...claimed, state: "done", payload: "the finished output" });
     handle.close();
 
     const report = reconcileOnce({ stateDir: dir, actor: "ceo" });
@@ -345,5 +373,165 @@ describe("reconcileOnce", () => {
     expect(report.promoted).toEqual([]);
     expect(report.errors).toEqual([]);
     expect(formatReport(report)[0]).toContain("nothing to do");
+  });
+});
+
+
+describe("the bugs an independent review found", () => {
+  // Each of these is a regression test for a bug that SHIPPED in 38b3683 and
+  // was found by review, not by the existing suite. They are grouped together
+  // on purpose so the reason each exists stays legible.
+
+  test("claiming work does NOT mark it done", () => {
+    // THE BUG: propose() wrote a result file, and the reconciler used bare
+    // existsSync() as proof the work had been paid for. So every claimed item
+    // was completed on the next tick having run nothing at all. Measured: state
+    // went running -> done with zero execution.
+    const { dir, id } = seeded();
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const handle = openWork(dir);
+    claim(handle, "w");
+    handle.close();
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const after = openWork(dir);
+    expect(get(after, id)?.state).toBe("running");
+    expect(get(after, id)?.reason).toBeNull();
+    after.close();
+  });
+
+  test("a result file only exists once work actually finished", () => {
+    const { dir, id } = seeded();
+    // At propose time there is nothing to recover FROM.
+    expect(existsSync(join(dir, "work", `${id}.json`))).toBe(false);
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const handle = openWork(dir);
+    const claimed = claim(handle, "w");
+    if (claimed === null) throw new Error("nothing claimed");
+    // Still nothing, because claiming is not finishing.
+    expect(existsSync(join(dir, "work", `${id}.json`))).toBe(false);
+    commit(handle, id, claimed.lease_epoch, "done");
+    // NOW there is a record of a finished result.
+    expect(existsSync(join(dir, "work", `${id}.json`))).toBe(true);
+    handle.close();
+  });
+
+  test("recovery reads the file's own state, not just its existence", () => {
+    // A file that does not describe a finished result is not an ack.
+    const { dir, id } = seeded();
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const handle = openWork(dir);
+    const claimed = claim(handle, "w");
+    if (claimed === null) throw new Error("nothing claimed");
+    // A file describing work that is still IN FLIGHT.
+    writeWorkFile(dir, { ...claimed, state: "running" });
+    handle.close();
+    const report = reconcileOnce({ stateDir: dir, actor: "ceo" });
+    expect(report.resolved).toEqual([]);
+    const after = openWork(dir);
+    expect(get(after, id)?.state).toBe("running");
+    after.close();
+  });
+
+  test("RECLAIM fences the worker it reclaimed", () => {
+    // THE BUG: reclaim set state=failed but left lease_epoch alone, so the
+    // overrunning worker - which was never killed - still held a valid epoch
+    // and overwrote the reclaim verdict with its own success. The fence was a
+    // no-op against exactly the scenario it exists for.
+    const { dir, id } = seeded();
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const handle = openWork(dir);
+    const claimed = claim(handle, "slow");
+    if (claimed === null) throw new Error("nothing claimed");
+    reconcileOnce({ stateDir: dir, actor: "ceo", now: Date.now() + 600_000, budgetMs: 1000 });
+    expect(get(handle, id)?.state).toBe("failed");
+    // The slow worker wakes up and reports success. It must be refused.
+    const zombie = commit(handle, id, claimed.lease_epoch, "done", "the slow result");
+    expect(zombie.fenced).toBe(true);
+    expect(get(handle, id)?.state).toBe("failed");
+    handle.close();
+  });
+
+  test("an epoch is CONSUMED by the commit that used it", () => {
+    // THE BUG: lease_epoch was only ever bumped by claim, so a second writer
+    // holding the same epoch - a retried ack, a double signal - overwrote the
+    // first result. Last write won.
+    const { dir, id } = seeded();
+    reconcileOnce({ stateDir: dir, actor: "ceo" });
+    const handle = openWork(dir);
+    const claimed = claim(handle, "w");
+    if (claimed === null) throw new Error("nothing claimed");
+    expect(commit(handle, id, claimed.lease_epoch, "done", "first").ok).toBe(true);
+    const second = commit(handle, id, claimed.lease_epoch, "failed", "second writer, same epoch");
+    expect(second.ok).toBe(false);
+    expect(second.fenced).toBe(true);
+    expect(get(handle, id)?.reason).toBe("first");
+    handle.close();
+  });
+
+  test("a crafted id cannot write outside the work directory", () => {
+    // THE BUG: the id becomes a filename, and "propose({id: '../escaped'})"
+    // wrote outside state_dir. src/worktree.ts already had the right rule; this
+    // mirrors it.
+    const dir = scratch();
+    const handle = openWork(dir);
+    for (const bad of ["../escaped", "../../tmp/pwned", "a/b", "", ".", ".."]) {
+      expect(() =>
+        propose(handle, { from: "eng", to: "eng", kind: "t", payload: "p", goal: `g-${bad}`, id: bad }),
+      ).toThrow();
+    }
+    expect(existsSync(join(dir, "escaped.json"))).toBe(false);
+    handle.close();
+  });
+
+  test("a non-integer blast radius is refused, not silently nulled", () => {
+    // Number("abc") is NaN, which landed as NULL, and NULL passes every radius
+    // comparison - so global work could be dispatched by passing a typo.
+    const dir = scratch();
+    const handle = openWork(dir);
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      const result = propose(handle, {
+        from: "eng", to: "eng", kind: "t", payload: "p", goal: `g-${String(bad)}`, blastRadius: bad,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("whole number");
+    }
+    handle.close();
+  });
+
+  test("concurrent first-opens do not deadlock", async () => {
+    // THE BUG: PRAGMA journal_mode=WAL is a WRITE and ran before busy_timeout
+    // was set, so a concurrent opener failed instantly with "database is
+    // locked". Measured: 10 of 24 concurrent opens died.
+    const dir = scratch();
+    const script = `
+      import { openWork } from "${join(import.meta.dir, "..", "src", "work.ts")}";
+      const h = openWork(process.argv[2]);
+      h.close();
+      process.stdout.write("OK");
+    `;
+    // Outside the scratch dir, so the afterEach cleanup cannot remove the
+    // script while the spawned processes are still reading it.
+    const scriptPath = join(tmpdir(), `cod-opener-${Date.now()}.ts`);
+    writeFileSync(scriptPath, script);
+    const results = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        new Promise<string>((resolve) => {
+          const child = spawn(process.execPath, ["run", scriptPath, dir]);
+          let out = "";
+          let err = "";
+          child.stdout.on("data", (c) => {
+            out += String(c);
+          });
+          child.stderr.on("data", (c) => {
+            err += String(c);
+          });
+          // stderr is carried into the result so a failure says WHY, rather
+          // than reporting a bare count that gives nobody anything to act on.
+          child.on("close", () => resolve(err.trim() === "" ? out : `${out}|${err.split("\n")[0]}`));
+        }),
+      ),
+    );
+    rmSync(scriptPath, { force: true });
+    expect(results.filter((r) => r === "OK").length).toBe(12);
   });
 });

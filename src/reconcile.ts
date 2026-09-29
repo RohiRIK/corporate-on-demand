@@ -28,7 +28,7 @@
  *  4. Report, and do nothing else.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claim, commit, get, listWork, openWork, type WorkDb, type WorkItem } from "./work";
 
@@ -125,12 +125,37 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
     }
 
     // "Work was paid for but the ack was lost" - resolved by reading the file,
-    // never by re-running it. This is the case that would otherwise double-bill
-    // and double-execute a finished job.
+    // never by re-running it.
+    //
+    // The file must be PARSED, and its recorded outcome trusted only when it
+    // actually describes a finished result. An earlier version used bare
+    // existsSync(), and because propose() also wrote a file, every claimed item
+    // was reported `done` on the next tick having done no work at all. A file
+    // only exists once commit() has written it, which is what makes its
+    // existence meaningful in the first place.
     for (const item of listWork(handle, "running")) {
       const file = join(options.stateDir, "work", `${item.id}.json`);
-      if (!existsSync(file)) continue;
-      const outcome = commit(handle, item.id, item.lease_epoch, "done", "recovered from a durable result file after a lost acknowledgement");
+      let recorded: { state?: string } | null = null;
+      try {
+        recorded = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { state?: string }) : null;
+      } catch {
+        // Unreadable or half-written: not evidence of anything. Leave it alone;
+        // the budget rule will reclaim it.
+        recorded = null;
+      }
+      if (recorded === null) continue;
+      if (recorded.state !== "done" && recorded.state !== "failed") {
+        // A file that does not describe a finished result is not an ack.
+        report.unchanged += 1;
+        continue;
+      }
+      const outcome = commit(
+        handle,
+        item.id,
+        item.lease_epoch,
+        recorded.state,
+        "recovered from a durable result file after a lost acknowledgement",
+      );
       if (outcome.ok) report.resolved.push(item.id);
       else report.errors.push(`${item.id}: ${outcome.reason ?? "fenced"}`);
     }
