@@ -1,6 +1,13 @@
 # Changelog
 
-All notable changes to Corporate-on-Demand are documented here.
+All notable changes to `cod` are documented here.
+
+**Note on history.** Entries below `[3.8.0]` describe the earlier
+`corporate-on-demand` **skill** (departments, pipelines, CEO oversight). That
+skill has been removed from this repository - it is preserved in git history at
+`a549589` - and the project is now a single CLI. The entries are kept because
+they are a real record of what shipped, not because any of it is still
+installed.
 
 ---
 
