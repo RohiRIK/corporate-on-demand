@@ -134,6 +134,27 @@ describe("build outcomes", () => {
     }
   });
 
+  test("doctor names the vendor script when the opencode binary is absent", async () => {
+    // The binary is deliberately not committed - it is fetched by
+    // scripts/vendor-opencode.sh - so a fresh clone cannot build until that
+    // runs. doctor must say which script, not just "not available".
+    const { VENDORED_OPENCODE: vendored } = await import("../src/image");
+    const original = PATHS.opencode;
+    try {
+      PATHS.opencode = "/nonexistent/opencode";
+      const { doctor } = await import("../src/docker");
+      const runner = async (): Promise<RunResult> => ({ code: 0, stdout: "29.7.2", stderr: "" });
+      const config = configFor("img");
+      const report = await doctor(config, runner);
+      expect(report.opencodeVendored).toBe(false);
+      expect(report.remedy).toContain("vendor-opencode.sh");
+    } finally {
+      PATHS.opencode = original;
+    }
+    // And when it is present, no remedy is offered.
+    expect(existsSync(vendored)).toBe(true);
+  });
+
   test("imageExists reflects the inspect exit code", async () => {
     const present = async (): Promise<RunResult> => ({ code: 0, stdout: "[]", stderr: "" });
     const absent = async (): Promise<RunResult> => ({ code: 1, stdout: "", stderr: "" });

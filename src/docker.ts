@@ -13,6 +13,8 @@
  *    CLI attach to a foreign container and inherit its mounts and capabilities.
  */
 
+import { existsSync } from "node:fs";
+import { PATHS } from "./image";
 import type { Config } from "./config";
 import { RuntimeFailure, UnsupportedRuntimeError, UsageError } from "./errors";
 import type { Workspace } from "./workspace";
@@ -196,6 +198,10 @@ export interface DoctorReport {
   readonly bunCronAvailable: boolean;
   readonly image: string;
   readonly imageCached: boolean;
+  /** Whether the pinned opencode binary has been fetched. */
+  readonly opencodeVendored: boolean;
+  /** What to do about it, when something is missing. */
+  readonly remedy: string | undefined;
 }
 
 /**
@@ -218,6 +224,10 @@ export async function doctor(
   const available = await isDockerAvailable(runner);
   const version = available ? await dockerVersion(runner) : "unknown";
   const imageCheck = await runner("docker", ["image", "inspect", config.image], 10_000);
+  // The opencode binary is fetched, not committed, so a fresh clone cannot
+  // build until scripts/vendor-opencode.sh has run. Report it here rather than
+  // letting `cod up` fail later with a missing-file error.
+  const opencodeVendored = existsSync(PATHS.opencode);
   return {
     dockerAvailable: available,
     dockerVersion: version,
@@ -225,6 +235,10 @@ export async function doctor(
     bunCronAvailable: typeof (globalThis as { Bun?: { cron?: unknown } }).Bun?.cron === "function",
     image: config.image,
     imageCached: imageCheck.code === 0,
+    opencodeVendored,
+    remedy: opencodeVendored
+      ? undefined
+      : "run `sh scripts/vendor-opencode.sh` to fetch the pinned opencode binary",
   };
 }
 

@@ -1,4 +1,9 @@
 node_modules/
+
+# The 177 MB opencode binary is fetched by scripts/vendor-opencode.sh with a
+# pinned checksum, not committed. A binary blob in git is permanent and makes
+# every clone 177 MB heavier for no benefit.
+vendor/opencode/*/opencode
 .local/
 *.log
 .env

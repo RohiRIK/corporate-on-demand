@@ -264,6 +264,8 @@ const commands: Record<
         `bun       ${report.bunVersion}`,
         `bun.cron  ${report.bunCronAvailable ? "available" : "MISSING (need 1.3.12+)"}`,
         `image     ${report.image}  (${report.imageCached ? "cached" : "not built"})`,
+        `opencode  ${report.opencodeVendored ? "vendored" : "NOT vendored"}`,
+        ...(report.remedy ? [`fix       ${report.remedy}`] : []),
       ].join("\n"),
     );
     if (!report.dockerAvailable) {

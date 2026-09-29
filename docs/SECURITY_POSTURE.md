@@ -65,6 +65,45 @@ Stated as controls anywhere they appear, and named as such here:
   making injected instructions less likely to succeed. **Zero value against a determined
   injection.** Do not cite them as controls.
 
+## The controls, as verified on a running container
+
+The table below was read back off a live container with
+`docker inspect cod-sandbox-cod --format '{{json .HostConfig}}'`. Every row is
+re-checked by `scripts/cleanroom.sh` on each run, so a claim that drifts from
+the code fails the build rather than ageing quietly in a document.
+
+| Control | Enforced by | Verified by |
+|---|---|---|
+| Non-root | `USER bun` in the image, `--user 1000:1000` on run | `id -u` → `1000` |
+| All capabilities dropped | `--cap-drop ALL` | `CapDrop: ["ALL"]` |
+| No privilege gain | `--security-opt no-new-privileges` | `SecurityOpt: ["no-new-privileges"]` |
+| PID ceiling | `--pids-limit 512` | `PidsLimit: 512` |
+| Memory ceiling | `--memory 2g` | `Memory: 2147483648` |
+| No credentials | opencode runs unauthenticated | clean-room fails if an `auth.json` appears |
+| No Docker socket | never passed as a `-v` mount | clean-room fails if a bind names `docker.sock` |
+| Read-only workspace | `cod.json` bind-mounted `ro` | `/cod/cod.json` is `rw=false` |
+| Pinned base image | `oven/bun@sha256:8956c766…` | a test rejects the mutable tag form |
+| Pinned opencode | 1.18.31 vendored and copied in | `opencode --version` → `1.18.31` |
+| Cron cannot run unversioned | entrypoint and supervisor exit 2 without `Bun.cron` | `docker run oven/bun:1.3.9-debian` → exit 2 |
+
+That last row is the easiest to get wrong and the most important. Below Bun
+1.3.12 `Bun.cron` does not exist, so a scheduler that does not check would
+register nothing, report itself healthy, and silently never run a single job.
+The container refuses to pretend instead.
+
+## What is deliberately not enforced
+
+- **Agent-to-agent isolation.** One container, one filesystem, one uid. Any
+  agent can read and overwrite any other agent's files. Treat every agent as
+  fully trusted and fully capable of sabotaging the others.
+- **Write restriction.** Nothing stops an agent editing its own instructions.
+  A prompt is a request, not a boundary.
+- **Spend ceilings inside the container.** There is no accounting boundary
+  here; the only real control is the model provider's own quota.
+- **Egress filtering.** Outbound access is required, because agents must be
+  able to install what a project needs. That is also the exfiltration path, and
+  there is no allowlist.
+
 ## Residual risk, accepted
 
 1. **Egress = exfiltration channel.** Any source file readable in the container can be POSTed
