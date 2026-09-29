@@ -52,6 +52,24 @@ toolchain). Later runs reuse it:
 
 One container per workspace, not one per agent. All workers share it.
 
+`up` alone is the whole thing: the supervisor is the container's main process,
+so there is no second command. It waits for a live schedule and **fails** if
+one does not come up, rather than reporting success for a broken container.
+
+The container restarts itself if the supervisor dies. Note that `docker kill`
+deliberately does *not* trigger a restart — if you killed it, you meant to stop
+it.
+
+**The timezone matters.** Docker defaults a container to UTC and `Bun.cron`
+fires on local time, so a workspace with no `timezone` set would run every job
+three hours off. `cod init` writes this host's zone; `cod status` always shows
+it:
+
+```
+$ cod status
+  timezone Asia/Jerusalem (+03:00)
+```
+
 ## See what happened
 
 Every event is written to `<state-dir>/logs/cod.jsonl` and survives the

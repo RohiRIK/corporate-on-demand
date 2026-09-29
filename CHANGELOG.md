@@ -50,6 +50,19 @@ not yet tagged or released.
   routing, merge policy, budget ceilings, cron visibility, cross-agent locking)
   and why each one was pushed out of this pass.
 
+### Fixed during this stage
+
+- **Every cron job was firing hours off.** Docker defaults a container to UTC and
+  `Bun.cron` fires on local time; nothing set a zone, so `0 2 * * *` ran at 05:00
+  local and reported success. The workspace now carries a `timezone`, validated
+  with `Intl`, written from the host by `cod init` and shown by `cod status`.
+- **A fresh workspace crash-looped.** With zero enabled crons nothing held Bun's
+  event loop open, so the supervisor exited at once and `--restart` restarted it
+  forever. `cod up` on a brand new workspace produced an unusable container.
+- `cod supervise` passed a shell script to `bun run`, which tried to parse it as
+  JavaScript; the entrypoint also discarded the reason a workspace failed to
+  parse, replacing it with a bare "refusing to guess".
+
 ### Known limitations
 
 - **A scheduled job runs an `echo`, not real work.** The full path is real — a
@@ -62,7 +75,14 @@ not yet tagged or released.
   is the accepted cost of "one container, many agents"; see
   `docs/SECURITY_POSTURE.md`.
 - `Bun.cron` does not support `@every`. Use a standard 5-field expression.
-- No agent rate limit, and no inter-agent file locking.
+- No inter-agent file locking.
+- Log redaction catches known credential *shapes*. A secret in prose, a novel
+  token format, or one split across two lines is not caught; it is a safety net,
+  not a guarantee. `cod.json` is not rewritten — redaction covers what the system
+  writes, not what you type.
+- Supervisor auto-restart is not bounded. A supervisor that crashes on startup
+  would restart forever; the new `runId` in `cod logs` makes that visible, but
+  nothing caps it.
 
 ---
 
