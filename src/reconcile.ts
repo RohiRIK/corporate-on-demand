@@ -30,7 +30,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { claim, commit, get, listWork, openWork, type WorkDb, type WorkItem } from "./work";
+import { claim, commit, get, listWork, openWork, reject, type WorkDb, type WorkItem } from "./work";
 
 /** Default per-item budget. Generous, because the cost of a wrong timeout is asymmetric. */
 export const DEFAULT_BUDGET_MS = 300_000;
@@ -87,14 +87,14 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
         // A proposal that outlived the budget it was waiting for is not
         // urgent work, it is a stale idea. Failing it keeps the queue honest.
         if (!addresseeOk(item.to_agent)) {
-          const outcome = commit(handle, item.id, item.lease_epoch, "failed", `unknown addressee: ${item.to_agent}`);
+          const outcome = reject(handle, item.id, `unknown addressee: ${item.to_agent}`);
           if (outcome.ok) report.rejected.push(item.id);
           else report.errors.push(`${item.id}: ${outcome.reason ?? "fenced"}`);
           continue;
         }
         // Global work is not runnable by a department, whatever it proposed.
         if (needsCeo(item)) {
-          const outcome = commit(handle, item.id, item.lease_epoch, "failed", "blast radius is global; the CEO must dispatch this itself");
+          const outcome = reject(handle, item.id, "blast radius is global; the CEO must dispatch this itself");
           if (outcome.ok) report.rejected.push(item.id);
           else report.errors.push(`${item.id}: ${outcome.reason ?? "fenced"}`);
           continue;

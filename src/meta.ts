@@ -17,7 +17,7 @@ COMMANDS:
   logs      Read the event log — the answer to "what happened"
   results   Read persisted job results — what ran, and did it work
   purge     Remove the work volume and every commit in it (--purge confirms)
-  work      The work ledger: list, propose, claim, commit
+  work      The work ledger: list, propose, claim, commit (--status filters the list)
   reconcile Run the CEO's reconciler once (also runs on the supervisor's tick)
   config    Show resolved configuration and where each value came from
   doctor    Check that the host can run a container
@@ -47,6 +47,7 @@ OPTIONS:
       --purpose <text>    Override the company purpose
       --workspace <path>  Workspace file, default ./cod.json
       --state <path>      State directory, default ~/.local/share/cod
+      --status <state>    Filter the work list by work status
       --image <image>     Container image tag, default ${"cod-sandbox:1.3.12"}
       --format <fmt>      table or json
 

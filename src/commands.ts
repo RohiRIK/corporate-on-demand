@@ -47,6 +47,8 @@ export interface CommandFlags {
   readonly failed?: boolean | undefined;
   /** Confirm a destructive `cod purge`. */
   readonly purge?: boolean | undefined;
+  /** Filter a ledger listing by work status. Not --state: that is the state DIRECTORY. */
+  readonly status?: string | undefined;
   /** Who is claiming. */
   readonly owner?: string | undefined;
   /** The lease epoch being committed against - the fencing token. */
@@ -70,6 +72,12 @@ export interface CommandFlags {
 }
 
 export type Print = (config: Config, data: unknown, table: () => string) => void;
+
+/** Keep a column from destroying the alignment of everything after it. */
+function truncate(text: string, width: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= width ? flat : `${flat.slice(0, width - 1)}\u2026`;
+}
 
 function configFrom(flags: CommandFlags): Config {
   const config = loadConfig(flags);
@@ -347,8 +355,12 @@ const commands: Record<
     const handle = openWork(config.stateDir);
     try {
       if (sub === "list") {
-        const state = typeof flags.state === "string" ? flags.state : undefined;
-        const items = listWork(handle, state as never);
+        // --state is the global state-DIRECTORY flag, so it cannot double as a
+        // status filter. It did: "work list --state proposed" silently listed
+        // nothing AND created a directory named "proposed" in the cwd. --status
+        // is unambiguous and cannot collide.
+        const status = typeof flags.status === "string" ? flags.status : undefined;
+        const items = listWork(handle, status as never);
         print(
           config,
           items,
@@ -358,10 +370,14 @@ const commands: Record<
               : items
                   .map(
                     (r) =>
-                      `${r.id}  ${r.state.padEnd(9)} ${r.from_agent} -> ${r.to_agent}` +
+                      // The GOAL is included, not just the identifiers: a ledger
+                      // that cannot be read to answer "is this the same work?"
+                      // is useless for the one job it exists to do.
+                      `${r.id}  ${r.state.padEnd(9)} ${truncate(r.payload, 48).padEnd(48)} ` +
+                      `${r.from_agent} -> ${r.to_agent}` +
                       `  epoch=${r.lease_epoch} attempts=${r.attempts}` +
                       (r.blast_radius === null ? "" : `  blast=${r.blast_radius}`) +
-                      (r.reason === null ? "" : `  (${r.reason})`),
+                      (r.reason === null ? "" : `  (${truncate(r.reason, 40)})`),
                   )
                   .join("\n"),
         );

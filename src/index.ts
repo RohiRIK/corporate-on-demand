@@ -41,6 +41,7 @@ async function main(argv: string[]): Promise<void> {
       version: { type: "boolean", short: "v" },
       json: { type: "boolean" },
       state: { type: "string" },
+      status: { type: "string" },
       image: { type: "string" },
       format: { type: "string" },
       workspace: { type: "string" },
@@ -80,6 +81,7 @@ async function main(argv: string[]): Promise<void> {
 
   const flags = {
     state: values.state,
+    status: values.status,
     image: values.image,
     format: values.format,
     workspace: values.workspace,

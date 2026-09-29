@@ -7,3 +7,10 @@ vendor/opencode/*/opencode
 .local/
 *.log
 .env
+
+# Runtime artefacts. The work ledger lives in the state directory and
+# is a cache over the files beside it; a committed copy is a stale copy,
+# and it can be a scratch database written by a mistyped --state flag.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

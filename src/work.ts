@@ -83,7 +83,6 @@ CREATE TABLE IF NOT EXISTS work (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_work_novelty ON work(novelty_key);
 CREATE INDEX IF NOT EXISTS ix_work_claim ON work(state, created_seq);
-CREATE TABLE IF NOT EXISTS epoch (n INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 `;
 
@@ -137,7 +136,6 @@ export function openWork(stateDir: string): WorkDb {
   // check-then-insert was a race: two openers both saw an empty table and one
   // lost with a UNIQUE violation on meta.k.
   database.transaction(() => {
-    database.run("INSERT OR IGNORE INTO epoch (n) VALUES (0)");
     database.run("INSERT OR IGNORE INTO meta (k, v) VALUES ('created_seq', '0')");
   })();
   return { db: database, close: (): void => database.close() };
@@ -356,6 +354,25 @@ export function claim(handle: WorkDb, owner: string, toAgent?: string): WorkItem
     .all(...(toAgent === undefined ? [owner, Date.now()] : [owner, Date.now(), toAgent])) as WorkItem[];
   if (rows.length === 0) return null;
   return rows[0] ?? null;
+}
+
+/**
+ * Refuse a proposal. Distinct from `failed`, which means work RAN and did not
+ * succeed - a refused proposal never ran at all, and collapsing the two loses
+ * the difference between "this was attempted" and "this was not permitted".
+ *
+ * `rejected` existed in the state union from the start and was never used,
+ * which is how a design decision turns into decoration: nothing tested it,
+ * because nothing could observe it.
+ */
+export function reject(handle: WorkDb, id: string, reason: string): CommitOutcome {
+  const result = handle.db
+    .query("UPDATE work SET state = 'rejected', reason = ?, lease_owner = NULL WHERE id = ? RETURNING *")
+    .get(reason, id) as WorkItem | null;
+  if (result === null) {
+    return { ok: false, fenced: false, item: get(handle, id), reason: "no such work item" };
+  }
+  return { ok: true, fenced: false, item: result };
 }
 
 /**

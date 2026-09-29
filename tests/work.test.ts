@@ -304,7 +304,9 @@ describe("reconcileOnce", () => {
     const report = reconcileOnce({ stateDir: dir, actor: "ceo" });
     expect(report.rejected).toEqual([id]);
     const handle = openWork(dir);
-    expect(get(handle, id)?.state).toBe("failed");
+    // `rejected`, not `failed`: a refused proposal never ran, and conflating
+    // the two loses the difference between "not permitted" and "did not work".
+    expect(get(handle, id)?.state).toBe("rejected");
     expect(get(handle, id)?.reason).toContain("CEO");
     handle.close();
   });
