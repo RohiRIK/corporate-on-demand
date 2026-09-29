@@ -8,6 +8,7 @@
 
 import { readFileSync } from "node:fs";
 import { Workspace } from "./workspace";
+import { echoTask } from "./task";
 import { assertCronSupport, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
@@ -39,10 +40,11 @@ function main(): void {
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {
     report: log,
     run: async (cron): Promise<void> => {
-      // Task execution lands in the next phase. Until then a firing job logs
-      // that it fired and completes, which is what makes the schedule
-      // observable without pretending the work is being done.
-      log(`job "${cron.name}" -> agent ${cron.agent}: ${cron.task} (execution not wired yet)`);
+      // The job now runs, and its result comes back out. What it runs is an
+      // echo - see src/task.ts for why that is the whole implementation at
+      // this stage and what replaces it.
+      const result = echoTask(cron);
+      log(`job "${result.cron}" -> ${result.output}`);
     },
   });
 

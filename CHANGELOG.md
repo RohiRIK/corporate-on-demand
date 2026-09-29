@@ -38,19 +38,23 @@ not yet tagged or released.
 - **`verify.sh`** and **`scripts/cleanroom.sh`** — the first gates typecheck,
   tests and build inputs; the second runs the full flow from an empty directory
   through to a real agent producing output.
-- **`docs/OPEN_QUESTIONS.md`** — records what is deliberately undecided,
-  including that cron schedules jobs but does not yet execute them.
+- **`docs/OPEN_QUESTIONS.md`** — records what is deliberately deferred (model
+  routing, merge policy, budget ceilings, cron visibility, cross-agent locking)
+  and why each one was pushed out of this pass.
 
 ### Known limitations
 
-- **A firing cron job does not dispatch an agent.** The schedule is real and
-  verified end to end; task execution is not wired. A firing job logs
-  `execution not wired yet` rather than pretending to work.
+- **A scheduled job runs an `echo`, not real work.** The full path is real — a
+  `Bun.cron` tick reaches a named agent's task and the result comes back out —
+  but the task itself echoes its input. The real dispatcher replaces `echoTask`
+  in `src/task.ts` and nothing above it changes. An echo was chosen because it
+  cannot fail for interesting reasons: if a scheduled job breaks, the cause is
+  the scheduling, not the work.
 - **No agent-to-agent isolation.** One container, one filesystem, one uid. This
   is the accepted cost of "one container, many agents"; see
   `docs/SECURITY_POSTURE.md`.
 - `Bun.cron` does not support `@every`. Use a standard 5-field expression.
-- No stdout size cap, no agent rate limit, and no inter-agent file locking.
+- No agent rate limit, and no inter-agent file locking.
 
 ---
 

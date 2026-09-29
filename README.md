@@ -54,7 +54,7 @@ unauthenticated.
 - [docs/SECURITY_POSTURE.md](docs/SECURITY_POSTURE.md) — what is actually
   enforced versus what is only convention
 - [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — what is deliberately
-  unfinished, including that cron schedules jobs but does not yet execute them
+  deferred, and why. A scheduled job runs an `echo` rather than real work.
 - [CHANGELOG.md](CHANGELOG.md) — the `Unreleased` section covers the CLI
 
 ```sh
