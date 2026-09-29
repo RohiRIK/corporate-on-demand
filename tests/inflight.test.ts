@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, test, afterEach } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -67,14 +67,14 @@ describe("begin and settle", () => {
   test("settling removes it, so a completed job is not reported as lost", () => {
     const dir = scratch();
     beginJob(dir, cron, 1_700_000_000_000);
-    settleJob(dir, "nightly", 1_700_000_000_000, true, "done");
+    settleJob(dir, beginJob(dir, cron, 1_700_000_000_000));
     expect(claimInflight(dir)).toHaveLength(0);
   });
 
   test("a FAILED job is also settled, and recorded as failed", () => {
     const dir = scratch();
     beginJob(dir, cron, 1_700_000_000_000);
-    settleJob(dir, "nightly", 1_700_000_000_000, false, "it broke");
+    settleJob(dir, beginJob(dir, cron, 1_700_000_000_000));
     const results = claimInflight(dir);
     expect(results).toHaveLength(0);
   });
@@ -155,5 +155,48 @@ describe("the file format", () => {
     // file would be worse than losing one entry.
     writeFileSync(join(dir, "inflight", "00000000000000000.json"), "{ half", "utf8");
     expect(claimInflight(dir).length).toBeGreaterThanOrEqual(1);
+  });
+  test("settling one cron does not settle another whose name contains it", () => {
+    const dir = scratch();
+    // Measured bug: settling `build` deleted `build-docs`'s marker and left its
+    // own, because the old code searched for a filename *containing* the cron
+    // name and deleted the first match - readdir order chose the victim. The
+    // `build` job then reported as abandoned for ever.
+    const a: Cron = { name: "build", agent: "eng", task: "t", schedule: "0 3 * * *", enabled: true };
+    const b: Cron = { name: "build-docs", agent: "eng", task: "t", schedule: "0 4 * * *", enabled: true };
+    const markerA = beginJob(dir, a, 1_700_000_000_000);
+    const markerB = beginJob(dir, b, 1_700_000_000_100);
+    expect(markerA).not.toBeNull();
+    expect(markerB).not.toBeNull();
+    if (markerA === null || markerB === null) throw new Error("marker not written");
+
+    settleJob(dir, markerA);
+
+    const left = readdirSync(join(dir, "inflight"));
+    expect(left).toEqual([markerB]);
+    expect(left.some((n) => n === markerA)).toBe(false);
+  });
+
+  test("settling one run of the same cron leaves the other in flight", () => {
+    const dir = scratch();
+    // A name search could never do this: two concurrent runs of one cron are
+    // only distinguishable by the exact marker.
+    const c: Cron = { name: "nightly", agent: "eng", task: "t", schedule: "0 3 * * *", enabled: true };
+    const first = beginJob(dir, c, 1_700_000_000_000);
+    const second = beginJob(dir, c, 1_700_000_000_500);
+    expect(second).not.toBeNull();
+    if (second === null) throw new Error("marker not written");
+    settleJob(dir, first);
+    const left = readdirSync(join(dir, "inflight"));
+    expect(left).toEqual([second]);
+  });
+
+  test("settling a null marker is a no-op, not a crash", () => {
+    const dir = scratch();
+    // beginJob returns null when it could not write a marker; there is then
+    // nothing to settle, which is a normal outcome.
+    expect(() => {
+      settleJob(dir, null);
+    }).not.toThrow();
   });
 });

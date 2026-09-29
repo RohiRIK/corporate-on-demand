@@ -123,7 +123,7 @@ function main(): void {
       // Announce BEFORE the work. If the supervisor dies mid-job, this marker is
       // the only evidence it happened at all - absence of a result is the signal
       // real schedulers use, and it is the whole point of src/inflight.ts.
-      beginJob(STATE_DIR, cron);
+      const marker = beginJob(STATE_DIR, cron);
       // Prune here rather than on every write, so a busy schedule does not
       // re-scan the directory 500 times a minute.
       const { pruneResults } = await import("./results");
@@ -151,7 +151,7 @@ function main(): void {
           },
           { stateDir: STATE_DIR, seq: runSeq },
         );
-        settleJob(STATE_DIR, cron.name);
+        settleJob(STATE_DIR, marker);
         runSeq += 1;
       } catch (error) {
         const message = (error as Error).message;
@@ -170,7 +170,7 @@ function main(): void {
           },
           { stateDir: STATE_DIR, seq: runSeq },
         );
-        settleJob(STATE_DIR, cron.name);
+        settleJob(STATE_DIR, marker);
         runSeq += 1;
       }
     },

@@ -67,7 +67,7 @@ function fileName(startedAt: number, cron: string): string {
  * that this one job becomes untraceable, which is strictly better than not
  * running.
  */
-export function beginJob(stateDir: string, cron: Cron, now: number = Date.now()): void {
+export function beginJob(stateDir: string, cron: Cron, now: number = Date.now()): string | null {
   try {
     const path = dir(stateDir);
     mkdirSync(path, { recursive: true });
@@ -77,36 +77,44 @@ export function beginJob(stateDir: string, cron: Cron, now: number = Date.now())
       task: cron.task,
       startedAt: now,
     };
-    writeFileSync(join(path, fileName(now, cron.name)), `${JSON.stringify(record)}\n`, "utf8");
+    const name = fileName(now, cron.name);
+    writeFileSync(join(path, name), `${JSON.stringify(record)}\n`, "utf8");
+    return name;
   } catch {
-    // See above: untraceable beats not running.
+    // See above: untraceable beats not running. Null says "there is no marker
+    // to settle later", which is the same fact, carried precisely.
+    return null;
   }
 }
 
-/** Remove a job's marker once it has finished, successfully or not. */
-export function settleJob(
-  stateDir: string,
-  cronName: string,
-  now: number = Date.now(),
-  ok?: boolean,
-  output?: string,
-): void {
+/**
+ * Remove a job's marker once it has finished, successfully or not.
+ *
+ * Takes the exact marker name returned by `beginJob`, not the cron's name.
+ *
+ * The earlier version searched the directory for any filename *containing* the
+ * cron name and deleted the first match. That is wrong in a way that does not
+ * announce itself: given crons named `build` and `build-docs` both in flight,
+ * settling `build` deleted `build-docs`'s marker and left its own behind,
+ * because readdir order decided the victim. The `build` job then stayed
+ * "abandoned" for ever while `build-docs` lost the evidence it was still
+ * running. Measured, not theoretical.
+ *
+ * Passing the exact name also settles two concurrent runs of the SAME cron
+ * correctly, which a name search could never do.
+ */
+export function settleJob(stateDir: string, marker: string | null): void {
+  // Null means beginJob could not write a marker, so there is nothing to
+  // remove. That is a normal outcome, not an error.
+  if (marker === null) return;
   try {
     const path = dir(stateDir);
     if (!existsSync(path)) return;
-    for (const name of readdirSync(path)) {
-      if (name.endsWith(".json") && name.includes(cronName)) {
-        unlinkSync(join(path, name));
-        return;
-      }
-    }
+    unlinkSync(join(path, marker));
   } catch {
     // A marker left behind becomes an "abandoned" report for a job that
     // actually finished - noisy, not dangerous.
   }
-  void now;
-  void ok;
-  void output;
 }
 
 /** Every job currently announced as in flight. */
