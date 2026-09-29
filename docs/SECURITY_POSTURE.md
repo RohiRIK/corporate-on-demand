@@ -106,6 +106,15 @@ The container refuses to pretend instead.
 
 ## Residual risk, accepted
 
+0. **Logs contain raw job output, unredacted.** `<stateDir>/logs/cod.jsonl`
+   holds whatever a job printed, verbatim. Today that is an `echo` of a task
+   string, so the exposure is nil. The moment agents do real work, this file
+   becomes a place credentials, tokens and source can land, and **redaction
+   stops being an improvement and becomes a requirement**. It is deliberately
+   not implemented now: a redactor written before there is real output to redact
+   would be untested, and an untested redactor is a false claim of safety. Log
+   rotation bounds the file at `5 MB x 4` per workspace.
+
 1. **Egress = exfiltration channel.** Any source file readable in the container can be POSTed
    out. Mitigation would be `--network none` plus a package proxy/allowlist — explicitly out of
    scope. Accepted.

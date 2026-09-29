@@ -46,6 +46,9 @@ async function main(argv: string[]): Promise<void> {
       workspace: { type: "string" },
       yes: { type: "boolean" },
       rebuild: { type: "boolean" },
+      level: { type: "string" },
+      run: { type: "string" },
+      last: { type: "string" },
       company: { type: "string" },
       purpose: { type: "string" },
     },
@@ -72,6 +75,9 @@ async function main(argv: string[]): Promise<void> {
     rebuild: values.rebuild,
     company: values.company,
     purpose: values.purpose,
+    level: values.level,
+    run: values.run,
+    last: values.last === undefined ? undefined : Number(values.last),
   };
 
   await runCommand(command, positionals.slice(1), flags, print);

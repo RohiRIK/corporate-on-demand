@@ -52,6 +52,27 @@ toolchain). Later runs reuse it:
 
 One container per workspace, not one per agent. All workers share it.
 
+## See what happened
+
+Every event is written to `<state-dir>/logs/cod.jsonl` and survives the
+container:
+
+```sh
+./src/index.ts logs                 # newest first
+./src/index.ts logs --level warn    # only warnings and errors
+./src/index.ts logs --last 20
+./src/index.ts logs --run <id>      # one supervisor or job, end to end
+./src/index.ts logs --json | jq .
+```
+
+Run a job, `cod down`, and the record is still there. Each event carries a
+timestamp, a level, and a `runId` — the id correlates one job's start, its
+firing, and its result, which is what makes a busy schedule readable instead of
+four interleaved stories.
+
+The file rotates at 5 MB and keeps 3 archives, so a long-running workspace
+cannot fill the disk through its own logging.
+
 ## Run a scheduled job
 
 ```sh

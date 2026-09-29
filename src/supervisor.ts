@@ -7,14 +7,41 @@
  */
 
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Workspace } from "./workspace";
 import { echoTask } from "./task";
+import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { assertCronSupport, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
+const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
 
-function log(line: string): void {
-  process.stdout.write(`[supervisor] ${line}\n`);
+/**
+ * The supervisor's run id, fixed for the life of the process.
+ *
+ * Every event it emits carries it, so `cod logs --run <id>` reconstructs one
+ * supervisor's whole life - including across a restart, where a new id
+ * appears and the gap between the two is itself the evidence.
+ */
+const RUN_ID = newRunId();
+
+/**
+ * A logger that writes JSONL to the state directory and mirrors to stdout.
+ *
+ * The file is the record that survives the container; stdout is for whoever is
+ * watching. Both go through the same sink so the two can never disagree.
+ */
+const logger = createLogger({
+  sink: fileSink(join(LOG_DIR, "cod.jsonl")),
+  level: (process.env["COD_LOG_LEVEL"] as Level | undefined) ?? "info",
+  runId: RUN_ID,
+});
+
+/** Report to the logger and keep the terminal usable. */
+function log(line: string, level: Level = "info"): void {
+  logger[level](line);
+  const prefix = level === "info" ? "" : `${level}: `;
+  process.stdout.write(`[supervisor] ${prefix}${line}\n`);
 }
 
 function main(): void {

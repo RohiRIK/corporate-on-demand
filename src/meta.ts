@@ -14,6 +14,7 @@ COMMANDS:
   status    Report container, worker and toolchain state
   image     Build the workspace image without starting anything
   supervise Run the in-container cron supervisor
+  logs      Read the event log — the answer to "what happened"
   config    Show resolved configuration and where each value came from
   doctor    Check that the host can run a container
   help      Show this help
@@ -24,6 +25,9 @@ OPTIONS:
       --json              Print JSON instead of a table
       --yes               Accept every default; never prompt (for scripts)
       --rebuild           Rebuild the image even when it is already present
+      --level <level>     Minimum level for cod logs: debug, info, warn, error
+      --run <id>          Show only events from one run
+      --last <n>          Show at most n events
       --company <name>    Override the company name
       --purpose <text>    Override the company purpose
       --workspace <path>  Workspace file, default ./cod.json

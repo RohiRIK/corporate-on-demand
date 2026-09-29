@@ -8,6 +8,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig, ensureStateDir, ensureParentDir, type Config } from "./config";
 import { RuntimeFailure, UsageError } from "./errors";
 import { isDockerAvailable } from "./docker";
@@ -32,6 +33,12 @@ export interface CommandFlags {
   readonly purpose?: string | undefined;
   /** Rebuild the image even when it is already present. */
   readonly rebuild?: boolean | undefined;
+  /** Minimum level for `cod logs`. */
+  readonly level?: string | undefined;
+  /** Correlate `cod logs` to one supervisor or job run. */
+  readonly run?: string | undefined;
+  /** Return at most this many events. */
+  readonly last?: number | undefined;
 }
 
 export type Print = (config: Config, data: unknown, table: () => string) => void;
@@ -250,6 +257,31 @@ const commands: Record<
           `image           ${config.image}  (${config.sources.image})`,
           `format          ${config.format}  (${config.sources.format})`,
         ].join("\n"),
+    );
+  },
+
+  /**
+   * Read the event log.
+   *
+   * This is the answer to "what happened". The file lives in the state
+   * directory, so it survives the container: run a job, destroy the container,
+   * and the record is still here.
+   */
+  async logs(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const { formatEvent, readEvents } = await import("./logs");
+    const events = readEvents(join(config.stateDir, "logs"), {
+      level: flags.level as never,
+      runId: flags.run,
+      limit: flags.last,
+    });
+    print(
+      config,
+      events,
+      () =>
+        events.length === 0
+          ? "no log events yet - is the container running?"
+          : events.map((event) => formatEvent(event)).join("\n"),
     );
   },
 
