@@ -1,0 +1,20 @@
+{
+  "name": "engineering",
+  "workers": [
+    {
+      "name": "builder",
+      "role": "builds",
+      "model": "opencode/space-bunny-free"
+    },
+    {
+      "name": "reviewer",
+      "role": "reviews",
+      "model": "opencode/space-bunny-free"
+    },
+    {
+      "name": "tester",
+      "role": "tests",
+      "model": "opencode/space-bunny-free"
+    }
+  ]
+}
