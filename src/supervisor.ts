@@ -170,6 +170,18 @@ function main(): void {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // With no enabled jobs there is nothing to hold the event loop open, so this
+  // process exits immediately - and `--restart` turns that into a crash loop
+  // that churns the host forever. A freshly initialised workspace has zero
+  // crons, so this is the DEFAULT case, not an edge case.
+  //
+  // Hold the loop with a long timer, and say why: silence here would look
+  // identical to a healthy idle supervisor.
+  if (jobNames.length === 0) {
+    log("no enabled cron jobs; holding the container open until one is added", "warn");
+  }
+  setInterval(() => beat(jobNames), 30_000);
 }
 
 main();

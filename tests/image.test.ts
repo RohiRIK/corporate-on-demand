@@ -118,6 +118,17 @@ describe("image inputs", () => {
     expect(argv).not.toContain("--rm");
   });
 
+  test("the supervisor holds the loop open with no jobs, or --restart loops", async () => {
+    // A freshly initialised workspace has ZERO enabled crons. With nothing
+    // registered there is no pending work to hold Bun's event loop open, so the
+    // supervisor exits immediately - and --restart turns that into an endless
+    // crash loop churning the host. Measured before the fix: RestartCount 5
+    // within seconds of `cod up`, and the container was unusable.
+    const supervisor = await Bun.file("src/supervisor.ts").text();
+    expect(supervisor).toContain("setInterval");
+    expect(supervisor).toContain("no enabled cron jobs");
+  });
+
   test("CI pins the runtime, and does NOT run the clean-room", async () => {
     // A CI that can pass on a version the container does not use proves
     // nothing, and one that goes red when a free provider is down is one
