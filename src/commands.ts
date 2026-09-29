@@ -318,8 +318,7 @@ const commands: Record<
   },
 
   /**
-   /**
-    * Remove a workspace's work volume, and everything committed in it.
+   * Remove a workspace's work volume, and everything committed in it.
     *
     * The counterpart to `down`, which deliberately KEEPS the volume so an
     * agent's commits survive a restart. Refuses without `--purge`, because the
