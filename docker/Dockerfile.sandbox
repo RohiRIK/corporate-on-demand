@@ -31,20 +31,43 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # and no runtime is resolved at build time.
 COPY --chmod=755 vendor/opencode/1.18.31/opencode /usr/local/bin/opencode
 
-# The unprivileged user every agent runs as. UID 1000 matches the --user flag
-# the CLI passes, so the two cannot drift apart silently.
-RUN useradd --create-home --uid 1000 --shell /bin/bash cod
+# The unprivileged user every agent runs as.
+#
+# The base image already ships a `bun` user at UID 1000, so there is nothing
+# to create: trying to add another one fails with "UID 1000 is not unique".
+# Reusing the existing user is better than fighting it, and it keeps the UID
+# aligned with the --user 1000:1000 the CLI passes. Adding a *different* uid
+# here would mean the two could drift apart silently.
+RUN id -u bun | grep -qx 1000 \
+    || (echo "FATAL: expected the base image to have uid 1000, found $(id -u bun)" && exit 1)
 
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # The supervisor reads the mounted workspace and registers its cron jobs on
 # Bun.cron. It is run via docker exec rather than from the entrypoint, so a
 # crash is visible as a failed exec instead of a restart loop.
-COPY --chmod=644 src/supervisor.ts src/workspace.ts src/scheduler.ts src/errors.ts /usr/local/lib/cod/
-RUN printf '#!/bin/sh\nexec bun run /usr/local/lib/cod/supervisor.ts\n' > /usr/local/bin/supervisor \
-    && chmod 755 /usr/local/bin/supervisor
+# The supervisor is BUNDLED, not copied. Copying loose .ts files pulls in the
+# whole import graph, and the container has no node_modules to resolve it
+# from - the copy compiled fine and then died on the first import.
+# `bun build --target=bun` inlines all 99 modules into one readable file.
+COPY package.json bun.lock ./
+COPY src ./src
+RUN bun install --production --frozen-lockfile
+RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/supervisor.js
 
-USER cod
+# Readable by the unprivileged user the container runs as: a root-owned file
+# behind a root-owned directory is unreadable to `bun`.
+RUN chmod -R 755 /usr/local/lib/cod
+# `sh -n` parses the file at build time, so a malformed wrapper fails the build
+# instead of the first cron run.
+RUN { \
+      printf '%s\n' '#!/bin/sh'; \
+      printf '%s\n' 'exec bun run /usr/local/lib/cod/supervisor.js'; \
+    } > /usr/local/bin/supervisor \
+    && chmod 755 /usr/local/bin/supervisor \
+    && sh -n /usr/local/bin/supervisor
+
+USER bun
 WORKDIR /work
 
 # `git config --system` as a non-root user fails; the safe.directory setting is

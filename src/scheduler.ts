@@ -57,26 +57,48 @@ export function scheduleWorkspace(
   const report = options.report ?? ((line: string): void => void process.stdout.write(`${line}\n`));
 
   const handles: ScheduledHandle[] = [];
+  const rejected: Cron[] = [];
   const enabled = workspace.crons.filter((cron) => cron.enabled);
 
   for (const cron of enabled) {
-    const handle = Bun.cron(cron.schedule, async (): Promise<void> => {
-      const started = now();
-      report(`[cron] ${cron.name} firing at ${new Date(started).toISOString()}`);
-      try {
-        await run(cron);
-        report(`[cron] ${cron.name} finished in ${now() - started}ms`);
-      } catch (error) {
-        // A failing job must not take the scheduler down with it, or one bad
-        // cron silently disables every other cron in the workspace.
-        report(`[cron] ${cron.name} failed: ${(error as Error).message}`);
-      }
-      // Bun.cron's stop() is void; the return type of the callback must be too.
-    });
+    // Bun.CronJob is the handle; ReturnType<typeof Bun.cron> resolves to the
+    // callback's Promise because of the overloaded signature.
+    let handle: Bun.CronJob;
+    try {
+      handle = Bun.cron(cron.schedule, async (): Promise<void> => {
+        const started = now();
+        report(`[cron] ${cron.name} firing at ${new Date(started).toISOString()}`);
+        try {
+          await run(cron);
+          report(`[cron] ${cron.name} finished in ${now() - started}ms`);
+        } catch (error) {
+          // A failing job must not take the scheduler down with it, or one bad
+          // cron silently disables every other cron in the workspace.
+          report(`[cron] ${cron.name} failed: ${(error as Error).message}`);
+        }
+        // Bun.cron's stop() is void; the return type of the callback must be too.
+      });
+    } catch (error) {
+      // Bun.cron throws on an expression it does not understand, and it does
+      // NOT support @every. Letting that escape the loop would leave every
+      // later job unregistered while the ones before it kept running - a
+      // partial schedule that looks healthy. One bad job is reported and
+      // skipped; the rest still register.
+      report(`[cron] ${cron.name} REJECTED (${JSON.stringify(cron.schedule)}): ${(error as Error).message}`);
+      rejected.push(cron);
+      continue;
+    }
     handles.push({ stop: (): void => void handle.stop() });
   }
 
   report(`[cron] registered ${handles.length} job(s): ${enabled.map((c) => c.name).join(", ") || "none"}`);
+  if (rejected.length > 0) {
+    report(
+      `[cron] WARNING: ${rejected.length} job(s) were rejected: ` +
+        `${rejected.map((c) => c.name).join(", ")}. Bun.cron uses standard 5-field ` +
+        `cron expressions and does NOT support @every.`,
+    );
+  }
   return handles;
 }
 
