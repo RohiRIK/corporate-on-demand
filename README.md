@@ -19,9 +19,55 @@
 
 *Departments. Pipelines. Anti-slop. C-Suite oversight. Runs while you sleep.*
 
+---
+
+## Two things live in this repository
+
+| | What it is | Status |
+|---|---|---|
+| **The skill** (`SKILL.md` + `references/`) | The department/pipeline/oversight methodology. Version 3.8.0, unchanged and stable. | Released |
+| **The `cod` CLI** (`src/`, `docker/`) | Infrastructure that runs it: onboarding, a shared container, in-container cron, security hardening. | **In development**, on branch `feat/infra-scratch` |
+
+The CLI is new and has not been released or tagged. Everything below about the
+skill still describes version 3.8.0 and has not changed.
+
+**On the two version numbers:** the skill is `3.8.0` and the `cod` CLI is
+`0.1.0`. They are separate artifacts on separate version lines, and they are
+deliberately not equal. `SKILL.md` and `references/` are byte-for-byte
+unchanged on the CLI branch, so the skill version was *not* bumped — claiming
+a new skill release when the skill content did not move would be a false
+statement in the one file a user reads first.
+
+### `cod` in one minute
+
+```sh
+bun install && sh scripts/vendor-opencode.sh
+./src/index.ts init acme --yes
+./src/index.ts up
+```
+
+That is the whole path from an empty directory to a running agent container.
+No credentials, no API key: the model is free and opencode runs
+unauthenticated.
+
+- [QUICKSTART.md](QUICKSTART.md) — the full command surface
+- [docs/SECURITY_POSTURE.md](docs/SECURITY_POSTURE.md) — what is actually
+  enforced versus what is only convention
+- [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — what is deliberately
+  unfinished, including that cron schedules jobs but does not yet execute them
+- [CHANGELOG.md](CHANGELOG.md) — the `Unreleased` section covers the CLI
+
+```sh
+sh verify.sh                        # typecheck, tests, build inputs
+sh scripts/cleanroom.sh /tmp/cod    # empty dir -> a real agent producing output
+```
+
+---
+
 🕹️ **[Live Demo: Arcade Platform](https://github.com/RohiRIK/arcade-platform)** — 7 games, 16 departments, fully autonomous. See Corporate on Demand in action.
 
 [![Version](https://img.shields.io/badge/version-3.8.0-blue?style=flat-square)]()
+[![cod%20CLI](https://img.shields.io/badge/cod--CLI-0.1.0%20unreleased-lightgrey?style=flat-square)]()
 [![Hermes](https://img.shields.io/badge/hermes--agent-skill-purple?style=flat-square)](https://hermes-agent.nousresearch.com)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 [![Departments](https://img.shields.io/badge/departments-16-orange?style=flat-square)]()

@@ -4,6 +4,56 @@ All notable changes to Corporate-on-Demand are documented here.
 
 ---
 
+## [Unreleased]
+
+The `cod` CLI. This is a working implementation on branch `feat/infra-scratch`,
+not yet tagged or released.
+
+### Added
+
+- **`cod` CLI** — a Bun + TypeScript tool that takes a workspace from an empty
+  directory to a running agent container, credential-free.
+  - `cod init <company>` — onboarding wizard. Writes a secret-free `cod.json`
+    with company, departments and workers seeded from a JSON template, so a new
+    department needs no code change.
+  - `cod up` / `cod down` / `cod status` — one container per **workspace**, not
+    one per agent. `up` starts in ~0.4s once the image exists. `down` is
+    idempotent and leaves nothing behind.
+  - `cod image` — build the workspace image, reporting `cached` vs `built` so a
+    slow cold build is never mistaken for a hang.
+  - `cod supervise` — run the in-container scheduler and show what it registered.
+  - `cod doctor` — host capability, image state, and the vendored binary, with
+    the exact command to run when something is missing.
+  - `cod config show` — resolved configuration and where each value came from.
+- **Container image** (`cod-sandbox`) — Bun 1.3.12 and opencode 1.18.31, both
+  version-pinned. The base image is pinned **by digest**, not by tag, so the
+  container cannot change under you.
+- **In-container cron on `Bun.cron`** — jobs are read from `cod.json` and
+  registered by an in-container supervisor. A version guard refuses to start
+  below Bun 1.3.12, where `Bun.cron` does not exist, rather than registering
+  nothing and reporting itself healthy.
+- **Security posture** (`docs/SECURITY_POSTURE.md`) — separates controls that
+  are genuinely enforced from convention, and is re-checked against a live
+  container on every clean-room run.
+- **`verify.sh`** and **`scripts/cleanroom.sh`** — the first gates typecheck,
+  tests and build inputs; the second runs the full flow from an empty directory
+  through to a real agent producing output.
+- **`docs/OPEN_QUESTIONS.md`** — records what is deliberately undecided,
+  including that cron schedules jobs but does not yet execute them.
+
+### Known limitations
+
+- **A firing cron job does not dispatch an agent.** The schedule is real and
+  verified end to end; task execution is not wired. A firing job logs
+  `execution not wired yet` rather than pretending to work.
+- **No agent-to-agent isolation.** One container, one filesystem, one uid. This
+  is the accepted cost of "one container, many agents"; see
+  `docs/SECURITY_POSTURE.md`.
+- `Bun.cron` does not support `@every`. Use a standard 5-field expression.
+- No stdout size cap, no agent rate limit, and no inter-agent file locking.
+
+---
+
 ## [3.8.0] — 2026-05-31
 
 ### Added
