@@ -69,9 +69,14 @@ RUN { \
       printf '%s\n' '#!/bin/sh'; \
       printf '%s\n' 'exec bun run /usr/local/lib/cod/workers.js "$@"'; \
     } > /usr/local/bin/cod-workers \
-    && chmod 755 /usr/local/bin/supervisor /usr/local/bin/cod-workers \
+    && { \
+      printf '%s\n' '#!/bin/sh'; \
+      printf '%s\n' 'exec bun run /usr/local/lib/cod/supervisor.js "$@"'; \
+    } > /usr/local/bin/cod-supervisor \
+    && chmod 755 /usr/local/bin/supervisor /usr/local/bin/cod-workers /usr/local/bin/cod-supervisor \
     && sh -n /usr/local/bin/supervisor \
-    && sh -n /usr/local/bin/cod-workers
+    && sh -n /usr/local/bin/cod-workers \
+    && sh -n /usr/local/bin/cod-supervisor
 
 USER bun
 WORKDIR /work

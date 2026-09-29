@@ -201,7 +201,17 @@ export function buildRunArgv(spec: ContainerSpec): string[] {
   const argv = [
     "run",
     "--detach",
-    "--rm",
+    // `--rm` is GONE, deliberately. Docker refuses `--rm` together with
+    // `--restart`, and restart is what this stage is for: with the supervisor
+    // as PID 1, a crash takes the container down and the policy brings it
+    // back. `--rm` would delete the container on that same exit, which
+    // contradicts the restart and would defeat it entirely.
+    //
+    // Nothing leaks as a result: `cod down` removes the container explicitly,
+    // and the previous owner check still refuses to remove one that is not
+    // ours.
+    "--restart",
+    "unless-stopped",
     "--name",
     spec.name,
     "--user",

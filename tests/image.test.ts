@@ -79,6 +79,45 @@ describe("image inputs", () => {
     expect(entrypoint).toContain("cod-workers");
   });
 
+  test("the supervisor is PID 1, so a crash restarts the container", async () => {
+    // The entrypoint `exec`s the supervisor instead of blocking in `tail -f`.
+    // That is what makes two things true at once: `cod up` alone produces a
+    // working schedule, and when the supervisor dies the container dies with
+    // it so --restart can bring it back.
+    const entrypoint = await Bun.file(ENTRYPOINT).text();
+    const code = entrypoint
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    expect(code).toContain("exec cod-supervisor");
+    // `tail -f /dev/null` is exactly the thing that must NOT come back.
+    expect(code).not.toContain("tail -f");
+  });
+
+  test("restart is set and --rm is not, because docker refuses both together", async () => {
+    // Measured: `docker run` fails outright with
+    //   "conflicting options: cannot specify both --restart and --rm"
+    // --rm would also delete the container on the very exit the restart policy
+    // is meant to act on, so it is removed deliberately. `cod down` removes the
+    // container explicitly instead, and still refuses to remove one it did not
+    // create.
+    const { buildRunArgv } = await import("../src/docker");
+    const argv = buildRunArgv({
+      name: "cod-sandbox-x",
+      user: "1000:1000",
+      image: "img",
+      network: "bridge",
+      memory: "2g",
+      cpus: "2",
+      labels: {},
+      mounts: [],
+      env: {},
+    });
+    expect(argv).toContain("--restart");
+    expect(argv[argv.indexOf("--restart") + 1]).toBe("unless-stopped");
+    expect(argv).not.toContain("--rm");
+  });
+
   test("the entrypoint refuses to continue without Bun.cron", async () => {
     const entrypoint = await Bun.file(ENTRYPOINT).text();
     // A scheduler that silently never fires is the failure this prevents.

@@ -162,11 +162,37 @@ const commands: Record<
 
     const docker = makeDocker();
     const name = await docker.up(config, workspace);
+
+    // `up` used to report success the moment the container existed. The
+    // supervisor is now PID 1, so the container can be up and the schedule
+    // already broken. Wait for a live heartbeat, and report the real reason
+    // if one never arrives - a bare "started" that hides a dead supervisor is
+    // the exact failure this stage exists to end.
+    const { formatLiveness, supervisorLiveness } = await import("./liveness");
+    const deadline = Date.now() + 15_000;
+    let liveness = supervisorLiveness(config.stateDir);
+    while (liveness.state !== "live" && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      liveness = supervisorLiveness(config.stateDir);
+    }
+
     print(
       config,
-      { started: name, image: build.tag, outcome: build.outcome },
-      () => `image    ${build.tag} (${imageNote})\nstarted  ${name}`,
+      { started: name, image: build.tag, outcome: build.outcome, liveness: liveness.state },
+      () =>
+        [
+          `image    ${build.tag} (${imageNote})`,
+          `started  ${name}`,
+          `  ${formatLiveness(liveness)}`,
+        ].join("\n"),
     );
+
+    if (liveness.state !== "live") {
+      throw new RuntimeFailure(
+        `the container started but the supervisor is not live (${liveness.state}); ` +
+          `the schedule is not running. Check: docker logs ${name}`,
+      );
+    }
   },
 
   /** Build the workspace image without starting anything. */

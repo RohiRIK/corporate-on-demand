@@ -71,8 +71,19 @@ fi
 
 log "opencode $(opencode --version 2>/dev/null || echo unknown)"
 
-# Block. The supervisor is started by the CLI with docker exec, so that a
-# crashed supervisor is visible as a failed exec rather than a container that
-# quietly restarts into a failure loop.
-log "ready; the container blocks here and the CLI drives work with docker exec"
-tail -f /dev/null
+# Become the supervisor, as PID 1.
+#
+# `exec` REPLACES this shell, so the supervisor becomes the container's main
+# process. That is what makes two things true at once:
+#
+#   - `cod up` alone produces a working schedule (no second command)
+#   - when the supervisor dies, the container dies with it, and Docker's
+#     --restart policy brings both back
+#
+# The earlier `tail -f /dev/null` kept the container "up" indefinitely with
+# nothing running inside it, so a dead supervisor was indistinguishable from a
+# healthy one. `cod status` had to carry the whole burden of telling them
+# apart. Making the container's life BE the schedule's life is more honest than
+# detecting the difference after the fact.
+log "starting the supervisor as PID 1"
+exec cod-supervisor
