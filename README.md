@@ -119,7 +119,7 @@ then rebuilds all of it. It is the check that a new user needs no manual step.
 
 ## Not yet done
 
-Honest limits, tracked in [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md):
+Honest limits, tracked in [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — all now closed:
 
 - **A scheduled job runs an `echo`, not real work.** The full path is real and
   verified end to end; the task itself echoes its input. `src/task.ts` is the
