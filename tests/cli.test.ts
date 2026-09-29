@@ -14,7 +14,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -70,6 +70,34 @@ async function runCli(args: string[]): Promise<{ code: number; stdout: string }>
     else process.env["COD_STATE_DIR"] = savedState;
   }
   return { code: 0, stdout: chunks.join("") };
+}
+
+/** The CLI entry point, resolved once and independent of the cwd. */
+const CLI = join(import.meta.dir, "..", "src", "index.ts");
+
+/**
+ * Spawn the CLI with a controlled environment.
+ *
+ * The child must never inherit an ambient COD_* from the developer's shell.
+ * A manual `cod init` that exported COD_WORKSPACE left the suite reading a
+ * workspace that did not exist, and the failure pointed at the test rather
+ * than at the shell that caused it. Max flagged this exact hazard. The child
+ * gets only what the test chose to set, so a test is reproducible from any
+ * shell state.
+ */
+function spawnCli(
+  args: string[],
+  env: Record<string, string | undefined>,
+): Bun.Subprocess<"ignore", "pipe", "pipe"> {
+  const childEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) childEnv[key] = value;
+  }
+  return Bun.spawn(["bun", "run", CLI, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+    env: childEnv,
+  });
 }
 
 describe("config resolution", () => {
@@ -244,69 +272,62 @@ describe("workspace schema", () => {
 describe("end to end", () => {
   test("init writes a valid workspace that parses", async () => {
     const home = scratch();
-    const previousCwd = process.cwd();
-    const previousWorkspace = process.env["COD_WORKSPACE"];
-    const previousState = process.env["COD_STATE_DIR"];
-    process.chdir(home);
-    delete process.env["COD_STATE_DIR"];
-    process.env["COD_WORKSPACE"] = join(home, "cod.json");
-    delete process.env["COD_STATE_DIR"];
-    try {
-      const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "..", "src", "index.ts"), "init", "acme", "--yes"], {
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [code, stdout, stderr] = await Promise.all([
-        proc.exited,
-        new Response(proc.stdout).text(),
-        new Response(proc.stderr).text(),
-      ]);
-      expect(`${code}:${stderr}`).toBe("0:");
-      expect(stdout).toContain("acme");
+    const proc = spawnCli(["init", "acme", "--yes"], {
+      PATH: process.env["PATH"],
+      HOME: home,
+      COD_WORKSPACE: join(home, "cod.json"),
+      COD_STATE_DIR: join(home, "state"),
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      proc.exited,
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    expect(`${code}:${stderr}`).toBe("0:");
+    expect(stdout).toContain("acme");
 
-      const written = await Bun.file(join(home, "cod.json")).json();
-      const parsed = Workspace.safeParse(written);
-      expect(parsed.success).toBe(true);
-      expect(parsed.success && allWorkers(parsed.data).length).toBe(3);
-    } finally {
-      process.chdir(previousCwd);
-      if (previousWorkspace === undefined) delete process.env["COD_WORKSPACE"];
-      else process.env["COD_WORKSPACE"] = previousWorkspace;
-      if (previousState === undefined) delete process.env["COD_STATE_DIR"];
-      else process.env["COD_STATE_DIR"] = previousState;
-    }
+    const written: unknown = await Bun.file(join(home, "cod.json")).json();
+    const parsed = Workspace.safeParse(written);
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && allWorkers(parsed.data).length).toBe(3);
   });
 
   test("an unknown command exits 2", async () => {
     const home = scratch();
-    const previousCwd = process.cwd();
-    process.chdir(home);
-    try {
-      const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "..", "src", "index.ts"), "bogus"], {
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      expect(await proc.exited).toBe(2);
-    } finally {
-      process.chdir(previousCwd);
-    }
+    const proc = spawnCli(["bogus"], { PATH: process.env["PATH"], HOME: home });
+    expect(await proc.exited).toBe(2);
   });
 
   test("config show --json is valid JSON that pipes to jq", async () => {
     const home = scratch();
-    const previousCwd = process.cwd();
-    process.chdir(home);
+    const proc = spawnCli(["config", "show", "--json"], { PATH: process.env["PATH"], HOME: home });
+    const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
+    expect(code).toBe(0);
+    const parsed: unknown = JSON.parse(stdout);
+    expect(parsed).toHaveProperty("sources.image");
+  });
+
+  test("an ambient COD_WORKSPACE in the parent shell cannot break a test", async () => {
+    // The regression this guards: a developer exports COD_WORKSPACE for a
+    // manual run, then runs the suite, and one test fails for reasons that
+    // have nothing to do with the code under test.
+    const home = scratch();
+    const previous = process.env["COD_WORKSPACE"];
+    process.env["COD_WORKSPACE"] = "/nonexistent/elsewhere/cod.json";
     try {
-      const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "..", "src", "index.ts"), "config", "show", "--json"], {
-        stdout: "pipe",
-        stderr: "pipe",
+      const proc = spawnCli(["init", "acme", "--yes"], {
+        PATH: process.env["PATH"],
+        HOME: home,
+        COD_WORKSPACE: join(home, "cod.json"),
+        COD_STATE_DIR: join(home, "state"),
       });
-      const [code, stdout] = await Promise.all([proc.exited, new Response(proc.stdout).text()]);
-      expect(code).toBe(0);
-      const parsed: unknown = JSON.parse(stdout);
-      expect(parsed).toHaveProperty("sources.image");
+    await proc.exited;
+    const stdout = await new Response(proc.stdout).text();
+    expect(stdout).toContain("acme");
+    expect(existsSync(join(home, "cod.json"))).toBe(true);
     } finally {
-      process.chdir(previousCwd);
+      if (previous === undefined) delete process.env["COD_WORKSPACE"];
+      else process.env["COD_WORKSPACE"] = previous;
     }
   });
 });
