@@ -32,10 +32,10 @@ stays thin; the detail lives in `references/`.
    workspace. Every worker in it shares one filesystem, one uid, and one network
    namespace. If you need agents not to see each other, that is a new container,
    not a new directory.
-2. **The only seam for real work is `echoTask` in `src/task.ts`.** Everything
-   above it — schedule, container, logging, results, redaction — is real and
-   tested. Replacing that one function is how a job starts doing work. Replacing
-   anything else to make a job "work" is how you break the substrate.
+2. **The only seam for real work is the driver in `src/dispatch.ts`.** Everything
+   above it — schedule, container, dispatch loop, logging, results, redaction —
+   is real and tested. Replacing `echoDriver` is how a job starts doing work.
+   Replacing anything else to make a job "work" is how you break the substrate.
 3. **Container state and schedule state are different claims.** The container
    can be `up` with no schedule running. `cod status` reports them separately and
    exits 1 when they disagree, and any change here must preserve that.

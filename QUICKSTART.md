@@ -144,7 +144,15 @@ after 90 seconds without a heartbeat.
 ## Tear down
 
 ```sh
-./src/index.ts down    # idempotent; leaves nothing behind
+./src/index.ts down    # idempotent; keeps the work volume
+```
+
+`down` keeps the volume on purpose, so an agent's commits survive a restart.
+To remove the work and every commit in it:
+
+```sh
+./src/index.ts purge            # refuses, and says why
+./src/index.ts purge --purge    # irreversible
 ```
 
 ## Verify the whole thing

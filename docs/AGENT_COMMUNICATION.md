@@ -9,10 +9,17 @@ is the coordination index.** A broker is premature for three agents in one
 container. Independent verification: eight concurrent processes racing for a
 single pending work item produced exactly one winner and seven clean refusals.
 
-Context verified: `corporate-on-demand` (`src/log.ts`, `results.ts`, `inflight.ts`, `liveness.ts`, `task.ts`
-`echoTask` stub), single container, one uid, one Docker volume, Bun 1.3.12. Verified locally that
+Context verified: `corporate-on-demand` (`src/log.ts`, `results.ts`, `inflight.ts`, `liveness.ts`,
+`src/dispatch.ts`), single container, one uid, one Docker volume, Bun 1.3.12. Verified locally that
 `bun:sqlite` is available, `PRAGMA journal_mode=WAL` is settable, and `INSERT OR IGNORE` dedupes
 (changes: 1 then 0) — so option 1 below is not hypothetical, it was run.
+
+The research was conducted against a system whose work path was a synchronous `echoTask` stub. That
+seam has since moved: the supervisor now dispatches through `src/dispatch.ts`, which has real step
+boundaries and a `shouldStop` poll between them. The conclusion is unchanged and slightly
+strengthened — an async step loop is what makes "interrupt at the next boundary" expressible at
+all — but the `(c) fencing` finding is now the *binding* constraint on the dispatcher rather than
+a hypothetical, because the dispatcher is the thing a re-dispatch would race.
 
 ## The correctness target, stated precisely
 

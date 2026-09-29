@@ -43,7 +43,9 @@ leaving it alone.
    (`src/scheduler.ts`).
 2. The scheduler checks the concurrency ceiling and reports a queue if the job
    waits - a queue that is invisible looks exactly like a stalled schedule.
-3. `run` is called. Today that is `echoTask`; the real dispatcher replaces it.
+3. `run` is called, which dispatches the job through `src/dispatch.ts`. Today
+   the driver is `echoDriver`; a real driver replaces it and nothing above
+   `dispatch` changes.
 4. On completion, a result file is written - **including on failure**, from a
    `finally`. A failure that leaves no trace is what makes a system untrustworthy.
 5. Every line the supervisor emits goes through the redacting sink on its way to

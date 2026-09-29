@@ -36,23 +36,33 @@ is a test for exactly this.
 
 ## Concurrency
 
-`maxConcurrent` (default 2) bounds simultaneous jobs via `runWithLimit` in
-`src/limit.ts`. Twenty lines, not a pool library: the behaviour worth having is
-the ceiling, FIFO order, and one failing task not stalling the queue.
+`maxConcurrent` (default 2) bounds simultaneous jobs via `createGate` in
+`src/limit.ts` - one shared global ceiling, FIFO waiters, released in a
+`finally` so a throwing job cannot leak a slot. Twenty lines, not a pool
+library: the behaviour worth having is the ceiling, FIFO order, and one failing
+task not stalling the queue.
+
+It was previously `runWithLimit(maxConcurrent, [oneClosure])` per cron - a
+single-element array, and `runWithLimit` spawns `min(limit, tasks.length)`, so
+it always spawned exactly one. Ten crons firing at the same minute ran ten jobs
+at once while the limit was read, logged, and stored in the heartbeat. Measured,
+not theoretical. The test measures peak overlap from *inside* the tasks, since
+asserting on scheduling order would have passed against the broken version.
 
 A waiting job **says so in the log**. A queue that is invisible looks exactly
 like a stalled schedule, and those need different fixes.
 
 ## What runs
 
-`echoTask` in `src/task.ts`. A cron job fires, runs, and returns a result -
-but the result is an echo of the task string. The schedule is real and verified
-end to end; the *work* is not.
+`echoDriver` in `src/dispatch.ts`. A cron job fires, runs through the
+dispatcher, and returns a result - but the driver echoes the task string. The
+schedule is real and verified end to end; the *work* is not.
 
-**`echoTask` is the only seam.** Replacing that one function is how a job starts
-doing real work, and nothing above it needs to change. An echo was chosen
-because it cannot fail for interesting reasons: if a scheduled job breaks, the
-cause is the scheduling rather than the work.
+**The driver is the only seam.** Replacing `echoDriver` is how a job starts
+doing real work, and nothing above `dispatch` changes - `TaskResult` is still
+the result contract. An echo was chosen because it cannot fail for interesting
+reasons: if a scheduled job breaks, the cause is the scheduling rather than
+the work.
 
 ## Results
 
@@ -64,7 +74,6 @@ Read them with `cod results [--last N] [--cron NAME] [--failed]`.
 
 ## A real gap, stated
 
-A job writes its result **on completion**. If the supervisor dies mid-job,
-nothing is written, and there is no record of what was in flight. The fix is
-the vocabulary in `recovery.md`: write "started" before running, so a crash
-leaves a detectable mark.
+`inflight.ts` closed this one: a job announces itself **before** running, so a
+crash mid-job leaves a detectable mark and the next start names it. See
+`recovery.md`.

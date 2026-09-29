@@ -15,7 +15,7 @@ One container per workspace. On-device cron. No API key.
 
 [![Bun](https://img.shields.io/badge/bun-1.3.12-white?style=flat-square&logo=bun)](https://bun.sh)
 [![opencode](https://img.shields.io/badge/opencode-1.18.31-blue?style=flat-square)](https://github.com/sst/opencode)
-[![Tests](https://img.shields.io/badge/tests-199%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-221%20passing-brightgreen?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 
 </div>
@@ -53,6 +53,37 @@ and real memory, and gives you isolation you did not ask for. The cost is that
 agents can see each other's files — see [invariants](skills/cod-system/references/invariants.md)
 for what that does and does not mean, and for the worktree design that fixes it.
 
+## The dispatch seam
+
+A scheduled job does not echo its way through the supervisor any more. It goes
+through `src/dispatch.ts`:
+
+```ts
+driver(cron, step)          // step(kind, label) is a BOUNDARY
+dispatch(cron, driver, { onStep, shouldStop })
+```
+
+`step` is a boundary, not a progress ping: it checks for a stop request *before*
+the next chunk of work begins, then records that the previous step finished. So
+`shouldStop` is polled only between steps and never during one — a step is a
+model call or a subprocess, and there is no honest way to interrupt one from
+outside.
+
+Two properties are the reason this is not a loop with a callback bolted on:
+
+- **Step numbers are assigned by the harness, not the driver.** A driver cannot
+  lie about how far it got. `step_no` is a fact about the loop, not a
+  self-report, which is the whole basis of stall detection.
+- **A failing `onStep` cannot fail the job.** A supervisor that dies because
+  logging threw is worse than one that loses a progress line. Losses are
+  counted and surfaced in the result as "N progress report(s) lost" rather than
+  swallowed silently.
+
+`echoDriver` implements the driver contract and produces today's output.
+`echoTask` in `src/task.ts` is off the live path but retained as the reference
+shape; `TaskResult` remains the result contract between the supervisor and the
+work.
+
 ## Commands
 
 | | |
@@ -79,7 +110,7 @@ Not claimed — measured, and re-checked by `scripts/cleanroom.sh` on every run:
 - a cron job firing on a real minute boundary, inside a real container
 - an agent producing real output, at **zero cost**, with no credential on disk
 - 11 security controls read back off a live container via `docker inspect`
-- **199 tests**, clean strict typecheck
+- **221 tests**, clean strict typecheck
 
 ## Documentation
 
@@ -100,12 +131,17 @@ than as bugs.
 ## Running on boot
 
 Docker's `--restart on-failure:5` survives a **daemon** restart, not a **host**
-reboot — after a reboot the container is simply gone. A systemd unit closes that:
+reboot — after a reboot the container is simply gone. A templated systemd unit
+closes that:
 
 ```sh
 sudo install -m 644 ops/cod-workspace@.service /etc/systemd/system/
 sudo systemctl enable --now cod-workspace@acme.service
 ```
+
+It was validated with `systemd-analyze verify`, which caught `ExecStartPre`
+placed in `[Unit]` — systemd *silently ignores* that, so it would have been a
+runtime surprise rather than a startup error. See [ops/README.md](ops/README.md).
 
 ## Verifying it yourself
 
@@ -114,19 +150,30 @@ sh verify.sh                        # typecheck, tests, build inputs
 sh scripts/cleanroom.sh /tmp/cod    # empty dir -> a real agent working
 ```
 
-The clean-room deletes the state, the workspace, the container and the image,
-then rebuilds all of it. It is the check that a new user needs no manual step.
+The clean-room rebuilds the image from a clean cache, starts a real container,
+runs a real agent call, and tears the whole thing down — including purging its
+own throwaway workspace, so a run leaves zero volumes and zero containers
+behind. It is the check that a new user needs no manual step.
 
 ## Not yet done
 
-Honest limits, tracked in [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — all now closed:
+Honest limits. The decisions that were open are closed and recorded in
+[docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — with the reasoning, so a
+later change reads as a revision rather than an accident.
 
-- **A scheduled job runs an `echo`, not real work.** The full path is real and
-  verified end to end; the task itself echoes its input. `src/task.ts` is the
-  single seam where a real dispatcher goes.
+- **The driver is still the echo driver.** The dispatch *contract* is real and
+  on the live path — steps, boundaries, fencing-friendly stop polling — but
+  `echoDriver` does no work. A real driver implements the same contract; nothing
+  above `dispatch` changes.
 - **No agent-to-agent isolation** (see above).
-- **Job isolation is per-worktree**, on its own git branch. What happens to a
-  finished job's branch — merge, keep, discard — is undecided.
+- **Job isolation is per-worktree**, on its own git branch. The merge policy is
+  decided (the org approves, never a human — question 2 in the open-questions
+  doc) but not implemented; no merge step runs yet.
+- **The ledger described in question 5 does not exist.** Files and the disk are
+  the whole coordination story today. SQLite, fencing and the novelty gate are
+  the fixed build order, step 2 onward.
+- **No budget ceiling**, deliberately — every model is free, so there is nothing
+  to meter. This needs revisiting the moment a paid model is added.
 
 ## History
 
