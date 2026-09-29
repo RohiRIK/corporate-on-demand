@@ -3,6 +3,12 @@
 Research and decision record for how `cod` agents coordinate. Decided
 2026-09-29; the short version is in `docs/OPEN_QUESTIONS.md` question 5.
 
+> **Status: option 1 below is IMPLEMENTED** in `src/work.ts` and
+> `src/reconcile.ts`, on the CLI as `cod work` and `cod reconcile`. The rest of
+> this document is the research that chose it and is kept as the decision
+> record. Where the implementation diverged from the recommendation, the
+> implementation wins and the divergence is called out below.
+
 The recommendation below is Leo's, verified locally on this stack (Bun
 1.3.12, `bun:sqlite`): **files are the durable record, `bun:sqlite` in WAL mode
 is the coordination index.** A broker is premature for three agents in one
@@ -79,6 +85,26 @@ constraint WAL imposes is exactly the constraint you already have.
 
 Cost: one migration from plain files to a table, and the invariant "the ledger is a cache; the files
 are the truth" must be held deliberately.
+
+### Where the implementation diverged from this recommendation
+
+The recommendation was written before the code existed. Four things changed, and
+the reasons are the point:
+
+- **The file is written by `commit()`, not by `propose()`.** The recommendation
+  implies every unit of work gets a file at dispatch time. Implemented that way,
+  the reconciler's recovery rule — "the result file exists, so the work was paid
+  for" — is true *before any work happens*, and every claimed item self-completes
+  on the next tick. The file's existence only means something if a file appears
+  when work **finishes**.
+- **The `epoch` table is created but never read.** It is still in `SCHEMA` and
+  still seeded, but the claim takes `lease_epoch + 1` from the row rather than
+  `(SELECT n FROM epoch)+1`. The per-row column is what makes fencing work at
+  row granularity rather than for the whole queue, and it needs no second table
+  to stay consistent with the first. The table is a leftover; it should be
+  dropped, and doing so is a schema migration, not a docs change.
+- **State names differ**: `ready`/`running` where the research wrote
+  `pending`, plus `proposed`, `failed` and `rejected`.
 
 ## Option 2 — Pure filesystem mailboxes, no database
 

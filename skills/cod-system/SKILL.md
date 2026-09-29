@@ -26,17 +26,22 @@ stays thin; the detail lives in `references/`.
 | What happens when the supervisor dies? | `references/recovery.md` |
 | What must never be broken? | `references/invariants.md` |
 
-## The three things to know before editing anything
+## The four things to know before editing anything
 
 1. **The unit of isolation is the workspace, not the agent.** One container per
    workspace. Every worker in it shares one filesystem, one uid, and one network
-   namespace. If you need agents not to see each other, that is a new container,
-   not a new directory.
-2. **The only seam for real work is the driver in `src/dispatch.ts`.** Everything
-   above it — schedule, container, dispatch loop, logging, results, redaction —
-   is real and tested. Replacing `echoDriver` is how a job starts doing work.
-   Replacing anything else to make a job "work" is how you break the substrate.
-3. **Container state and schedule state are different claims.** The container
+   namespace. If you need agents not to see each other's work, that is a new
+   container, not a new directory.
+2. **The ledger is a cache; the files are the truth.** `src/work.ts`. Any change
+   that treats the `work` table as authoritative is how a lost job becomes a lost
+   job permanently. Claim and commit are fenced on `lease_epoch`, and an agent
+   killed mid-call is a **zombie, not a corpse** — it wakes up and tries to write.
+3. **The only seam for real work is the driver in `src/dispatch.ts`.** Everything
+   above it — schedule, container, dispatch loop, reconciler, logging, results,
+   redaction — is real and tested. Replacing `echoDriver` is how a job starts
+   doing work. Replacing anything else to make a job "work" is how you break the
+   substrate.
+4. **Container state and schedule state are different claims.** The container
    can be `up` with no schedule running. `cod status` reports them separately and
    exits 1 when they disagree, and any change here must preserve that.
 

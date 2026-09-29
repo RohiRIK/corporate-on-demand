@@ -52,6 +52,36 @@ asserting on scheduling order would have passed against the broken version.
 A waiting job **says so in the log**. A queue that is invisible looks exactly
 like a stalled schedule, and those need different fixes.
 
+## The reconciler rides this tick
+
+The supervisor's `setInterval(…, 30_000)` in `src/supervisor.ts` does two jobs:
+refresh the heartbeat, and run one pass of `reconcileOnce`. **It is not a second
+timer** — a free 30s tick already exists, and another one is another thing that
+can drift.
+
+**Level-triggered, not edge-triggered.** The reconciler does not wait to be told
+what changed. Every tick it re-reads current state and converges on desired
+state, so an event missed while the process was down self-heals on the next tick
+instead of being lost for ever. The consequence: **anything edge-triggered — a
+"worker finished" hook — would be decoration**, because the loop re-derives
+truth every pass regardless. That is why it is a function over rows rather than a
+callback.
+
+It must therefore be **idempotent**: cron re-fires it whether or not the last
+tick did anything, so running it twice must equal running it once.
+
+The whole call is wrapped in a `try`. A reconcile failure must not take the
+supervisor down, or one bad ledger stops every cron in the workspace.
+
+Four jobs per pass: promote or reject proposals; reclaim work past its **per-item**
+budget; recover work whose acknowledgement was lost; report. The budget is per
+item and never global — a single global threshold either kills legitimate slow
+work or tolerates a hung job, and usually does both.
+
+Recovery **reads the durable file and never re-runs the job**. The case is
+"work was paid for, the ack was lost"; re-running would double-execute and
+double-bill a job that already finished.
+
 ## What runs
 
 `echoDriver` in `src/dispatch.ts`. A cron job fires, runs through the

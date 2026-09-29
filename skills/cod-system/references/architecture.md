@@ -12,14 +12,39 @@ you  ──>  cod (host CLI, Bun)  ──>  docker  ──>  one container per w
         <state-dir>/                          supervisor (in-container)
           cod.json  (read-only mount)              │
           supervisor.json  (heartbeat)            ├── Bun.cron  (schedule)
-          logs/cod.jsonl     (events)             ├── opencode  (the runtime)
-          results/*.json     (one per run)        └── /work/<dept>/<worker>
+          logs/cod.jsonl     (events)             ├── reconciler  (30s tick)
+          results/*.json     (one per run)        ├── opencode  (the runtime)
+          work/ledger.sqlite (CACHE)              └── /work/<dept>/<worker>
+          work/<id>.json     (THE TRUTH)
 ```
 
 The host CLI does three things and nothing else: resolve configuration, run
 `docker`, and read back what the container wrote. It never executes a task.
 That split is why the host can be restarted without losing the schedule, and why
 the container can die without taking the CLI with it.
+
+## The work ledger
+
+`src/work.ts` and `src/reconcile.ts` are the coordination layer. Two parts, and
+the split between them is the whole design:
+
+- **The work ledger** — `src/work.ts`. Two layers, deliberately separated. The
+  **files are the truth**: readable with `jq`, and they survive total loss of
+  the database. The **SQLite table is a cache** over them.
+- **The reconciler** — `src/reconcile.ts`. The CEO's loop, level-triggered, and
+  the only thing permitted to make a proposal runnable.
+
+> **THE LEDGER IS A CACHE. THE FILES ARE THE TRUTH.**
+
+Claim is one `UPDATE … RETURNING`, and SQLite's write lock makes exactly one
+concurrent caller win — real mutual exclusion with no broker, no second daemon
+and no credentials. Every commit is fenced on `lease_epoch`. Both mechanisms
+are covered in `invariants.md`; the reasoning is in
+`docs/AGENT_COMMUNICATION.md`.
+
+The reconciler rides the **existing 30s supervisor tick** in
+`src/supervisor.ts` rather than adding a timer, and is wrapped so a ledger
+failure cannot take down every cron in the workspace.
 
 ## The state directory
 
@@ -31,7 +56,14 @@ Everything the system remembers lives in one directory (`--state`, default
 | `<state>/supervisor.json` | supervisor | heartbeat: `runId`, `seenAt`, registered jobs |
 | `<state>/logs/cod.jsonl` | supervisor | every event, rotating at 5 MB x 3 |
 | `<state>/results/*.json` | supervisor | one file per job run, pruned to `resultRetention` |
+| `<state>/work/ledger.sqlite` | ledger | the coordination **cache** — rebuildable |
+| `<state>/work/<id>.json` | ledger | the durable **truth** — one per finished item |
 | `<state>/bus/` | - | reserved |
+
+Note the asymmetry in the last three rows: `work/<id>.json` is written by
+`commit()` and nowhere else, so its existence means work genuinely finished.
+Writing it earlier makes "the file exists, so the work was paid for" true before
+any work has happened — which is exactly the bug that shipped in `38b3683`.
 
 `cod.json` is **not** here: it is the operator's own file, mounted read-only, and
 the CLI never rewrites it. Silently editing what someone wrote is worse than
@@ -70,5 +102,8 @@ policy exists to act on.
 - Not a job queue with delivery guarantees. There is no visibility timeout and
   no re-queue; see `recovery.md`.
 - Not isolated per agent. One container, one filesystem, one uid.
+- Not exactly-once messaging. At-least-once delivery plus a durable dedupe key,
+  an idempotent commit and a fencing token is the real target, and it is the
+  ledger's target — see `docs/AGENT_COMMUNICATION.md`.
 - Not a CI system. `verify.sh` and `.github/workflows/ci.yml` are; the
   clean-room is a human-triggered check, deliberately.

@@ -121,12 +121,14 @@ deliberate one.
 
 - **The polling reconciler.** Level-triggered, Kubernetes-style: on each tick,
   compare desired state against actual state and converge. It is idempotent
-  because cron re-fires it, so a missed tick costs nothing.
+  because cron re-fires it, so a missed tick costs nothing. **Landed** in
+  `src/reconcile.ts`; it rides the existing 30s supervisor tick and is wrapped so
+  a ledger failure cannot take down every cron.
 - **The novelty gate.** Self-proposed work enters as `proposed`; only the
-  CEO's tick promotes it to `ready`. This is the anti-loop mechanism, and it is
-  **real enforcement, not a prompt instruction** — the novelty key is a
+  reconciler's tick promotes it to `ready`. This is the anti-loop mechanism, and
+  it is **real enforcement, not a prompt instruction** — the novelty key is a
   `UNIQUE` index, so a repeat proposal fails at the database rather than being
-  asked not to happen.
+  asked not to happen. **Landed.**
 - **Fencing** (question 5).
 - **Two-stage escalation**, on a per-task Start-To-Close budget: at **1x**
   write `interrupt_requested`, which the dispatcher polls at its next step
@@ -140,10 +142,13 @@ deliberate one.
   transitions this system has no mechanism to trigger.
 - **A `priority` column** — nothing in the system can compute a priority that
   means anything. A column that is always a constant is a lie in a schema.
-- **`blast_radius` as a computed 0/1/2 column.** Blast radius is a *rule*
-  (question 2), not a number: nothing can measure it yet, so storing an integer
-  would invent precision the system cannot produce. The rule stays in prose
-  until something can evaluate it.
+- **`blast_radius` as a *computed* 0/1/2 column.** The rule is real (question 2)
+  but nothing can *measure* a radius, so a computed integer would invent
+  precision the system cannot produce. **Revised, not simply cut:** the column
+  exists, and it is **supplied by the proposing agent** — `--blast 0|1|2`, or
+  NULL. A non-integer is refused rather than silently stored as NULL, which
+  would have passed every comparison and dispatched global work without the CEO.
+  See the honest limit below.
 - **`tokens_used`** — dead instrumentation. Budget ceilings were closed in
   question 3 because every model is free, so there is nothing to count toward.
 - **`state_digest = hash(workspace files)`** — an expensive proxy for a signal
@@ -163,12 +168,54 @@ order is what keeps the anti-loop mechanism real:
 
 1. **The dispatcher**, with a per-step callback. **Done** — `src/dispatch.ts`,
    on the live path.
-2. **SQLite schema**, and `claim`/`commit` with fencing.
-3. **`reconcile()`** on the existing 30s tick.
-4. **The novelty key**, as a `UNIQUE` index.
+2. **SQLite schema**, and `claim`/`commit` with fencing. **Done** —
+   `src/work.ts`.
+3. **`reconcile()`** on the existing 30s tick. **Done** — `src/reconcile.ts`,
+   called from the supervisor's `setInterval` in `src/supervisor.ts`.
+4. **The novelty key**, as a `UNIQUE` index. **Done** —
+   `CREATE UNIQUE INDEX ux_work_novelty` on `work(novelty_key)`.
 
-### Two limits recorded honestly
+The order is what kept the anti-loop mechanism real: a proposal that is not
+already non-runnable is not a gate, it is a field.
 
+### What landed, and what the reviews then found
+
+The four steps above landed in `38b3683`. An independent review of that commit
+found three live corruption bugs, all fixed in `ba1d316` — recorded here because
+the fixes change the design, not just the code:
+
+- **Claimed work was marked done without running.** `propose()` wrote the result
+  file and the reconciler used bare `existsSync()` as proof the work had been
+  paid for, so the file existed before any work happened and the first tick
+  after any claim completed the item. **The result file is now written by
+  `commit()` and nowhere else**, so its existence means something, and the
+  reconciler *parses* it and trusts it only when it records a finished state.
+- **A reclaim did not fence the worker it reclaimed.** The budget rule set
+  `state='failed'` but left the epoch alone, so the overrunning worker — never
+  killed, only declared — overwrote the verdict with its own success.
+- **An epoch was never consumed.** `lease_epoch` was only ever bumped by `claim`,
+  so a second writer holding the same epoch overwrote the first. It is last
+  write wins for anyone holding the current epoch.
+
+Two of these are *the same class of defect as the misnamed tests*: the suite was
+green and the assertions were wrong, because the tests described the buggy
+behaviour. Two old tests asserted the buggy behaviour and were corrected rather
+than deleted.
+
+### Four limits recorded honestly
+
+- **`blast_radius` is a policy hint, not an unspoofable control.** The
+  reconciler enforces the rule correctly — radius 2 is refused whatever proposed
+  it, via the pure predicate `needsCeo` — but the *input* is agent-supplied. An
+  agent that declares `0` for global work is not caught. The refusal is only as
+  strong as the value the proposer chose, and that is the honest ceiling on
+  question 2's "a rule, not a judgement": the rule is enforced, the number is
+  not earned.
+- **The novelty key catches byte-identical repeats only.** "Do the same thing
+  twice" is detected when department, goal and target paths hash the same. A
+  department that rewords its goal produces a different key and is let through.
+  Reworded goals are normal LLM output, not an edge case. Semantic dedupe is a
+  different problem and is not solved here.
 - **Slow-but-fine is indistinguishable from stuck.** No local signal separates
   them: a job making progress on a long model call looks exactly like a job
   hung on one. The mitigation is a **per-task Start-To-Close budget**, never a

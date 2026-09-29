@@ -134,6 +134,89 @@ in shipped code. Both are now pinned by tests that would have failed before.
   is the only place true overlap is observable. Asserting on scheduling order
   would have passed against the broken version — which is how the bug survived.
 
+### The work ledger, the reconciler, and the anti-loop gate
+
+The coordination layer, in `38b3683`, with three corruption bugs found by review
+and fixed in `ba1d316`. All three are on the CLI, which is a hard project
+requirement: `cod work list | propose | claim | commit` and `cod reconcile`.
+
+- **The work ledger** (`src/work.ts`) — two layers, deliberately separated. The
+  **files are the truth**, readable with `jq` and surviving total loss of the
+  database; **the SQLite table is a cache** over them. *The ledger is a cache;
+  the files are the truth.* Claim is a single `UPDATE … RETURNING`, and
+  SQLite's write lock makes exactly one concurrent caller win: verified with
+  **eight separate processes** racing for one item, exactly one winner. Processes
+  and not promises, because the write lock is the mechanism and an in-process
+  test cannot exercise it.
+
+- **Fencing** — every commit is `WHERE id=? AND lease_epoch=?`. An agent killed
+  mid-call is a **zombie, not a corpse**: if the supervisor re-dispatches, the
+  new run writes, and then the old process wakes and clobbers it. A stale epoch
+  updates zero rows. **Git worktree isolation does not prevent this** — both
+  runs share the ledger, not the source tree. The epoch is also *consumed* by
+  the commit that uses it, so a second writer at the same epoch is refused and a
+  budget reclaim fences the worker it reclaimed.
+
+- **The reconciler** (`src/reconcile.ts`) — the CEO's loop, **level-triggered**
+  in the Kubernetes sense: it does not wait to be told what changed, it re-reads
+  current state every tick and converges, so an event missed while the process
+  was down self-heals instead of being lost. Anything edge-triggered would
+  therefore be decoration, and the loop must be **idempotent** because cron
+  re-fires it regardless. It rides the **existing 30s supervisor tick** and is
+  wrapped so a ledger failure cannot take down every cron. Four jobs per pass:
+  promote or reject proposals; reclaim work past its **per-item** budget; recover
+  work whose acknowledgement was lost — by **reading the durable file, never
+  re-running the job**, because re-running a finished job double-executes and
+  double-bills it; report.
+
+- **The anti-loop gate** — departments propose their own next work, so a
+  proposal enters as `proposed` and **only the reconciler may promote it to
+  `ready`**. Duplicates are refused by a `UNIQUE` index on `novelty_key`, a
+  sha256 of department + goal + sorted target paths truncated to 32 hex chars.
+  Real enforcement, not a prompt asking an agent to notice, and the brake on
+  self-graded work. Blast radius is a **rule, not a judgement**: radius 2 is
+  global and is refused whatever proposed it, radius 1 stays runnable, and the
+  predicate is a separate pure function so the policy cannot drift.
+
+**Deliberately not built**, recorded so a later change reads as a revision: the
+9-state machine (cut to `proposed`/`ready`/`running`/`done`/`failed` plus
+`attempts`; `claimed`/`review`/`merged`/`abandoned` are states for a pipeline and
+reviewer that do not exist), a `priority` column (a column that is always a
+constant is a lie in a schema), `tokens_used` (budget ceilings were closed
+because every model is free, so a token counter is dead instrumentation), and a
+computed `state_digest` (an expensive proxy for a signal the dispatcher emits
+directly and free at each step).
+
+**`blast_radius` is a policy hint, not an unspoofable control.** The rule is
+enforced; the input is not. It is supplied by the proposing agent, so an agent
+can declare `0` for global work, and the reconciler's refusal is only as strong
+as that value. Stated plainly rather than described as a guarantee.
+
+### Docs: the ledger, the reconciler, and the anti-loop gate
+
+- `README.md` — the three features, the CLI surface with the flags as actually
+  implemented in `src/index.ts` and `src/meta.ts`, and a **worked lifecycle
+  whose every line is real captured output**: propose, a duplicate refused,
+  unclaimable until `cod reconcile`, claim, a stale-epoch commit fenced, a good
+  commit accepted, and a radius-2 proposal rejected. Test badge corrected from
+  221 to the measured **257**.
+- `docs/OPEN_QUESTIONS.md` — build-order steps 2–4 marked **Done**; the three
+  corruption bugs recorded as design changes rather than code fixes; the
+  `blast_radius` entry restated as *revised, not cut*, with its honest limit.
+- `docs/AGENT_COMMUNICATION.md` — option 1 marked **implemented**, plus a new
+  section on where the implementation diverged from the research and why.
+- `skills/cod-system/` — a **Ledger invariants** section in `invariants.md`
+  (the cache/truth rule, fencing, epoch consumption, the reconciler's exclusive
+  right to promote, the result-file rule); the reconciler tick documented in
+  `scheduling.md`; the ledger and reconciler added to `architecture.md`'s
+  diagram and state-directory table; and a fourth "thing to know before editing
+  anything" in `SKILL.md`.
+
+**Verified by mutation, not only by assertion.** Removing the `lease_epoch`
+predicate from `commit()` fails **18** tests; making proposals born `ready`,
+which bypasses the CEO entirely, fails **12**. A test that passes against broken
+code is worth nothing.
+
 ### Ops: the things that were missing on a real machine
 
 - **`cod purge`** (`src/purge.ts`) — the counterpart to `cod down`, which
@@ -216,6 +299,27 @@ in shipped code. Both are now pinned by tests that would have failed before.
 
 ### Known limitations
 
+- **A ledger database file is committed to the repository**, at
+  `proposed/work/ledger.sqlite` (32 KB), added in `ba1d316`. It is a runtime
+  artifact from a test or a manual run in a directory called `proposed/`, not a
+  fixture, and it should be removed and gitignored. Removing a tracked binary is
+  a `git rm`, not a docs change, so it is reported rather than done.
+- **`work list --state <s>` cannot be used as a state filter, and it writes.**
+  `--state` is the global *state directory* flag, so `cod work list --state ready`
+  passes `ready` to `configFrom` as the state directory. Two consequences,
+  both measured: it prints `work ledger is empty` while the rows exist, and
+  because `openWork` does `mkdirSync` on the state dir, the run **creates a
+  directory named after the state value in the current working directory** —
+  `cod work list --state done` leaves behind `./done/work/ledger.sqlite`. Two
+  meanings on one flag is the defect; renaming the filter is a `src/` change and
+  was out of scope here.
+- **The `epoch` table is dead.** It is created and seeded in `SCHEMA` and never
+  read; `claim` takes `lease_epoch + 1` from the row. Harmless, but it is a
+  second piece of state that looks load-bearing. Dropping it is a schema change.
+- **The `rejected` state is never written.** It is in the `WorkState` union and
+  the reconciler's report has a `rejected` bucket, but rejections are committed
+  as `state='failed'` with a reason. A reader filtering on `state='rejected'`
+  finds nothing.
 - **`QUICKSTART.md` said 47 tests.** It had been carried over from an early
   stage and never corrected, while the badge and README said 221. A reader
   running the command saw a number that matched nothing. Corrected to the
@@ -244,10 +348,13 @@ in shipped code. Both are now pinned by tests that would have failed before.
   above `dispatch` changes. An echo was chosen because it cannot fail for
   interesting reasons: if a scheduled job breaks, the cause is the scheduling,
   not the work.
-- **The org in `docs/OPEN_QUESTIONS.md` is a design nothing dispatches yet.**
-  The decisions are closed, the build order is fixed, and step 1 (the
-  dispatcher) has landed. SQLite, fencing, `reconcile()` and the novelty gate
-  have not.
+- **The org in `docs/OPEN_QUESTIONS.md` is a design that now dispatches, but
+  only its floor.** The decisions are closed and the fixed build order is
+  complete — dispatcher, ledger with fencing, reconciler on the 30s tick, and
+  the novelty gate all landed. What is still missing is everything above that
+  floor: no reviewer agent, no merge step, and the driver is still the echo
+  driver, so no work actually runs through the ledger yet. The ledger is
+  correct and reachable; it is not yet fed by real agents.
 - **No agent-to-agent isolation.** One container, one filesystem, one uid. This
   is the accepted cost of "one container, many agents"; see
   `docs/SECURITY_POSTURE.md`.
