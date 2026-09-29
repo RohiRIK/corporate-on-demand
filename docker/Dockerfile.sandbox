@@ -53,7 +53,8 @@ COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY package.json bun.lock ./
 COPY src ./src
 RUN bun install --production --frozen-lockfile
-RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/supervisor.js
+RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/supervisor.js \
+    && bun build src/workers-cli.ts --target=bun --outfile /usr/local/lib/cod/workers.js
 
 # Readable by the unprivileged user the container runs as: a root-owned file
 # behind a root-owned directory is unreadable to `bun`.
@@ -64,8 +65,13 @@ RUN { \
       printf '%s\n' '#!/bin/sh'; \
       printf '%s\n' 'exec bun run /usr/local/lib/cod/supervisor.js'; \
     } > /usr/local/bin/supervisor \
-    && chmod 755 /usr/local/bin/supervisor \
-    && sh -n /usr/local/bin/supervisor
+    && { \
+      printf '%s\n' '#!/bin/sh'; \
+      printf '%s\n' 'exec bun run /usr/local/lib/cod/workers.js "$@"'; \
+    } > /usr/local/bin/cod-workers \
+    && chmod 755 /usr/local/bin/supervisor /usr/local/bin/cod-workers \
+    && sh -n /usr/local/bin/supervisor \
+    && sh -n /usr/local/bin/cod-workers
 
 USER bun
 WORKDIR /work

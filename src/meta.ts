@@ -15,6 +15,7 @@ COMMANDS:
   image     Build the workspace image without starting anything
   supervise Run the in-container cron supervisor
   logs      Read the event log — the answer to "what happened"
+  results   Read persisted job results — what ran, and did it work
   config    Show resolved configuration and where each value came from
   doctor    Check that the host can run a container
   help      Show this help
@@ -27,7 +28,9 @@ OPTIONS:
       --rebuild           Rebuild the image even when it is already present
       --level <level>     Minimum level for cod logs: debug, info, warn, error
       --run <id>          Show only events from one run
-      --last <n>          Show at most n events
+      --last <n>          Show at most n events or results
+      --cron <name>       Filter results to one job
+      --failed            Show only failed runs
       --company <name>    Override the company name
       --purpose <text>    Override the company purpose
       --workspace <path>  Workspace file, default ./cod.json

@@ -11,10 +11,19 @@ import { join } from "node:path";
 import { Workspace } from "./workspace";
 import { echoTask } from "./task";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
+import { recordResult } from "./results";
 import { assertCronSupport, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
 const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
+const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
+
+/**
+ * Distinguishes two runs inside the same millisecond, which happens whenever
+ * several jobs share a minute boundary. Without it one result would overwrite
+ * another and a run would go missing with nothing to indicate it.
+ */
+let runSeq = 0;
 
 /**
  * The supervisor's run id, fixed for the life of the process.
@@ -67,11 +76,46 @@ function main(): void {
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {
     report: log,
     run: async (cron): Promise<void> => {
-      // The job now runs, and its result comes back out. What it runs is an
-      // echo - see src/task.ts for why that is the whole implementation at
-      // this stage and what replaces it.
-      const result = echoTask(cron);
-      log(`job "${result.cron}" -> ${result.output}`);
+      const startedAt = Date.now();
+      // Recorded in a `finally` so a FAILED job leaves a trace. A failure that
+      // vanishes is exactly what makes a schedule untrustworthy - you cannot
+      // debug what you cannot see, and "it just stopped" is the worst report.
+      try {
+        const result = echoTask(cron);
+        log(`job "${result.cron}" -> ${result.output}`);
+        recordResult(
+          {
+            cron: result.cron,
+            agent: result.agent,
+            task: result.task,
+            startedAt,
+            finishedAt: Date.now(),
+            durationMs: Date.now() - startedAt,
+            ok: true,
+            output: result.output,
+          },
+          { stateDir: STATE_DIR, seq: runSeq },
+        );
+        runSeq += 1;
+      } catch (error) {
+        const message = (error as Error).message;
+        log(`job "${cron.name}" FAILED: ${message}`, "error");
+        recordResult(
+          {
+            cron: cron.name,
+            agent: cron.agent,
+            task: cron.task,
+            startedAt,
+            finishedAt: Date.now(),
+            durationMs: Date.now() - startedAt,
+            ok: false,
+            output: "",
+            error: message,
+          },
+          { stateDir: STATE_DIR, seq: runSeq },
+        );
+        runSeq += 1;
+      }
     },
   });
 

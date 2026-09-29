@@ -39,6 +39,10 @@ export interface CommandFlags {
   readonly run?: string | undefined;
   /** Return at most this many events. */
   readonly last?: number | undefined;
+  /** Filter `cod results` to one job name. */
+  readonly cron?: string | undefined;
+  /** Show only failed runs. */
+  readonly failed?: boolean | undefined;
 }
 
 export type Print = (config: Config, data: unknown, table: () => string) => void;
@@ -282,6 +286,30 @@ const commands: Record<
         events.length === 0
           ? "no log events yet - is the container running?"
           : events.map((event) => formatEvent(event)).join("\n"),
+    );
+  },
+
+  /**
+   * Read persisted job results.
+   *
+   * The structured counterpart to `cod logs`: what ran, when, and whether it
+   * worked. Readable long after the container that produced it is gone.
+   */
+  async results(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const { formatResult, listResults } = await import("./results");
+    const results = listResults(config.stateDir, {
+      limit: flags.last,
+      cron: flags.cron,
+      onlyFailed: flags.failed,
+    });
+    print(
+      config,
+      results,
+      () =>
+        results.length === 0
+          ? "no results yet - have any jobs run?"
+          : results.map((result) => formatResult(result)).join("\n"),
     );
   },
 

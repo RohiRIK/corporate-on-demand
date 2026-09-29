@@ -49,6 +49,8 @@ async function main(argv: string[]): Promise<void> {
       level: { type: "string" },
       run: { type: "string" },
       last: { type: "string" },
+      cron: { type: "string" },
+      failed: { type: "boolean" },
       company: { type: "string" },
       purpose: { type: "string" },
     },
@@ -78,6 +80,8 @@ async function main(argv: string[]): Promise<void> {
     level: values.level,
     run: values.run,
     last: values.last === undefined ? undefined : Number(values.last),
+    cron: values.cron,
+    failed: values.failed,
   };
 
   await runCommand(command, positionals.slice(1), flags, print);

@@ -61,6 +61,24 @@ describe("image inputs", () => {
     expect(PINNED_BUN).toBe("1.3.12");
   });
 
+  test("the entrypoint asks the schema for workers, never greps the file", async () => {
+    // The old `sed 's/.*"name".../'` matched every "name" key, so it made
+    // directories for the company, the departments AND every cron job. It is
+    // exactly the kind of bug that passes every test and is invisible until
+    // you look at the filesystem.
+    const entrypoint = await Bun.file(ENTRYPOINT).text();
+    // Check the executable lines only. The comment above it still names the
+    // old sed while explaining why it went, and a test that fails on its own
+    // documentation is a test that discourages documenting the fix.
+    const code = entrypoint
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    expect(code).not.toMatch(/sed .*name/);
+    expect(code).toContain("cod-workers");
+    expect(entrypoint).toContain("cod-workers");
+  });
+
   test("the entrypoint refuses to continue without Bun.cron", async () => {
     const entrypoint = await Bun.file(ENTRYPOINT).text();
     // A scheduler that silently never fires is the failure this prevents.

@@ -23,17 +23,24 @@ mkdir -p /work
 # enforcement: on a shared mount, mode bits give no write isolation between
 # agents. See docs/SECURITY_POSTURE.md.
 #
-# The list is derived from the workspace file so a new department needs no
-# change here.
-workers="$(sed -n 's/.*"name"[[:space:]]*:[[:space:]]*"\([a-z0-9][a-z0-9-]*\)".*/\1/p' \
-  "$WORKSPACE_FILE" 2>/dev/null || true)"
+# The list comes from the workspace schema via Bun, NOT from grepping the file.
+# The previous `sed 's/.*"name".../'` matched every "name" in the document, so it
+# created directories for the company, the departments AND every cron job -
+# `acme engineering builder reviewer tester heartbeat nightly`. Wrong, and
+# quietly so. The schema knows what a worker is; ask it.
+if [ -f "$WORKSPACE_FILE" ]; then
+  workers="$(cod-workers "$WORKSPACE_FILE" 2>/dev/null || true)"
 
-if [ -n "$workers" ]; then
+  if [ -z "$workers" ]; then
+    log "FATAL: could not read workers from the workspace; refusing to guess"
+    exit 2
+  fi
+
   for worker in $workers; do
     mkdir -p "/work/$worker"
     chmod 755 "/work/$worker"
   done
-  log "prepared work directories: $(echo $workers | tr '\n' ' ')"
+  log "prepared $(printf '%s\n' $workers | wc -l) worker directories"
 fi
 
 # There are no credentials to install. opencode is unauthenticated by design,

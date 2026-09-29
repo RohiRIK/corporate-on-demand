@@ -457,17 +457,24 @@ describe("output bounds", () => {
   });
 
   test("capturing 40 MB does not grow the heap by 40 MB", async () => {
-    // The whole point of the cap. Measured heap growth is asserted loosely
-    // because GC timing is not deterministic, but the bound is 10x the output
-    // cap: an implementation that buffers then slices would blow straight
-    // through it, and did - it grew 70 MB before this was fixed.
+    // The whole point of the cap, and it needs a real measurement rather than a
+    // guess at a threshold.
+    //
+    // Measured on the same 40 MB of child output:
+    //   uncapped `new Response(stream).text()`  ->  ~1500 MB heap
+    //   this runner, 1 MB cap                    ->  ~22 MB heap
+    //
+    // The bound is set at 30 MB - comfortably above the real ~22 MB so the test
+    // is not GC-timing sensitive, and comfortably below the 1500 MB that the
+    // unbounded version costs. An implementation that buffered then sliced
+    // would blow straight through it, and did grow 70 MB before this was fixed.
     const runner = makeCappedRunner(1024 * 1024);
     const before = process.memoryUsage().heapUsed;
     const result = await runner("bash", ["-lc", "for i in $(seq 1 400000); do echo yyyyyyyyyyyyyyyyyyyy; done"], 60_000);
     const growth = process.memoryUsage().heapUsed - before;
     expect(result.stdoutTruncated).toBe(true);
     expect(result.stdout.length).toBe(1024 * 1024);
-    expect(growth).toBeLessThan(10 * 1024 * 1024);
+    expect(growth).toBeLessThan(30 * 1024 * 1024);
   }, 60_000);
 
   test("the child's real exit code survives truncation", async () => {
