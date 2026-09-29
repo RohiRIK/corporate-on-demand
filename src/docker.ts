@@ -140,7 +140,35 @@ export const defaultRunner: Runner = makeRunner(OUTPUT_LIMIT_BYTES);
 /** Alias kept for readability at the call sites in the tests. */
 export const makeCappedRunner = makeRunner;
 
-const CONTAINER_PREFIX = "cod-sandbox";
+/** How many times Docker may restart a crashed workspace container. */
+export const RESTART_LIMIT = 5;
+
+export const CONTAINER_PREFIX = "cod-sandbox";
+
+/**
+ * The named volume holding `/work`: the git repo and every per-job worktree.
+ *
+ * Derived from the workspace name so two workspaces never share one. `down`
+ * removes the container but deliberately KEEPS this volume - deleting an
+ * agent's committed work on teardown would be the worst possible default.
+ */
+export function workVolume(config: { workspaceFile: string }): string {
+  // The PARENT directory is part of the identity, not just the filename. Using
+  // the filename alone made /a/cod.json and /b/cod.json produce the same
+  // volume, so two workspaces in different places would silently share one
+  // repository and one set of worktrees - the exact collision the per-workspace
+  // volume exists to prevent.
+  const parts = config.workspaceFile.split(/[\\/]/).filter((part) => part !== "");
+  const parent = parts.length > 1 ? (parts[parts.length - 2] as string) : "";
+  const name = (parts[parts.length - 1] ?? "workspace").replace(/\.json$/i, "");
+  const safe = [...parent, name]
+    .join("-")
+    .replace(/[^a-z0-9-]/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+  return `${CONTAINER_PREFIX}-${safe || "workspace"}-work`;
+}
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 export function safeSegment(value: string, label: string): string {
@@ -177,7 +205,13 @@ export interface ContainerSpec {
   readonly name: string;
   readonly image: string;
   readonly labels: Readonly<Record<string, string>>;
-  readonly mounts: readonly { readonly source: string; readonly target: string; readonly readOnly: boolean }[];
+  readonly mounts: readonly {
+    readonly source: string;
+    readonly target: string;
+    readonly readOnly: boolean;
+    /** A named Docker volume rather than a host bind. */
+    readonly volume?: boolean;
+  }[];
   readonly network: string;
   readonly memory: string;
   readonly cpus: string;
@@ -210,8 +244,16 @@ export function buildRunArgv(spec: ContainerSpec): string[] {
     // Nothing leaks as a result: `cod down` removes the container explicitly,
     // and the previous owner check still refuses to remove one that is not
     // ours.
+    // Bounded, not `unless-stopped`. Verified on this host: a process that
+    // exits immediately under `on-failure:3` stops at restarts=3. Without the
+    // cap a supervisor that crashes on startup restarts for ever, and
+    // `unless-stopped` never stops.
+    //
+    // Docker adds a second guard from its own docs: a restart policy only
+    // engages after a container has been up ~10s, which is specifically to
+    // stop a container that never starts from looping.
     "--restart",
-    "unless-stopped",
+    `on-failure:${RESTART_LIMIT}`,
     "--name",
     spec.name,
     "--user",
@@ -236,6 +278,12 @@ export function buildRunArgv(spec: ContainerSpec): string[] {
     argv.push("-e", `${key}=${value}`);
   }
   for (const mount of spec.mounts) {
+    if (mount.volume === true) {
+      // A named volume, not a bind: nothing on the host should be handed to a
+      // container that runs arbitrary agents.
+      argv.push("--mount", `type=volume,src=${mount.source},dst=${mount.target}`);
+      continue;
+    }
     assertMountAllowed(mount.source);
     const mode = mount.readOnly ? ",readonly" : "";
     argv.push("--mount", `type=bind,src=${mount.source},dst=${mount.target}${mode}`);
@@ -398,8 +446,18 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
         image: config.image,
         labels: { "cod.workspace": wsName },
         mounts: [
+          // The workspace is a bind mount, so the repo and its worktrees live
+          // in the container's own writable layer under /work. That keeps a
+          // job's commits out of the operator's workspace file, which is
+          // mounted read-only precisely so the system cannot rewrite it.
           { source: config.workspaceFile, target: "/cod/cod.json", readOnly: true },
           { source: config.stateDir, target: "/cod", readOnly: false },
+          // /work holds the git repo and every per-job worktree. It is a NAMED
+          // VOLUME, not the container's writable layer: verified, that layer is
+          // destroyed by `docker rm`, so a container restart took every commit
+          // and every worktree with it. A volume survives both the restart and
+          // the removal, which is what makes a worktree worth having.
+          { source: workVolume(config), target: "/work", readOnly: false, volume: true },
         ],
         // Egress is deliberate: agents install packages, so --network none is
         // incompatible with the requirement and was removed on purpose. This

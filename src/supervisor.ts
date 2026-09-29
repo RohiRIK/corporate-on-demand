@@ -12,6 +12,7 @@ import { Workspace } from "./workspace";
 import { echoTask } from "./task";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
+import { beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
 import { heartbeatPath, type Heartbeat } from "./liveness";
 import { assertCronSupport, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 
@@ -107,11 +108,22 @@ function main(): void {
   log(`heartbeat written for ${jobNames.length} job(s), run ${RUN_ID}`);
   log(`timezone ${parsed.data.timezone} (${new Date().toString().slice(-25)})`);
 
+  // Anything still announced in flight was killed by the last crash. Named on
+  // startup, because "where did it stop" is the question a crashed supervisor
+  // cannot answer from its own log - the log died with it.
+  for (const stuck of findAbandoned(STATE_DIR)) {
+    log(`ABANDONED: ${formatAbandoned(stuck)}`, "error");
+  }
+
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {
     report: log,
     maxConcurrent: parsed.data.maxConcurrent,
     run: async (cron): Promise<void> => {
       beat(jobNames);
+      // Announce BEFORE the work. If the supervisor dies mid-job, this marker is
+      // the only evidence it happened at all - absence of a result is the signal
+      // real schedulers use, and it is the whole point of src/inflight.ts.
+      beginJob(STATE_DIR, cron);
       // Prune here rather than on every write, so a busy schedule does not
       // re-scan the directory 500 times a minute.
       const { pruneResults } = await import("./results");
@@ -139,6 +151,7 @@ function main(): void {
           },
           { stateDir: STATE_DIR, seq: runSeq },
         );
+        settleJob(STATE_DIR, cron.name);
         runSeq += 1;
       } catch (error) {
         const message = (error as Error).message;
@@ -157,6 +170,7 @@ function main(): void {
           },
           { stateDir: STATE_DIR, seq: runSeq },
         );
+        settleJob(STATE_DIR, cron.name);
         runSeq += 1;
       }
     },

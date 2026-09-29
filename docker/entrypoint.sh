@@ -50,6 +50,25 @@ if [ -f "$WORKSPACE_FILE" ]; then
     chmod 755 "/work/$worker"
   done
   log "prepared $(printf '%s\n' $workers | wc -l) worker directories"
+
+  # A git repository in /work, so per-job worktrees have something to branch
+  # from. `git worktree add` needs a repo; without this the isolation design in
+  # src/worktree.ts has nothing to attach to and every job would have to share
+  # one checkout - the exact race it exists to prevent.
+  #
+  # Idempotent: a restart must NOT reinitialise and lose committed work, so this
+  # only initialises when /work/.git is genuinely absent.
+  if [ ! -d /work/.git ]; then
+    git init -q /work
+    # Identity is set inside the repo, not --global: a shared --global would be
+    # a write to the image's home and would not survive a rebuild.
+    git -C /work config user.email "agent@cod.local"
+    git -C /work config user.name "cod agent"
+    git -C /work config commit.gpgsign false
+    log "initialised a git repository in /work for per-job worktrees"
+  else
+    log "existing git repository in /work, leaving it alone"
+  fi
 fi
 
 # There are no credentials to install. opencode is unauthenticated by design,

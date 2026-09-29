@@ -61,6 +61,57 @@ describe("image inputs", () => {
     expect(PINNED_BUN).toBe("1.3.12");
   });
 
+  test("/work is a named VOLUME, not the container's writable layer", async () => {
+    // Measured: with /work in the container layer, `cod down && cod up` destroyed
+    // every commit and every worktree. A worktree that does not survive a
+    // restart is not isolation, it is extra steps.
+    const { buildRunArgv, workVolume } = await import("../src/docker");
+    const argv = buildRunArgv({
+      name: "cod-sandbox-x",
+      user: "1000:1000",
+      image: "img",
+      network: "bridge",
+      memory: "2g",
+      cpus: "2",
+      labels: {},
+      env: {},
+      mounts: [{ source: workVolume({ workspaceFile: "/w/cod.json" }), target: "/work", readOnly: false, volume: true }],
+    });
+    const joined = argv.join(" ");
+    expect(joined).toContain("type=volume");
+    expect(joined).toContain("/work");
+    // A volume, not a bind: nothing on the host is handed to a container that
+    // runs arbitrary agents.
+    expect(joined).not.toContain("type=bind,src=" + "cod-sandbox");
+  });
+
+  test("the work volume is per-workspace so two never share one", async () => {
+    const { workVolume } = await import("../src/docker");
+    const a = workVolume({ workspaceFile: "/a/cod.json" });
+    const b = workVolume({ workspaceFile: "/b/cod.json" });
+    expect(a).not.toBe(b);
+    // Deterministic, so `cod down` and `cod up` find the same one.
+    expect(workVolume({ workspaceFile: "/a/cod.json" })).toBe(a);
+  });
+
+  test("the entrypoint initialises a git repo, and never reinitialises one", async () => {
+    // `git worktree add` needs a repository. Without this, the per-job worktree
+    // design in src/worktree.ts has nothing to branch from and every job shares
+    // one checkout - the exact race it exists to prevent.
+    const entrypoint = await Bun.file(ENTRYPOINT).text();
+    const code = entrypoint
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("#"))
+      .join("\n");
+    expect(code).toContain("git init");
+    // Idempotent: a restart must not reinitialise and lose committed work.
+    expect(code).toContain("[ ! -d /work/.git ]");
+    // Identity per-repo, not --global: a global write would not survive a
+    // rebuild and would be a write to the image's home.
+    expect(code).toContain("user.email");
+    expect(code).not.toContain("config --global");
+  });
+
   test("the entrypoint asks the schema for workers, never greps the file", async () => {
     // The old `sed 's/.*"name".../'` matched every "name" key, so it made
     // directories for the company, the departments AND every cron job. It is
@@ -114,7 +165,10 @@ describe("image inputs", () => {
       env: {},
     });
     expect(argv).toContain("--restart");
-    expect(argv[argv.indexOf("--restart") + 1]).toBe("unless-stopped");
+    // Bounded, not `unless-stopped`: verified on this host, `on-failure:3`
+    // against a process that exits 1 stops at restarts=3.
+    expect(argv[argv.indexOf("--restart") + 1]).toMatch(/^on-failure:\d+$/);
+    expect(argv[argv.indexOf("--restart") + 1]).not.toBe("unless-stopped");
     expect(argv).not.toContain("--rm");
   });
 
