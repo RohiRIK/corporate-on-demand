@@ -14,6 +14,7 @@ import {
   MAX_RESULTS,
   formatResult,
   listResults,
+  pruneResults,
   recordResult,
   resultsDir,
   type JobResult,
@@ -173,6 +174,94 @@ describe("listResults", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("pruneResults", () => {
+  test("removes the oldest beyond the cap and keeps the newest", () => {
+    const dir = scratch();
+    try {
+      for (let i = 0; i < 600; i += 1) {
+        recordResult(result({ cron: `j${i}`, startedAt: 1_700_000_000_000 + i * 1000 }), { stateDir: dir });
+      }
+      const outcome = pruneResults(dir, 500);
+      expect(outcome.removed).toBe(100);
+      // Counted from the filesystem, not through listResults: that caps its
+      // read at MAX_RESULT_FILES, so asking it for 500 proves nothing.
+      expect(readdirSync(resultsDir(dir))).toHaveLength(500);
+      // The survivors must be the NEWEST, not an arbitrary slice.
+      const left = listResults(dir, { limit: 10_000 });
+      expect(left[0]?.cron).toBe("j599");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("reports what it removed, so pruning is never silent", () => {
+    const dir = scratch();
+    try {
+      for (let i = 0; i < 10; i += 1) {
+        recordResult(result({ startedAt: 1_700_000_000_000 + i }), { stateDir: dir });
+      }
+      const outcome = pruneResults(dir, 4);
+      expect(outcome.removed).toBe(6);
+      // A prune that deleted silently would be its own surprise.
+      expect(outcome.removed).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("does nothing when the directory is already under the cap", () => {
+    const dir = scratch();
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        recordResult(result({ startedAt: 1_700_000_000_000 + i }), { stateDir: dir });
+      }
+      expect(pruneResults(dir, 500).removed).toBe(0);
+      expect(listResults(dir)).toHaveLength(3);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("never deletes a corrupt file, which is evidence of something", () => {
+    const dir = scratch();
+    try {
+      for (let i = 0; i < 5; i += 1) {
+        recordResult(result({ startedAt: 1_700_000_000_000 + i }), { stateDir: dir });
+      }
+      const corrupt = join(resultsDir(dir), "00000000000000000-000.json");
+      writeFileSync(corrupt, "{ half-writ", "utf8");
+      pruneResults(dir, 2);
+      // The unparseable file is already unreadable; deleting it would destroy
+      // the evidence of whatever wrote it badly.
+      expect(existsSync(corrupt)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a keepLast of 0 is clamped to 1 rather than deleting everything", () => {
+    const dir = scratch();
+    try {
+      for (let i = 0; i < 4; i += 1) {
+        recordResult(result({ startedAt: 1_700_000_000_000 + i }), { stateDir: dir });
+      }
+      pruneResults(dir, 0);
+      expect(listResults(dir)).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a missing directory prunes to nothing rather than throwing", () => {
+    // keepLast is still required: there is no sensible default for "how many
+    // results to keep", and defaulting it would silently keep a different
+    // number than the caller believes.
+    const outcome = pruneResults("/nonexistent/cod", 500);
+    expect(outcome.removed).toBe(0);
+    expect(outcome.remaining).toBe(0);
   });
 });
 

@@ -10,7 +10,7 @@
  * remove from the subprocess path; it has no business being reintroduced here.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Cron } from "./workspace";
 
@@ -111,6 +111,51 @@ export function listResults(stateDir: string, options: ListOptions = {}): JobRes
     results.push(parsed);
   }
   return results;
+}
+
+/**
+ * Delete the oldest results beyond `keepLast`, and report what went.
+ *
+ * One file per run means an unbounded directory: a job every minute is 525,600
+ * files a year. Pruning is REPORTED rather than silent — silent deletion of
+ * data is its own surprise, and "why did my result disappear" needs an answer
+ * in the log rather than a guess.
+ *
+ * Unparseable files are never pruned. They are already unreadable, and
+ * deleting them would destroy the evidence of whatever wrote them badly.
+ */
+export function pruneResults(
+  stateDir: string,
+  keepLast: number,
+): { readonly removed: number; readonly remaining: number } {
+  const dir = resultsDir(stateDir);
+  if (!existsSync(dir)) return { removed: 0, remaining: 0 };
+  const keep = Math.max(1, Math.floor(keepLast));
+  const names = readdirSync(dir)
+    .filter((name) => name.endsWith(".json"))
+    .sort()
+    .reverse();
+  if (names.length <= keep) return { removed: 0, remaining: names.length };
+
+  let removed = 0;
+  for (const name of names.slice(keep)) {
+    const path = join(dir, name);
+    // Only remove a file that is actually a result, so a hand-placed note or a
+    // half-written file is never the thing that disappears.
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<JobResult>;
+      if (typeof parsed.cron !== "string" || typeof parsed.startedAt !== "number") continue;
+    } catch {
+      continue;
+    }
+    try {
+      unlinkSync(path);
+      removed += 1;
+    } catch {
+      // A file we cannot delete is not a reason to stop pruning the rest.
+    }
+  }
+  return { removed, remaining: names.length - removed };
 }
 
 /** A one-line human rendering. */

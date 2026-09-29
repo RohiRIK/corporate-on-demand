@@ -101,6 +101,7 @@ function main(): void {
   }
 
   parsedMaxConcurrent = parsed.data.maxConcurrent;
+  const resultRetention = parsed.data.resultRetention;
   const jobNames = parsed.data.crons.filter((c) => c.enabled).map((c) => c.name);
   beat(jobNames);
   log(`heartbeat written for ${jobNames.length} job(s), run ${RUN_ID}`);
@@ -111,6 +112,13 @@ function main(): void {
     maxConcurrent: parsed.data.maxConcurrent,
     run: async (cron): Promise<void> => {
       beat(jobNames);
+      // Prune here rather than on every write, so a busy schedule does not
+      // re-scan the directory 500 times a minute.
+      const { pruneResults } = await import("./results");
+      const pruned = pruneResults(STATE_DIR, resultRetention);
+      if (pruned.removed > 0) {
+        log(`pruned ${pruned.removed} old result(s), keeping ${resultRetention}`);
+      }
       const startedAt = Date.now();
       // Recorded in a `finally` so a FAILED job leaves a trace. A failure that
       // vanishes is exactly what makes a schedule untrustworthy - you cannot
