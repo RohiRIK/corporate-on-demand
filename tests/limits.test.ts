@@ -59,24 +59,68 @@ describe("createGate", () => {
     expect(peak).toBe(1);
   });
 
-  test("a released slot is handed to the next waiter", async () => {
-    // A leaked slot would permanently shrink the ceiling, so this checks the
-    // gate returns to full width after a task that throws.
+  test("a released slot is handed to the next waiter, not freed to nobody", async () => {
+    // The distinction that matters: `release` with a waiter present must HAND
+    // OVER the slot, so `active` stays at the limit rather than dipping. A gate
+    // that simply decremented would let a third task start while the second was
+    // still waiting, and the ceiling would be 1 in name only.
+    const gate = createGate(1);
+    await gate.acquire();
+    expect(gate.active()).toBe(1);
+
+    let handed = false;
+    const waiter = gate.acquire().then(() => {
+      // Resolving means this waiter now owns the slot.
+      expect(gate.active()).toBe(1);
+      handed = true;
+    });
+    // Let the waiter reach its await before the slot is released.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(handed).toBe(false);
+
+    gate.release();
+    await waiter;
+    expect(handed).toBe(true);
+    expect(gate.active()).toBe(1);
+    gate.release();
+  });
+
+  test("a task that throws still frees its slot, via the caller's finally", async () => {
+    // The gate does not own the `finally` - `src/scheduler.ts` does. So this
+    // test exercises the pattern the scheduler actually uses: acquire, work in
+    // a try, release in a finally. If a throwing job leaked its slot, the
+    // ceiling would shrink by one on every failure and eventually deadlock the
+    // whole schedule.
+    const gate = createGate(2);
+    const task = async (shouldThrow: boolean): Promise<void> => {
+      await gate.acquire();
+      try {
+        if (shouldThrow) throw new Error("work blew up");
+      } finally {
+        gate.release();
+      }
+    };
+
+    expect(gate.active()).toBe(0);
+    await expect(task(true)).rejects.toThrow("work blew up");
+    expect(gate.active()).toBe(0);
+
+    // A success and a failure interleaved must leave the gate at full width.
+    await Promise.allSettled([task(false), task(true), task(false)]);
+    expect(gate.active()).toBe(0);
+
+    // And it must still be usable afterwards.
+    await task(false);
+    expect(gate.active()).toBe(0);
+  });
+
+  test("repeated acquire/release cycles return to zero", async () => {
+    // The no-leak property on its own, named for what it actually checks.
     const gate = createGate(1);
     for (let n = 0; n < 4; n += 1) {
       await gate.acquire();
       gate.release();
     }
-    expect(gate.active()).toBe(0);
-  });
-
-  test("a throwing task still frees its slot", async () => {
-    const gate = createGate(2);
-    await gate.acquire();
-    await gate.acquire();
-    expect(gate.active()).toBe(2);
-    gate.release();
-    gate.release();
     expect(gate.active()).toBe(0);
   });
 
