@@ -31,12 +31,27 @@ fail() { printf '  FAIL  %s\n' "$1"; FAILED=1; }
 unset COD_WORKSPACE COD_STATE_DIR COD_IMAGE 2>/dev/null || true
 
 step "typecheck"
-# `bun x`, not `bunx`. There is no bunx binary on this host, so verify.sh only
-# worked when an interactive shell happened to have a shim on PATH - and then it
-# failed for anyone else, including CI and this script's own subprocess. The
-# same applies to the test runner below.
-if bun x tsc --noEmit; then
-  pass "tsc --noEmit"
+# Use the typechecker already installed in node_modules, not `bun x`.
+#
+# `bun x` goes through the package-resolution path even though typescript is
+# already a devDependency and its binary is sitting right there in
+# node_modules/.bin. That is slow, it is non-deterministic when offline, and -
+# the reason this changed - it looks to a security scanner like a new package
+# is being fetched, which triggers a network threat-intelligence lookup. That
+# lookup times out on a slow link and BLOCKS the run. Three separate stalls
+# traced back to this one line.
+#
+# The fallback keeps the script working in a checkout with no node_modules
+# (a fresh clone before `bun install`), where there is genuinely nothing local
+# to use.
+if [ -x node_modules/.bin/tsc ]; then
+  tsc_cmd="node_modules/.bin/tsc"
+else
+  tsc_cmd="bun x tsc"
+fi
+
+if $tsc_cmd --noEmit; then
+  pass "$tsc_cmd --noEmit"
 else
   fail "tsc reported type errors"
 fi
