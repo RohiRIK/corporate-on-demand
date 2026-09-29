@@ -1,16 +1,17 @@
 /**
- * Running a scheduled job.
+ * The result contract for a scheduled job.
  *
- * Deliberately an `echo` and nothing else.
+ * `TaskResult` is the entire interface between the supervisor and the work, and
+ * it is deliberately the narrowest shape that can carry a job's identity and
+ * outcome. Nothing here describes HOW the work happened - step counts, progress
+ * and cancellation live in `src/dispatch.ts`, which is the only caller that
+ * needs them.
  *
- * The point of this phase is to prove the plumbing — that a `Bun.cron` tick
- * reaches a named agent's task and the result comes back out — without
- * building an execution layer nobody has specified yet. Model routing, spend
- * ceilings, merge policy and inter-agent locking are all undecided, and
- * guessing at them here would optimise the wrong thing.
- *
- * So a job echoes. That is honest, testable, and reversible: the real
- * dispatcher replaces `echoTask` and nothing above it changes.
+ * `echoTask` remains as the original synchronous echo and as the reference
+ * shape. It is no longer on the live path: the supervisor now goes through
+ * `dispatch`, which wraps a driver and reports every step. Keeping the function
+ * is useful because it pins the smallest correct output, and because the
+ * dispatcher's echo driver must produce exactly this.
  */
 
 import type { Cron } from "./workspace";

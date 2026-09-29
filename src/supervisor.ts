@@ -9,7 +9,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Workspace } from "./workspace";
-import { echoTask } from "./task";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
 import { beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
@@ -136,7 +135,16 @@ function main(): void {
       // vanishes is exactly what makes a schedule untrustworthy - you cannot
       // debug what you cannot see, and "it just stopped" is the worst report.
       try {
-        const result = echoTask(cron);
+        // Through the dispatcher, not around it. The step loop is the reason
+        // `dispatch` exists, so the supervisor goes through it even with the
+        // echo driver - otherwise the seam would be proven only by its tests
+        // and never by the thing that uses it.
+        const { dispatch, echoDriver } = await import("./dispatch");
+        const result = await dispatch(cron, echoDriver, {
+          onStep: (step): void => {
+            log(`step ${step.no}/${step.kind}: ${step.label} (${step.ms}ms)`);
+          },
+        });
         log(`job "${result.cron}" -> ${result.output}`);
         recordResult(
           {
