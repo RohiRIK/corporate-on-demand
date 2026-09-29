@@ -216,6 +216,27 @@ in shipped code. Both are now pinned by tests that would have failed before.
 
 ### Known limitations
 
+- **`QUICKSTART.md` said 47 tests.** It had been carried over from an early
+  stage and never corrected, while the badge and README said 221. A reader
+  running the command saw a number that matched nothing. Corrected to the
+  measured 221.
+
+- **A doubled `/**` in `src/commands.ts` opened the purge doc comment.** It
+  compiled, because the inner `/**` is just comment text, so nothing caught it.
+  Reported here rather than fixed, since `src/` was out of scope for the docs
+  pass; **fixed in `85cdc20`** immediately after. Recorded because a silent
+  cosmetic defect that survives every test is exactly the kind that gets
+  mistaken for intent later.
+- **Two tests in `tests/limits.test.ts` are mislabelled, and one does not
+  exercise what its name says.** `a released slot is handed to the next waiter`
+  never creates a waiter — it acquires and releases in a loop and asserts
+  `active() === 0`, which is the "no leak" check, not a hand-off check.
+  `a throwing task still frees its slot` throws nothing; it calls
+  `acquire`/`release` directly, and the `finally` it claims to cover is in
+  `scheduler.ts`, not in the gate. The FIFO hand-off *is* covered, by
+  `waiters are served in arrival order`. Left unfixed: `tests/` is out of
+  scope for this change. The gate's behaviour is not in doubt — the other four
+  tests measure it, and `scheduler.ts` releases in a `finally` by inspection.
 - **A scheduled job still runs the echo driver, not real work.** The full path
   is real — a `Bun.cron` tick reaches a named agent, runs through
   `src/dispatch.ts`, reports each step, and the result comes back out — but the
