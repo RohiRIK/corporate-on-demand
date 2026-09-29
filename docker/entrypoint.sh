@@ -29,10 +29,19 @@ mkdir -p /work
 # `acme engineering builder reviewer tester heartbeat nightly`. Wrong, and
 # quietly so. The schema knows what a worker is; ask it.
 if [ -f "$WORKSPACE_FILE" ]; then
-  workers="$(cod-workers "$WORKSPACE_FILE" 2>/dev/null || true)"
+  # The error is captured, not discarded. An earlier version used
+  # `2>/dev/null || true`, which turned a hard schema mismatch into a bare
+  # "refusing to guess" - the real cause was lost, and the container just
+  # failed to start. Silent failure of a guard is how you lose an hour.
+  worker_err=""
+  if ! workers="$(cod-workers "$WORKSPACE_FILE" 2>/tmp/workers.err)"; then
+    worker_err="$(cat /tmp/workers.err 2>/dev/null || echo unknown error)"
+  fi
+  rm -f /tmp/workers.err
 
   if [ -z "$workers" ]; then
-    log "FATAL: could not read workers from the workspace; refusing to guess"
+    log "FATAL: could not read workers from $WORKSPACE_FILE; refusing to guess"
+    [ -n "$worker_err" ] && log "reason: $worker_err" >&2
     exit 2
   fi
 

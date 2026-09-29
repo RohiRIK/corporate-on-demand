@@ -21,6 +21,8 @@ function workspaceWith(crons: Workspace["crons"]): Workspace {
     departments: [{ name: "engineering", workers: [{ name: "builder", role: "builds", model: "m" }] }],
     crons,
     maxConcurrent: 2,
+    timezone: "UTC",
+    resultRetention: 500,
   };
 }
 

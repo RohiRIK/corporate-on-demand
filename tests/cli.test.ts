@@ -183,6 +183,7 @@ describe("security", () => {
       network: "bridge",
       memory: "2g",
       cpus: "2",
+      env: {},
       user: "1000:1000",
     });
     const joined = argv.join(" ");
@@ -205,6 +206,7 @@ describe("security", () => {
       network: "bridge",
       memory: "2g",
       cpus: "2",
+      env: {},
       user: "1000:1000",
     });
     expect(argv.join(" ")).toContain("readonly");
@@ -275,6 +277,8 @@ describe("workspace schema", () => {
       ],
       crons: [],
       maxConcurrent: 2,
+      timezone: "UTC",
+      resultRetention: 500,
       };
     expect(allWorkers(workspace).map((w) => w.name)).toEqual(["w1", "w2"]);
     expect(findWorker(workspace, "w2")?.name).toBe("w2");

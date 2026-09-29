@@ -104,6 +104,7 @@ function main(): void {
   const jobNames = parsed.data.crons.filter((c) => c.enabled).map((c) => c.name);
   beat(jobNames);
   log(`heartbeat written for ${jobNames.length} job(s), run ${RUN_ID}`);
+  log(`timezone ${parsed.data.timezone} (${new Date().toString().slice(-25)})`);
 
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {
     report: log,

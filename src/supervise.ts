@@ -35,8 +35,9 @@ export interface SupervisorResult {
 export async function runSupervisor(
   config: Config,
   container: string,
-  options: { readonly timeoutMs?: number; readonly runner?: Runner } = {},
+  options: { readonly timeoutMs?: number; readonly runner?: Runner; readonly timezone?: string } = {},
 ): Promise<SupervisorResult> {
+  const timezone = options.timezone ?? "UTC";
   const runner = options.runner ?? defaultRunner;
   const timeoutMs = options.timeoutMs ?? 10_000;
   try {
@@ -48,9 +49,14 @@ export async function runSupervisor(
         "/work",
         "-e",
         `COD_WORKSPACE_FILE=/cod/cod.json`,
+        // Before the container name: after it, Docker treats it as an argument
+        // to the command rather than an exec option.
+        "-e",
+        `TZ=${timezone}`,
         container,
-        "bun",
-        "run",
+        // The wrapper is a shell script, so it must be EXECUTED, not handed to
+        // `bun run` - which tries to parse it as JavaScript and dies with a
+        // syntax error pointing at the word "bun" on the shebang line.
         SUPERVISOR_ENTRY,
       ],
       timeoutMs,

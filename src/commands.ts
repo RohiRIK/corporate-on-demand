@@ -10,6 +10,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_MAX_CONCURRENT } from "./limit";
+import { describeTimezone, hostTimezone } from "./timezone";
 import { loadConfig, ensureStateDir, ensureParentDir, type Config } from "./config";
 import { RuntimeFailure, UsageError } from "./errors";
 import { isDockerAvailable } from "./docker";
@@ -107,6 +108,10 @@ const commands: Record<
       departments: [department],
       crons: [],
       maxConcurrent: DEFAULT_MAX_CONCURRENT,
+      // The HOST's zone, not UTC. A new workspace should be correct without
+      // the operator having to know the field exists.
+      timezone: hostTimezone(),
+      resultRetention: 500,
     };
 
     const parsed = Workspace.safeParse(workspace);
@@ -191,7 +196,7 @@ const commands: Record<
     }
     const { containerNameFor, runSupervisor } = await import("./supervise");
     const name = containerNameFor(config);
-    const result = await runSupervisor(config, name);
+    const result = await runSupervisor(config, name, { timezone: readWorkspace(config).timezone });
     print(
       config,
       result,
@@ -235,6 +240,7 @@ const commands: Record<
         running,
         liveness: liveness.state,
         supervisorJobs: liveness.heartbeat?.jobs ?? null,
+        timezone: workspace.timezone,
         workers: allWorkers(workspace).map((w) => w.name),
         crons: workspace.crons.map((c) => c.name),
       },
@@ -242,6 +248,9 @@ const commands: Record<
         [
           `${workspace.company.name} — container ${running ? "up" : "down"}`,
           `  ${formatLiveness(liveness)}`,
+          // A cron expression means nothing without knowing which clock it
+          // refers to, so the resolved zone is always on screen.
+          `  timezone ${describeTimezone(workspace.timezone)}`,
           `  workers  ${allWorkers(workspace).map((w) => w.name).join(", ") || "none"}`,
           `  crons    ${workspace.crons.map((c) => c.name).join(", ") || "none"}`,
         ].join("\n"),

@@ -44,6 +44,8 @@ export type Cron = z.infer<typeof Cron>;
  * Strict on purpose: a typo in a workspace file should fail loudly at `init`
  * rather than silently drop a worker that someone believed they had hired.
  */
+import { DEFAULT_TIMEZONE, isValidTimezone } from "./timezone";
+
 export const Workspace = z
   .object({
     version: z.literal(1),
@@ -54,6 +56,15 @@ export const Workspace = z
     // so the schema refuses it here rather than letting a clamp paper over a
     // configuration mistake the user should see.
     maxConcurrent: z.number().int().min(1).max(64).default(2),
+    // The clock every cron expression in this file refers to. Validated with
+    // Intl rather than trusted, because a zone that silently behaves as UTC is
+    // how every schedule here was hours off before this existed.
+    timezone: z.string().refine((z) => isValidTimezone(z), {
+      message: "not a valid IANA timezone, e.g. Asia/Jerusalem or UTC",
+    }).default(DEFAULT_TIMEZONE),
+    // How many result files to keep. One file per run means an unbounded
+    // directory otherwise: a job every minute is 525,600 files a year.
+    resultRetention: z.number().int().min(1).max(100_000).default(500),
   })
   .strict();
 export type Workspace = z.infer<typeof Workspace>;

@@ -182,6 +182,14 @@ export interface ContainerSpec {
   readonly memory: string;
   readonly cpus: string;
   readonly user: string;
+  /**
+   * Environment for the container, and for every `docker exec` into it.
+   *
+   * Holds TZ today. It exists as a map rather than a hardcoded flag because a
+   * timezone set only at `docker run` is a timezone that does not reach the
+   * process that actually schedules the jobs.
+   */
+  readonly env: Readonly<Record<string, string>>;
 }
 
 /**
@@ -213,6 +221,9 @@ export function buildRunArgv(spec: ContainerSpec): string[] {
   ];
   for (const [key, value] of Object.entries(spec.labels)) {
     argv.push("--label", `${key}=${value}`);
+  }
+  for (const [key, value] of Object.entries(spec.env)) {
+    argv.push("-e", `${key}=${value}`);
   }
   for (const mount of spec.mounts) {
     assertMountAllowed(mount.source);
@@ -386,6 +397,7 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
         network: "bridge",
         memory: "2g",
         cpus: "2",
+        env: { TZ: workspace.timezone },
         user: "1000:1000",
       };
       await run(buildRunArgv(spec), wsName);
