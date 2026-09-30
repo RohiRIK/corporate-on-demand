@@ -1,0 +1,16 @@
+node_modules/
+
+# The 177 MB opencode binary is fetched by scripts/vendor-opencode.sh with a
+# pinned checksum, not committed. A binary blob in git is permanent and makes
+# every clone 177 MB heavier for no benefit.
+vendor/opencode/*/opencode
+.local/
+*.log
+.env
+
+# Runtime artefacts. The work ledger lives in the state directory and
+# is a cache over the files beside it; a committed copy is a stale copy,
+# and it can be a scratch database written by a mistyped --state flag.
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

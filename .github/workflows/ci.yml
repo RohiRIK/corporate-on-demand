@@ -1,0 +1,87 @@
+name: CI
+
+# Runs the gates that do not need Docker, a model provider, or minutes of
+# wall clock.
+#
+# The clean-room (`scripts/cleanroom.sh`) is deliberately NOT run here. It
+# needs Docker, builds a 400 MB image, and calls a free model endpoint that
+# fails intermittently - measured twice this session, including a 180s hang
+# from the host. A build that goes red because a free provider had a bad
+# afternoon is a build people learn to ignore, and an ignored build is worse
+# than no build. The clean-room stays a human-triggered check.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# Cancel superseded runs on the same ref: a queue of stale builds is a queue
+# nobody reads.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify (bun 1.3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # The pinned runtime, not "latest". CI must not be able to pass on a
+      # Bun version the container does not use - the whole image is built on
+      # 1.3.12 because Bun.cron does not exist below it.
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.12"
+
+      # --frozen-lockfile, so CI cannot pass on dependencies the committed
+      # lockfile does not describe.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The 177 MB opencode binary is fetched with a pinned checksum, not
+      # committed. It is only needed for the image build, but verify.sh checks
+      # for it, so fetch it here too.
+      - name: Vendor opencode (pinned checksum)
+        run: sh scripts/vendor-opencode.sh
+
+      - name: Verify (typecheck, tests, build inputs, shell syntax)
+        run: sh verify.sh
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The repository's own AGENTS.md requires a secret scan before
+      # publishing. It runs as its own job so a leak is a red build with an
+      # obvious name rather than a failure buried in a test run.
+      - name: Scan tracked files for credential shapes
+        run: |
+          if git grep -nIE 'sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' \
+               -- . ':!bun.lock' ':!docs/SECURITY_POSTURE.md' ':!src/redact.ts' \
+               ':!tests/redact.test.ts' ':!tests/results.test.ts' \
+               ':!scripts/vendor-opencode.sh'; then
+            echo "::error::possible credential in a tracked file"
+            exit 1
+          fi
+          echo "no credential shapes found in tracked files"
+          # The exclusions above are all files that legitimately CONTAIN a
+          # credential shape: the redaction patterns themselves, the tests that
+          # prove they work, the checksum script, and this scan. They are listed
+          # individually rather than globbed so a new one cannot slip in.
+
+      - name: Confirm the large binary is not tracked
+        run: |
+          if git ls-files | grep -q 'vendor/opencode/.*/opencode$'; then
+            echo "::error::the 177 MB opencode binary is tracked; it must be fetched by scripts/vendor-opencode.sh"
+            exit 1
+          fi
+          echo "vendored binary correctly untracked"

@@ -1,0 +1,103 @@
+# The workspace image.
+#
+# Two things are pinned deliberately, because a mutable tag is how a build
+# silently starts producing a different container:
+#
+#   - the base image by digest, not by tag
+#   - the opencode binary, vendored into the repo rather than resolved at
+#     build time through a version manager
+#
+# `cod doctor` reports the opencode version, so drift between the host and
+# the image is visible instead of surprising.
+
+FROM oven/bun@sha256:8956c7667fa17beb6e3c664115e66bdacfe502da5d99603626e74c197bdef160
+
+# Tools an agent needs to build a project. Installed in one layer so the apt
+# cache is reused when the toolchain list changes.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      git \
+      curl \
+      ca-certificates \
+      build-essential \
+      python3 \
+      python3-pip \
+      jq \
+      ripgrep \
+      unzip \
+      postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# opencode 1.18.31 - a self-contained ELF binary, so no Node layer is needed
+# and no runtime is resolved at build time.
+COPY --chmod=755 vendor/opencode/1.18.31/opencode /usr/local/bin/opencode
+
+# The unprivileged user every agent runs as.
+#
+# The base image already ships a `bun` user at UID 1000, so there is nothing
+# to create: trying to add another one fails with "UID 1000 is not unique".
+# Reusing the existing user is better than fighting it, and it keeps the UID
+# aligned with the --user 1000:1000 the CLI passes. Adding a *different* uid
+# here would mean the two could drift apart silently.
+RUN id -u bun | grep -qx 1000 \
+    || (echo "FATAL: expected the base image to have uid 1000, found $(id -u bun)" && exit 1)
+
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# The supervisor reads the mounted workspace and registers its cron jobs on
+# Bun.cron. It is run via docker exec rather than from the entrypoint, so a
+# crash is visible as a failed exec instead of a restart loop.
+# The supervisor is BUNDLED, not copied. Copying loose .ts files pulls in the
+# whole import graph, and the container has no node_modules to resolve it
+# from - the copy compiled fine and then died on the first import.
+# `bun build --target=bun` inlines all 99 modules into one readable file.
+COPY package.json bun.lock ./
+COPY src ./src
+RUN bun install --production --frozen-lockfile
+RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/supervisor.js \
+    && bun build src/workers-cli.ts --target=bun --outfile /usr/local/lib/cod/workers.js
+
+# Readable by the unprivileged user the container runs as: a root-owned file
+# behind a root-owned directory is unreadable to `bun`.
+RUN chmod -R 755 /usr/local/lib/cod
+# `sh -n` parses the file at build time, so a malformed wrapper fails the build
+# instead of the first cron run.
+RUN { \
+      printf '%s\n' '#!/bin/sh'; \
+      printf '%s\n' 'exec bun run /usr/local/lib/cod/supervisor.js'; \
+    } > /usr/local/bin/supervisor \
+    && { \
+      printf '%s\n' '#!/bin/sh'; \
+      printf '%s\n' 'exec bun run /usr/local/lib/cod/workers.js "$@"'; \
+    } > /usr/local/bin/cod-workers \
+    && { \
+      printf '%s\n' '#!/bin/sh'; \
+      printf '%s\n' 'exec bun run /usr/local/lib/cod/supervisor.js "$@"'; \
+    } > /usr/local/bin/cod-supervisor \
+    && chmod 755 /usr/local/bin/supervisor /usr/local/bin/cod-workers /usr/local/bin/cod-supervisor \
+    && sh -n /usr/local/bin/supervisor \
+    && sh -n /usr/local/bin/cod-workers \
+    && sh -n /usr/local/bin/cod-supervisor
+
+USER bun
+WORKDIR /work
+
+# `git config --system` as a non-root user fails; the safe.directory setting is
+# what lets an agent read a bind-mounted repository owned by another uid.
+RUN git config --global --add safe.directory '*' || true
+
+# Git identity, image-wide.
+#
+# Without this, an agent that runs `git init` in ANY directory outside /work
+# cannot commit: "Author identity unknown". That failure is invisible - the
+# agent's work simply does not save and nothing says why. The entrypoint sets
+# an identity on /work, but that covers one path; a clone, a subdirectory, or a
+# scratch repo is still broken.
+#
+# Image-wide rather than per-repo on purpose, and it is not a credential: it is
+# a name for commits authored inside an ephemeral container that has no
+# credential of any kind.
+RUN git config --global user.email "agent@cod.local" \
+    && git config --global user.name "cod agent" \
+    && git config --global commit.gpgsign false
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

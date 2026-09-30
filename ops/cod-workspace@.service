@@ -1,0 +1,39 @@
+# Start a cod workspace container on boot, and keep it running.
+#
+# The last missing fundamental: `cod up` is a manual command, so a host reboot
+# silently loses the schedule. Docker's own --restart policy only survives a
+# DAEMON restart, not a host reboot - the container is gone until something
+# starts it again. That something is this unit.
+#
+# Templated on the workspace name so several workspaces can run at once.
+#
+#   systemctl enable --now cod-workspace@acme.service
+#
+# It runs `cod up`, which is idempotent: if the container is already up this is
+# a no-op, so enabling it for a running workspace is safe.
+
+[Unit]
+Description=cod workspace container (%i)
+Documentation=https://github.com/RohiRIK/corporate-on-demand
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+# The state dir must exist before the container starts, or Docker creates the
+# bind mount root-owned and the agent cannot write to it. This lives in
+# [Service], not [Unit] - systemd-analyze verify caught that when it was there,
+# and ignored the directive rather than failing.
+ExecStartPre=/bin/sh -c 'mkdir -p /var/lib/cod/%i'
+RemainAfterExit=yes
+Environment=COD_WORKSPACE_FILE=/var/lib/cod/%i/cod.json
+Environment=COD_STATE_DIR=/var/lib/cod/%i
+ExecStart=/usr/local/bin/cod up --workspace /var/lib/cod/%i/cod.json
+# `cod down` on stop, so `systemctl stop` means stop rather than leave it
+# running with nothing supervising it.
+ExecStop=/usr/local/bin/cod down --workspace /var/lib/cod/%i/cod.json
+TimeoutStartSec=900
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

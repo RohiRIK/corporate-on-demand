@@ -1,363 +1,401 @@
 <div align="center">
 
 ```
- ██████╗ ██████╗ ██████╗ ██████╗  ██████╗ ██████╗  █████╗ ████████╗███████╗
-██╔════╝██╔═══██╗██╔══██╗██╔══██╗██╔═══██╗██╔══██╗██╔══██╗╚══██╔══╝██╔════╝
-██║     ██║   ██║██████╔╝██████╔╝██║   ██║██████╔╝███████║   ██║   █████╗  
-██║     ██║   ██║██╔══██╗██╔═══╝ ██║   ██║██╔══██╗██╔══██║   ██║   ██╔══╝  
-╚██████╗╚██████╔╝██║  ██║██║     ╚██████╔╝██║  ██║██║  ██║   ██║   ███████╗
- ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚═╝      ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
-                  ██████╗ ███╗   ██╗    ██████╗ ███████╗███╗   ███╗ █████╗ ███╗   ██╗██████╗ 
-                 ██╔═══██╗████╗  ██║    ██╔══██╗██╔════╝████╗ ████║██╔══██╗████╗  ██║██╔══██╗
-                 ██║   ██║██╔██╗ ██║    ██║  ██║█████╗  ██╔████╔██║███████║██╔██╗ ██║██║  ██║
-                 ██║   ██║██║╚██╗██║    ██║  ██║██╔══╝  ██║╚██╔╝██║██╔══██║██║╚██╗██║██║  ██║
-                 ╚██████╔╝██║ ╚████║    ██████╔╝███████╗██║ ╚═╝ ██║██║  ██║██║ ╚████║██████╔╝
-                  ╚═════╝ ╚═╝  ╚═══╝    ╚═════╝ ╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝ 
+ ██████╗  ██████╗ ██████╗
+██╔════╝ ██╔═══██╗██╔══██╗
+██║       ██║   ██║██████╔╝
+██║       ██║   ██║██╔══██╗
+╚██████╗  ╚██████╔╝██║  ██║
+ ╚═════╝   ╚═════╝ ╚═╝  ╚═╝
 ```
 
-**Autonomous multi-agent corporate system for self-evolving projects**
+**A credential-free container workspace for scheduled AI agents**
 
-*Departments. Pipelines. Anti-slop. C-Suite oversight. Runs while you sleep.*
+One container per workspace. On-device cron. No API key.
 
-🕹️ **[Live Demo: Arcade Platform](https://github.com/RohiRIK/arcade-platform)** — 7 games, 16 departments, fully autonomous. See Corporate on Demand in action.
-
-[![Version](https://img.shields.io/badge/version-3.8.0-blue?style=flat-square)]()
-[![Hermes](https://img.shields.io/badge/hermes--agent-skill-purple?style=flat-square)](https://hermes-agent.nousresearch.com)
+[![Bun](https://img.shields.io/badge/bun-1.3.12-white?style=flat-square&logo=bun)](https://bun.sh)
+[![opencode](https://img.shields.io/badge/opencode-1.18.31-blue?style=flat-square)](https://github.com/sst/opencode)
+[![Tests](https://img.shields.io/badge/tests-257%20passing-brightgreen?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
-[![Departments](https://img.shields.io/badge/departments-16-orange?style=flat-square)]()
-[![Impl Guides](https://img.shields.io/badge/impl%20guides-25%2B-yellow?style=flat-square)]()
-[![Docs](https://img.shields.io/badge/docs-45%2B%20files-brightgreen?style=flat-square)]()
 
 </div>
 
 ---
 
-## What is this?
+## What this is
 
-A [Hermes Agent](https://hermes-agent.nousresearch.com) skill that turns cron jobs into an autonomous corporation. Each department is an AI agent running on a schedule — with its own identity, mandatory pipeline, quality contract, and inbox. A full C-Suite (CEO, CTO, CISO, CPO) oversees everything, and a Board provides strategic direction.
+`cod` takes a directory from empty to a scheduled AI agent, with no credentials
+anywhere in the picture.
 
-**The result**: your project improves itself while you sleep. You wake up to a morning report of what happened overnight.
+```sh
+git clone https://github.com/RohiRIK/corporate-on-demand.git
+cd corporate-on-demand
+bun install
+sh scripts/vendor-opencode.sh
 
-```
-                              ┌─────────────────┐
-                              │    👤 Human      │
-                              │  morning report  │
-                              │   @ 08:00        │
-                              └────────┬─────────┘
-                                       │ reads
-                              ┌────────▼─────────┐
-                              │   🤵 CEO Agent   │
-                              │  inspects 2x/day │
-                              │  grades A-F      │
-                              │  issues directives│
-                              │  activates sprints│
-                              └────────┬─────────┘
-                                       │ oversees
-              ┌────────────────────────┼────────────────────────┐
-              │                        │                        │
-     ┌────────▼──────┐       ┌────────▼────────┐      ┌───────▼───────┐
-     │  C-Suite       │       │  state.json     │      │  📬 Inboxes   │
-     │  CTO · CISO    │       │  shared brain   │      │  cross-dept   │
-     │  CPO · CFO     │       │  pipeline       │      │  communication│
-     └────────┬───────┘       │  grades · pivot │      └───────────────┘
-              │               │  sprint mode    │
-              │               └─────────────────┘
-    ┌─────────┼─────────────────────────────────────┐
-    │         │         │         │         │        │
-┌───▼──┐ ┌───▼──┐ ┌───▼───┐ ┌──▼───┐ ┌───▼──┐ ┌──▼────┐
-│🔬 R&D│ │🎨 UX │ │🔧Infra│ │📋 PM │ │🏛Board│ │🎭Crea-│
-│+Labs │ │ /UI  │ │      │ │      │ │      │ │ tive  │
-└──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └───────┘
-
-┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ ┌───────┐
-│🛡️ QA │ │🖥️ IT │ │👷DevOp│ │🔒Sec │ │📊Anal│ │💰 CFO │
-└──────┘ └──────┘ └──────┘ └──────┘ └──────┘ └───────┘
+./src/index.ts init acme --yes    # write cod.json
+./src/index.ts up                 # build the image, start the container
+./src/index.ts status             # confirm the schedule is live
 ```
 
----
+That is the whole path. **No API key, no login, no configuration.** The model is
+free and opencode runs unauthenticated — which is not just convenient, it is the
+main security property: there is no credential for a compromised agent to spend,
+exfiltrate, or use against a metered endpoint.
 
-## Quick Start
+## Why one container for all agents
 
-### 1. Scaffold a project
+Isolation is per **workspace**, not per agent. Every worker shares one container,
+one filesystem, one uid, and one network namespace.
 
-```bash
-BUN=~/.bun/bin/bun
-$BUN scripts/scaffold.ts --name my-arcade --path ~/my-arcade --template game
+That is a deliberate trade. Running a container per agent costs real startup time
+and real memory, and gives you isolation you did not ask for. The cost is that
+agents can see each other's files — see [invariants](skills/cod-system/references/invariants.md)
+for what that does and does not mean, and for the worktree design that fixes it.
+
+## The dispatch seam
+
+A scheduled job does not echo its way through the supervisor any more. It goes
+through `src/dispatch.ts`:
+
+```ts
+driver(cron, step)          // step(kind, label) is a BOUNDARY
+dispatch(cron, driver, { onStep, shouldStop })
 ```
 
-Templates: `game` | `saas` | `content` | `devtools` | `homelab` | `data`
+`step` is a boundary, not a progress ping: it checks for a stop request *before*
+the next chunk of work begins, then records that the previous step finished. So
+`shouldStop` is polled only between steps and never during one — a step is a
+model call or a subprocess, and there is no honest way to interrupt one from
+outside.
 
-### 2. Configure reporting mode (MANDATORY)
+Two properties are the reason this is not a loop with a callback bolted on:
 
-```bash
-# See references/impl-reporting-modes.md
-# Default is Mode A (all messages delivered) — usually too noisy
+- **Step numbers are assigned by the harness, not the driver.** A driver cannot
+  lie about how far it got. `step_no` is a fact about the loop, not a
+  self-report, which is the whole basis of stall detection.
+- **A failing `onStep` cannot fail the job.** A supervisor that dies because
+  logging threw is worse than one that loses a progress line. Losses are
+  counted and surfaced in the result as "N progress report(s) lost" rather than
+  swallowed silently.
+
+`echoDriver` implements the driver contract and produces today's output.
+`echoTask` in `src/task.ts` is off the live path but retained as the reference
+shape; `TaskResult` remains the result contract between the supervisor and the
+work.
+
+## The work ledger
+
+`src/work.ts`. Two layers, deliberately separated.
+
+**The files are the truth.** A human reads them with `jq`, and they survive
+total loss of the database. **The SQLite table is a cache over them** — an index
+that makes claim and commit atomic and that can be rebuilt from the files.
+
+> **THE LEDGER IS A CACHE. THE FILES ARE THE TRUTH.**
+> Anything that treats the table as authoritative is how a lost job becomes a
+> lost job permanently.
+
+**Claiming** is a single statement:
+
+```sql
+UPDATE work SET state='running', lease_owner=?, lease_epoch=lease_epoch+1, ...
+ WHERE id=(SELECT id FROM work WHERE state='ready' ORDER BY created_seq LIMIT 1)
+ RETURNING *
 ```
 
-### 3. Validate the setup
+SQLite's write lock makes exactly one concurrent caller win. Verified on this
+runtime: **eight separate processes raced for one pending item and exactly one
+claimed it.** The test spawns them concurrently rather than in a loop — an
+earlier version used `spawnSync` in a loop, so the eight ran one after another
+and nothing was ever racing.
 
-```bash
-$BUN scripts/validate.ts --path ~/my-arcade
+**Processes, not promises.** The mechanism under test is the write lock, and an
+in-process test cannot exercise it. Eight in-process promises would pass against
+a ledger with no mutual exclusion at all.
+
+**Fencing is not optional.** Every commit is:
+
+```sql
+UPDATE work SET state=?, reason=?, lease_owner=NULL, lease_epoch=lease_epoch+1
+ WHERE id=? AND lease_epoch=? RETURNING *
 ```
 
-### 4. Set up cron jobs
+An agent killed mid-call is a **zombie, not a corpse**. If the supervisor
+re-dispatches, the new run finishes and writes — and then the old process wakes
+and clobbers it. A stale epoch updates zero rows and the commit is refused.
 
-See [`references/setup.md`](references/setup.md) for the full cron setup with Hermes Agent.
+**Git worktree isolation does not prevent this.** Both runs share the *ledger*,
+not the source tree.
 
-### 5. Watch it run
+The epoch is also **consumed** by the commit that uses it, which is load-bearing
+twice: a second writer holding the same epoch (a retried ack, a double signal)
+now matches zero rows instead of overwriting, and a budget reclaim fences the
+worker it reclaimed.
 
-Morning report arrives at 08:00 on Telegram. CEO inspects twice daily. Departments run every 2h. You wake up to a changelog.
+**Durability.** Every file is written `tmp → fsync(file) → rename() →
+fsync(dir)`, so a reader never sees a half-written message. **WAL is legitimate**
+because SQLite requires every process on one host and refuses network
+filesystems — which is exactly the shape this system already has.
 
----
+## The reconciler
 
-## Features
+`src/reconcile.ts`. The CEO's loop, and it is **level-triggered**: the idea
+transfers from a Kubernetes controller. It does not wait to be told what changed.
+Every tick it re-reads current state and converges on desired state, so an event
+missed while the process was down self-heals on the next tick instead of being
+lost for ever.
 
-| Feature | What it does |
-|---------|-------------|
-| 🏢 **16 departments** | Operational (R&D, UX/UI, Infra, PM, Board, QA, IT, DevOps, Security, Analytics, Creative) + C-Suite (CEO, CTO, CISO, CPO, CFO) |
-| 📋 **Mandatory pipelines** | R&D: research→pitch→spec→build. No skipping steps. |
-| 🚫 **Anti-slop contract** | Banned words list, concrete output rules, CEO grades A-F |
-| 📬 **Inbox communication** | Cross-department tasks via structured inbox files |
-| 🧠 **Shared state** | `state.json` — directives, pipeline status, grades, pivot tracking |
-| 🤵 **C-Suite oversight** | CEO inspects + grades. CTO reviews architecture. CISO audits security. CPO guards product quality. CFO tracks budgets. |
-| 📰 **Morning/Evening reports** | Daily briefings delivered to Telegram |
-| ⚡ **Fast-track** | CEO accelerates a single project — 2 pipeline steps per cycle |
-| 🚀 **Sprint Mode** | Temporary org-wide acceleration — 6 levers: cron boost, parallel tracks, multi fast-track, C-suite bump, daily standups, scope lock. CEO/PM/Board can propose. Max 5 days. |
-| 🔄 **Pivoting** | 7-gate process for strategic direction changes. Proposal → assessment → plan → board vote → freeze → execution → sign-off |
-| 🔬 **R&D Labs** | Default experimentation sandbox. No pitch/spec needed. Graduation path to production pipeline. |
-| 📚 **Confluence** | Shared knowledge base — decisions, technical docs, runbooks, postmortems |
-| 🎉 **Gibbush days** | Pipeline-free experimentation cycles to prevent staleness |
-| 🚨 **Incident response** | P1/P2/P3 severity, incident mode, postmortems |
-| 📊 **KPI dashboard** | Objective metrics per department |
-| 🔧 **Project upgrade** | 5-gate flow to upgrade existing projects when skill evolves |
+The consequence, and the reason it is a function over rows rather than a
+callback: **anything edge-triggered would be decoration.** A "worker finished"
+hook would add nothing the loop does not already re-derive.
 
----
+It must therefore be **idempotent**, because cron re-fires it whether or not the
+last tick did anything — running it twice must equal running it once.
 
-## Maturity Model
+It rides the **existing 30s supervisor tick** rather than adding a timer, and it
+is wrapped so a ledger failure cannot take down every cron in the workspace.
 
-Start small, grow organically. The [strategy guide](references/strategy-guide.md) tells you exactly when to add what.
+Four jobs per pass:
 
-```
-Stage 0: Idea          ──→  CEO + R&D + Infra (3 depts)
-                              │
-Stage 1: MVP           ──→  + UX/UI + PM (5 depts)
-                              │
-Stage 2: Growing       ──→  + Board + QA (7 depts)
-                              │
-Stage 3: Mature        ──→  + IT + DevOps + Security (10 depts)
-                              │
-Stage 4: Enterprise    ──→  + C-Suite (CTO/CISO/CPO/CFO) + Analytics + Creative (16 depts)
-```
+1. **Promote or reject proposals.** Only the reconciler may make a proposal
+   runnable.
+2. **Reclaim work past its budget.** Per item, never global: one global
+   threshold either kills legitimate slow work or tolerates a hung job, and
+   usually does both.
+3. **Recover work whose acknowledgement was lost.** It **reads the durable
+   file**, and never re-runs the job. The case is "work was paid for, the ack
+   was lost" — re-running would double-execute and double-bill a job that
+   already finished.
+4. **Report**, and do nothing else.
 
----
+## The anti-loop gate
 
-## Project Structure
+Departments propose their own next work, so a proposal enters as `proposed` and
+**only the reconciler may promote it to `ready`**. A department cannot put
+itself on the run queue.
 
-```
-your-project/
-├── backend/                    # Application backend
-├── frontend/                   # Application frontend
-├── departments/
-│   ├── CORPORATE.md            # Master governance doc
-│   ├── DELEGATION.md           # Cross-dept communication protocol
-│   ├── ceo/                    # CEO oversight + directives
-│   ├── cto/                    # Technical oversight
-│   ├── ciso/                   # Security posture
-│   ├── cpo/                    # Product quality
-│   ├── cfo/                    # Budget tracking
-│   ├── rnd/
-│   │   ├── SYSTEM.md           # R&D identity & pipeline
-│   │   ├── research/           # Research docs
-│   │   ├── pitches/            # Pitch documents
-│   │   ├── specs/              # Implementation specs
-│   │   ├── labs/               # Experimentation sandbox (default)
-│   │   └── inbox/              # Tasks from other depts
-│   ├── uxui/                   # Design, CSS, user experience
-│   ├── infra/                  # Docker, health, networking
-│   ├── pm/                     # Documentation, changelogs
-│   ├── board/                  # Strategy, meeting minutes
-│   ├── qa/                     # Testing, quality assurance
-│   ├── it/                     # File management, maintenance
-│   ├── devops/                 # CI/CD, deployment pipelines
-│   ├── security/               # Vulnerability audits
-│   ├── analytics/              # Metrics, data analysis
-│   └── creative/               # Game scripts, visual direction
-├── confluence/
-│   ├── decisions/              # Strategic decisions + pivot docs
-│   ├── technical/              # Technical documentation
-│   ├── runbooks/               # Operational runbooks
-│   └── postmortems/            # Incident postmortems
-├── state.json                  # Shared coordination brain
-├── logs/                       # Per-cycle JSON logs
-└── docker-compose.yml          # Infrastructure
+Duplicate proposals are refused by a `UNIQUE` index on `novelty_key` — a sha256
+of department + goal + sorted target paths, truncated to 32 hex chars. This is
+**real enforcement, not a prompt asking an agent to notice**, and it is the
+brake on self-graded work.
+
+Blast radius is a **rule, not a judgement**. Radius 2 is global and is refused
+by the reconciler whatever proposed it; radius 1 is cross-department and stays
+runnable. The predicate is a separate pure function (`needsCeo`) so the policy
+is testable and cannot drift.
+
+**`blast_radius` is currently supplied by the agent, so this is a policy hint,
+not an unspoofable control.** An agent can submit `0` for global work, and the
+reconciler's refusal is only as strong as that input.
+
+## The CLI surface
+
+All of this is reachable from the command line, which is a hard project
+requirement. Flags below are as implemented in `src/index.ts` and `src/meta.ts`.
+
+```sh
+cod work list [--state <s>] [--json]
+cod work propose --from <agent> --to <agent> --goal <text> \
+                 [--payload <t>] [--paths a,b] [--blast 0|1|2] [--kind <k>]
+cod work claim [--owner <name>] [--to <agent>]
+cod work commit <id> --epoch <n> [--reason <text>] [--failed]
+cod reconcile
 ```
 
----
+The work-item id is a **positional argument**, not `--id`. It was a flag
+advertised in `--help` and wired to nothing, and it was removed rather than left
+as a trap one commit away from being live.
 
-## Tools
+**One caveat, stated rather than hidden:** `--state` is *also* the global
+state-directory flag, so `cod work list --state ready` cannot filter by state —
+`ready` is taken as the state directory. The examples below therefore set
+`COD_STATE_DIR` and pass no `--state`. See the changelog for the full defect.
 
-| Script | Purpose |
-|--------|---------|
-| `scaffold.ts` | Scaffold entire project from template |
-| `validate.ts` | Run structural checks on deployment |
-| `report.ts` | Generate status report with grades and metrics |
-| `add-department.ts` | Add a department to an existing project |
-| `csuite-report.ts` | C-Suite role-specific reports |
-| `grade.ts` | CEO grades a department |
-| `board-meeting.ts` | Run a board meeting — collect summaries, write minutes |
-| `inbox-send.ts` | Send inbox messages between departments |
-| `inbox-digest.ts` | Digest a department's inbox |
-| `read-artifacts.ts` | Read/scan department artifacts |
-| `state-rw.ts` | Read/write state.json fields |
-| `activity-log.ts` | Append or query activity log |
-| `staleness-check.ts` | CPO staleness checker for UX/UI |
+### The lifecycle, worked
 
-```bash
-BUN=~/.bun/bin/bun
-SCRIPTS=path/to/corporate-on-demand/scripts
+Every line below is real output from this repository, not an illustration.
 
-# Scaffold
-$BUN $SCRIPTS/scaffold.ts --name myproj --path ~/myproj --template saas
+```console
+$ cod work propose --from engineering --to engineering \
+      --goal "add a healthcheck to the compose file" \
+      --paths docker/compose.yml --blast 1
+proposed w-mun3fld6-256770 (state proposed; it is NOT runnable until the CEO reconciles it)
 
-# Validate
-$BUN $SCRIPTS/validate.ts --path ~/myproj
+$ cod work propose --from engineering --to engineering \
+      --goal "add a healthcheck to the compose file" \
+      --paths docker/compose.yml --blast 1
+refused: already proposed as w-mun3fld6-256770 (state proposed); re-proposing identical work is refused
 
-# Report
-$BUN $SCRIPTS/report.ts --path ~/myproj
+$ cod work list
+w-mun3fld6-256770  proposed  engineering -> engineering  epoch=0 attempts=0  blast=1
 
-# Grade a department
-$BUN $SCRIPTS/grade.ts --path ~/myproj --dept rnd --grade B --reason "Good specs"
+$ cod work claim --owner worker-a
+nothing to claim
 
-# Board meeting
-$BUN $SCRIPTS/board-meeting.ts --path ~/myproj
+$ cod reconcile
+promoted w-mun3fld6-256770 to ready
 
-# Send inbox message
-$BUN $SCRIPTS/inbox-send.ts --path ~/myproj --to rnd --from ceo --priority high \
-  --title "Auth refactor" --body "Details"
+$ cod work claim --owner worker-a
+claimed w-mun3fld6-256770 as worker-a (lease_epoch 1, attempt 1)
+
+$ cod work commit w-mun3fld6-256770 --epoch 0 --reason "the zombie result"
+commit REFUSED: fenced: lease_epoch 0 is stale (current 1); a newer run owns this item
+
+$ cod work commit w-mun3fld6-256770 --epoch 1 --reason "the real result"
+committed w-mun3fld6-256770 as done
+
+$ cod work list
+w-mun3fld6-256770  done  engineering -> engineering  epoch=2 attempts=1  blast=1  (the real result)
 ```
 
----
+The proposal is **unclaimable until `cod reconcile` runs**, the duplicate is
+refused at the database rather than asked not to happen, the stale-epoch commit
+is fenced, and the good one is accepted. Note `epoch=2` after a commit at epoch
+1: the epoch was consumed.
 
-## Documentation Map
+Global work is refused by the rule, whatever proposed it:
 
-### Core
+```console
+$ cod work propose --from engineering --to engineering --goal "change the schema" --blast 2
+proposed w-mun3mb6l-a276f9 (state proposed; it is NOT runnable until the CEO reconciles it)
 
-| Doc | What |
-|-----|------|
-| [`strategy-guide.md`](references/strategy-guide.md) | 🗺️ **Start here** — classify project, choose depts & mechanisms |
-| [`architecture.md`](references/architecture.md) | Folder structure, schedules, state.json schema |
-| [`pipelines.md`](references/pipelines.md) | Mandatory pipeline rules per department |
-| [`anti-slop.md`](references/anti-slop.md) | Quality contract, banned words, CEO grading |
-| [`pitfalls.md`](references/pitfalls.md) | Failure modes with mitigations |
-| [`setup.md`](references/setup.md) | Step-by-step cron setup guide |
-| [`company-templates.md`](references/company-templates.md) | 6 project templates |
+$ cod reconcile
+rejected w-mun3mb6l-a276f9
 
-### Implementation Guides
+$ cod work list
+w-mun3mb6l-a276f9  failed  engineering -> engineering  epoch=1 attempts=0  blast=2  (blast radius is global; the CEO must dispatch this itself)
+```
 
-| Guide | What |
-|-------|------|
-| [`impl-sprint-mode.md`](references/impl-sprint-mode.md) | 🚀 Temporary org-wide acceleration (6 levers, max 5 days) |
-| [`impl-pivoting.md`](references/impl-pivoting.md) | 🔄 7-gate strategic direction changes |
-| [`impl-labs.md`](references/impl-labs.md) | 🔬 R&D experimentation sandbox (default) |
-| [`impl-confluence.md`](references/impl-confluence.md) | 📚 Shared knowledge base |
-| [`impl-project-upgrade.md`](references/impl-project-upgrade.md) | 🔧 5-gate project upgrade flow |
-| [`impl-cross-dept-meetings.md`](references/impl-cross-dept-meetings.md) | Cross-department meetings |
-| [`impl-fast-track.md`](references/impl-fast-track.md) | Single-project acceleration |
-| [`impl-incident-response.md`](references/impl-incident-response.md) | P1/P2/P3 incident handling |
-| [`impl-dept-creation.md`](references/impl-dept-creation.md) | CEO creates new departments |
-| [`impl-qa-dept.md`](references/impl-qa-dept.md) | QA department setup |
-| [`impl-devops-dept.md`](references/impl-devops-dept.md) | DevOps department setup |
-| [`impl-it-dept.md`](references/impl-it-dept.md) | IT department setup |
-| [`impl-security-dept.md`](references/impl-security-dept.md) | Security department setup |
-| [`impl-analytics-dept.md`](references/impl-analytics-dept.md) | Analytics department setup |
-| [`impl-hr-dept.md`](references/impl-hr-dept.md) | HR department setup |
-| [`impl-kpi-dashboard.md`](references/impl-kpi-dashboard.md) | KPI metrics dashboard |
-| [`impl-dept-budgets.md`](references/impl-dept-budgets.md) | Department budget tracking |
-| [`impl-testing-strategy.md`](references/impl-testing-strategy.md) | 7-layer testing strategy |
-| [`impl-reporting-modes.md`](references/impl-reporting-modes.md) | Configure what delivers to Telegram |
-| [`impl-schedule-optimization.md`](references/impl-schedule-optimization.md) | QA buffer + cron stagger |
-| [`impl-gibbush.md`](references/impl-gibbush.md) | Pipeline-free experimentation days |
-| [`impl-retrospectives.md`](references/impl-retrospectives.md) | Department retrospectives |
-| [`impl-mentorship.md`](references/impl-mentorship.md) | Cross-department mentorship |
-| [`impl-seasonal-events.md`](references/impl-seasonal-events.md) | Seasonal themes and events |
-| [`impl-ecosystem.md`](references/impl-ecosystem.md) | Newsletter, SLAs, plugin framework |
-| [`impl-publishing.md`](references/impl-publishing.md) | Publishing and distribution |
+## Deliberately not built
 
-### C-Suite & Governance
+These are decisions, not omissions.
 
-| Doc | What |
-|-----|------|
-| [`csuite-layer-plan.md`](references/csuite-layer-plan.md) | C-Suite design + tools |
-| [`improvement-roadmap-csuite.md`](references/improvement-roadmap-csuite.md) | C-Suite improvement roadmap |
+- **The 9-state machine**, cut to `proposed` / `ready` / `running` / `done` /
+  `failed` plus an `attempts` counter. `claimed`, `review`, `merged` and
+  `abandoned` are states for a pipeline and a reviewer that do not exist.
+- **A `priority` column.** Nothing in the system can compute a priority that
+  means anything. A column that is always a constant is a lie in a schema.
+- **`tokens_used`.** Budget ceilings were closed because every model is free, so
+  a token counter is dead instrumentation.
+- **A computed `state_digest`.** An expensive proxy for a signal the dispatcher
+  emits directly, and free, at each step.
 
-### Reference
+## Commands
 
-| Doc | What |
-|-----|------|
-| [`example-arcade-platform.md`](references/example-arcade-platform.md) | Live case study — arcade platform |
-| [`ideas.md`](references/ideas.md) | Expansion ideas backlog |
-| [`migration-checklist.md`](references/migration-checklist.md) | Department migration checklist |
-| [`pre-publish-checklist.md`](references/pre-publish-checklist.md) | Pre-publish quality gates |
+| | |
+|---|---|
+| `cod init <name>` | onboarding; writes a secret-free `cod.json` |
+| `cod up` / `down` | start / stop the workspace container (`down` is idempotent) |
+| `cod status` | container state **and** schedule state, separately |
+| `cod supervise` | run the in-container scheduler by hand |
+| `cod logs` | the event log — the answer to "what happened" |
+| `cod results` | persisted job results — what ran, and did it work |
+| `cod image` | build the workspace image |
+| `cod doctor` | host checks, with the fix for anything missing |
+| `cod purge` | remove the work volume and every commit in it (`--purge` confirms) |
+| `cod work` | the work ledger: `list`, `propose`, `claim`, `commit` |
+| `cod reconcile` | one pass of the CEO's loop; also runs on the supervisor's 30s tick |
+| `cod config show` | resolved configuration and where each value came from |
 
----
+Exit codes: `0` success, `1` retryable runtime failure, `2` deterministic usage
+or configuration error.
 
-## Anti-Slop Contract
+## What is actually verified
 
-Every department signs this contract. CEO enforces it.
+Not claimed — measured, and re-checked by `scripts/cleanroom.sh` on every run:
 
-**Banned words**: "enhance", "leverage", "streamline", "utilize", "robust", "comprehensive", "cutting-edge", "synergy", "holistic", "paradigm"
+- one container per workspace, starting in **~0.4s** once the image exists
+- a cron job firing on a real minute boundary, inside a real container
+- an agent producing real output, at **zero cost**, with no credential on disk
+- 11 security controls read back off a live container via `docker inspect`
+- **257 tests**, clean strict typecheck
 
-**Rules**:
-- ❌ No vague changelogs ("improved performance")
-- ❌ No placeholder code (`// TODO: implement`)
-- ❌ No generic variable names (`data`, `temp`, `result`)
-- ✅ Every change has a measurable before/after
-- ✅ Every doc answers "what, why, how" concretely
+The ledger and the reconciler are verified by **mutation, not only by assertion**.
+An assertion proves the code does what you wrote; a mutation proves the test
+would notice if it stopped. Measured on this tree:
 
-CEO grades each department A-F. Consecutive D/F grades trigger corrective directives.
+| Mutation | Result |
+|---|---|
+| Remove the `lease_epoch` predicate from `commit()` | **18 tests fail** |
+| Make proposals born `ready`, bypassing the CEO entirely | **12 tests fail** |
 
----
+A test that passes against broken code is worth nothing.
 
-## Case Study: Arcade Platform
+One more, from the same pass: the "eight concurrent processes" test used
+`spawnSync` in a loop, so the processes ran one after another and nothing was
+ever racing. The property was real; the test was not proving it.
 
-A browser-based arcade running on Docker in a homelab. 7 games (Snake, Pong, Breakout, Tetris, Space Invaders, Pac-Man, Frogger), 16 departments running autonomously, evolving 24/7.
+## Documentation
 
-**Results**:
-- R&D autonomously built 4 additional games beyond the initial 3
-- QA maintains 17+ consecutive clean cycles, zero bugs
-- Creative department produces game scripts and visual direction
-- Board self-governs — applies pressure before CEO even inspects
-- Active pivot (`arcade-evolution`) managing LittleJS framework migration across all departments
+The system explains itself in [`skills/cod-system/`](skills/cod-system/SKILL.md) —
+for anyone changing it, not just running it. It includes the gotchas this
+codebase learned the hard way, so the next person meets them as warnings rather
+than as bugs.
 
-See [`references/example-arcade-platform.md`](references/example-arcade-platform.md) for the full deployment reference.
+| | |
+|---|---|
+| [architecture](skills/cod-system/references/architecture.md) | how the pieces fit, and why the seams are where they are |
+| [onboarding](skills/cod-system/references/onboarding.md) | creating and configuring a workspace |
+| [container](skills/cod-system/references/container.md) | what is enforced, what is not |
+| [scheduling](skills/cod-system/references/scheduling.md) | cron, concurrency, and the syntax that bites |
+| [recovery](skills/cod-system/references/recovery.md) | what happens when the supervisor dies |
+| [invariants](skills/cod-system/references/invariants.md) | the rules most changes are measured against |
 
----
+## Running on boot
 
-## Changelog
+Docker's `--restart on-failure:5` survives a **daemon** restart, not a **host**
+reboot — after a reboot the container is simply gone. A templated systemd unit
+closes that:
 
-See [`CHANGELOG.md`](CHANGELOG.md) for the full version history. Current version: **v3.8.0**.
+```sh
+sudo install -m 644 ops/cod-workspace@.service /etc/systemd/system/
+sudo systemctl enable --now cod-workspace@acme.service
+```
 
----
+It was validated with `systemd-analyze verify`, which caught `ExecStartPre`
+placed in `[Unit]` — systemd *silently ignores* that, so it would have been a
+runtime surprise rather than a startup error. See [ops/README.md](ops/README.md).
 
-## Requirements
+## Verifying it yourself
 
-- [Hermes Agent](https://hermes-agent.nousresearch.com) or [OpenClaw](https://github.com/AizelNetwork/OpenClaw) (for cron job orchestration)
-- [Bun](https://bun.sh) runtime (for TypeScript tools)
-- Docker & Docker Compose (for project deployment)
-- A Telegram bot (for reports — optional)
+```sh
+sh verify.sh                        # typecheck, tests, build inputs
+sh scripts/cleanroom.sh /tmp/cod    # empty dir -> a real agent working
+```
 
----
+The clean-room rebuilds the image from a clean cache, starts a real container,
+runs a real agent call, and tears the whole thing down — including purging its
+own throwaway workspace, so a run leaves zero volumes and zero containers
+behind. It is the check that a new user needs no manual step.
 
-## License
+## Not yet done
 
-MIT — use it, fork it, build your own corporation.
+Honest limits. The decisions that were open are closed and recorded in
+[docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — with the reasoning, so a
+later change reads as a revision rather than an accident.
 
----
+- **The driver is still the echo driver.** The dispatch *contract* is real and
+  on the live path — steps, boundaries, fencing-friendly stop polling — but
+  `echoDriver` does no work. A real driver implements the same contract; nothing
+  above `dispatch` changes.
+- **No agent-to-agent isolation** (see above).
+- **Job isolation is per-worktree**, on its own git branch. The merge policy is
+  decided (the org approves, never a human — question 2 in the open-questions
+  doc) but not implemented; no merge step runs yet.
+- **`blast_radius` is self-asserted by the proposer.** The rule is enforced
+  correctly, but the input is not: an agent can submit `0` for global work. It
+  is a policy hint, not an unspoofable control.
+- **The novelty key catches byte-identical repeats only.** A department that
+  rewords its goal defeats it, and reworded goals are normal LLM output rather
+  than an edge case.
+- **Ledger growth is uncapped** and the reconciler scans all history on every
+  tick. Fine at this scale; it is the first thing to fix if the ledger grows.
+- **No budget ceiling**, deliberately — every model is free, so there is nothing
+  to meter. This needs revisiting the moment a paid model is added.
 
-<div align="center">
+## History
 
-*Powered by caffeine and questionable life choices ☕️*
-
-**[Strategy Guide](references/strategy-guide.md)** · **[Architecture](references/architecture.md)** · **[Anti-Slop](references/anti-slop.md)** · **[Changelog](CHANGELOG.md)**
-
-</div>
+This repository previously held a `corporate-on-demand` **skill** — 16
+departments, mandatory pipelines, CEO oversight. It has been removed; the git
+history preserves it at `a549589`. See [CHANGELOG.md](CHANGELOG.md).
