@@ -158,7 +158,7 @@ To remove the work and every commit in it:
 ## Verify the whole thing
 
 ```sh
-bun test ./tests                              # 257 tests
+bun test ./tests                              # 293 tests
 sh scripts/cleanroom.sh /tmp/cod-cr           # empty dir -> working agent
 ```
 

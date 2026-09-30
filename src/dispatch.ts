@@ -153,11 +153,15 @@ export async function dispatch(
 }
 
 /**
- * The echo driver: today's behaviour, expressed as a driver.
+ * The echo driver: the deterministic reference implementation.
  *
- * It exists so the async contract and the step accounting can be real and
- * tested while no model is being called. It still cannot fail for interesting
- * reasons, which was the original reason for choosing an echo.
+ * NO LONGER ON THE LIVE PATH. The supervisor runs `driverFor` in
+ * src/drivers.ts, which makes a real credential-free model call. This stays
+ * for two reasons: the dispatcher tests pin the step accounting against it, and
+ * it is the fallback when a workspace names no worker - a visible string beats
+ * a job that silently never runs.
+ *
+ * It remains useful precisely because it cannot fail for interesting reasons.
  */
 export async function echoDriver(cron: Cron, step: (kind: StepKind, label: string) => Promise<void>): Promise<string> {
   await step("plan", `brief: ${cron.task}`);

@@ -1,6 +1,37 @@
 # Open questions
 
-All questions that were open are now closed. Each was decided deliberately on
+## Task execution — CLOSED: a scheduled job makes a real model call
+
+A cron used to echo its task text back. It now resolves the worker, takes that
+worker's own `model`, and runs `opencode run --pure --format json` inside the
+container. The JSONL event stream is parsed for step-by-step progress and for the
+answer, and the answer is what lands in the result file.
+
+Verified end to end: a cron asked *"What is 17 plus 26?"* returned **`43`** in
+4.65s at `cost 0`, credential-free.
+
+**The verification detail matters more than the result.** The first check asked
+the agent to *"reply with exactly: REAL_AGENT_OK"* and then searched the output
+for that string — and the ECHO returns the task text verbatim, so it contained
+the string and the check passed against a job that had done nothing. The task
+must be one the echo cannot answer, or the check proves nothing.
+
+What an agent may do is deliberately minimal, and each omission is a decision
+rather than a gap: it returns text and is told it cannot change files. **No
+`--auto`, no tool grant, no per-agent worktree, no merge, no retries.** Those
+remain genuinely undecided. Review and merge policy are recorded above and are
+unchanged by this.
+
+Two facts about the runtime, both measured:
+
+- `opencode run` **hangs on the host** (280s, no output) while the provider is
+  reachable, so the driver spawns it inside the container where the supervisor
+  already runs. The container deliberately has no docker binary and no socket.
+- The driver uses `Bun.spawn`, not `node:child_process`. On this runtime
+  `execFile` hangs to its own 40s timeout with empty output on the identical
+  command, where `Bun.spawn` returns it in ~3.3s.
+
+All questions below were open; each is now closed. Each was decided deliberately on
 2026-09-29; the reasoning is kept here so a later change is a *revision* with a
 reason, not an accident.
 

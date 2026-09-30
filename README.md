@@ -15,7 +15,7 @@ One container per workspace. On-device cron. No API key.
 
 [![Bun](https://img.shields.io/badge/bun-1.3.12-white?style=flat-square&logo=bun)](https://bun.sh)
 [![opencode](https://img.shields.io/badge/opencode-1.18.31-blue?style=flat-square)](https://github.com/sst/opencode)
-[![Tests](https://img.shields.io/badge/tests-257%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-293%20passing-brightgreen?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 
 </div>
@@ -86,10 +86,41 @@ Two properties are the reason this is not a loop with a callback bolted on:
   counted and surfaced in the result as "N progress report(s) lost" rather than
   swallowed silently.
 
-`echoDriver` implements the driver contract and produces today's output.
-`echoTask` in `src/task.ts` is off the live path but retained as the reference
-shape; `TaskResult` remains the result contract between the supervisor and the
-work.
+### What a job actually does
+
+**A scheduled job makes a real model call.** The supervisor resolves the cron to
+its worker, takes that worker's own `model` from the workspace, and runs it
+through `opencode run --pure --format json` inside the container. The JSONL event
+stream is parsed for progress and for the answer, and the answer is what lands in
+the result file.
+
+```ts
+// src/agent.ts - the real thing
+opencode run --pure --format json -m opencode/space-bunny-free --title cod-nightly "<prompt>"
+```
+
+Verified end to end: a cron asked *"What is 17 plus 26?"* returned **`43`** in
+4.65s at `cost 0`. A task the echo cannot answer is the only honest proof, so
+that is the check — see the note in `CHANGELOG.md` about a verification that
+passed against a job that had done nothing.
+
+What an agent may do is deliberately **minimal**: it returns text, and it is
+told it cannot change files. No `--auto`, no tool grant, no worktree per agent,
+no merge. Those are open decisions, not omissions.
+
+Two facts worth knowing if you run this yourself:
+
+- `opencode run` **hangs on the host** — measured 280s with no output — so the
+  driver spawns it inside the container, which is where the supervisor already
+  runs. The container deliberately has no docker binary and no socket.
+- The driver uses `Bun.spawn`, not `node:child_process`. On this runtime
+  `execFile` hangs to its own timeout on the identical command, while
+  `Bun.spawn` returns it in ~3.3s.
+
+`echoDriver` remains as the deterministic reference implementation and is the
+fallback when a workspace names no worker; `echoTask` in `src/task.ts` is off
+the live path entirely. `TaskResult` remains the result contract between the
+supervisor and the work.
 
 ## The work ledger
 
@@ -316,7 +347,7 @@ Not claimed — measured, and re-checked by `scripts/cleanroom.sh` on every run:
 - a cron job firing on a real minute boundary, inside a real container
 - an agent producing real output, at **zero cost**, with no credential on disk
 - 11 security controls read back off a live container via `docker inspect`
-- **257 tests**, clean strict typecheck
+- **293 tests**, clean strict typecheck
 
 The ledger and the reconciler are verified by **mutation, not only by assertion**.
 An assertion proves the code does what you wrote; a mutation proves the test
