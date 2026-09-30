@@ -574,3 +574,30 @@ code is worth nothing.
   against a healthy model, a rate-limited one, and a missing binary.
 - **`cod-system` 1.1.0** cross-references it, because the map is where someone
   lands first.
+
+## Unreleased - an agent skill library, and typos you can see
+
+- **Four new agent skills** under `skills/agent/`, injected into every job a
+  worker is given:
+  - `escalation` - what is the department's and what is the CEO's. Names the
+    radius-2 paths and says what to do when the useful work is global: do the
+    local part now, propose the global part with a reason.
+  - `debugging` - reproduce, read the whole error, explain the cause in one
+    sentence BEFORE changing anything. Calls out the trap that costs the most
+    time: a change that makes the error disappear is a hypothesis.
+  - `reviewing` - scope, correctness, tests, boundary, secrets. Says what not to
+    do: do not rewrite it, do not approve because it is small.
+  - `wrap-up` - run the thing, look at what actually changed, commit, never
+    push. And report what you did NOT do.
+- **`templates/skills/_TEMPLATE.md`** for authoring more, with the two rules that
+  keep the bundle healthy: copy the directory rather than nesting (nested skills
+  make lookup ambiguous, and ambiguity means an agent runs without its rules),
+  and keep each under ~40 lines because it is injected on every job.
+- **`cod skills`** lists the bundle and audits the workspace against it. This
+  closes a real gap: a skill name that did not resolve used to be skipped
+  silently, so a typo produced an agent running with NO rule and nothing on the
+  surface saying why. For a company with nobody watching, a quietly missing rule
+  looks exactly like compliance. Now the typo is named and attributed to the
+  worker who named it.
+- Engineering workers carry `git-discipline, testing, debugging, escalation,
+  wrap-up`; CTO carries `escalation, reviewing, wrap-up`.

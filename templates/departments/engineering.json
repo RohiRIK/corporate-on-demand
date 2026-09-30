@@ -5,17 +5,38 @@
     {
       "name": "builder",
       "role": "builds",
-      "model": "opencode/space-bunny-free"
+      "model": "opencode/space-bunny-free",
+      "skills": [
+        "git-discipline",
+        "testing",
+        "debugging",
+        "escalation",
+        "wrap-up"
+      ]
     },
     {
       "name": "reviewer",
       "role": "reviews",
-      "model": "opencode/space-bunny-free"
+      "model": "opencode/space-bunny-free",
+      "skills": [
+        "git-discipline",
+        "testing",
+        "debugging",
+        "escalation",
+        "wrap-up"
+      ]
     },
     {
       "name": "tester",
       "role": "tests",
-      "model": "opencode/space-bunny-free"
+      "model": "opencode/space-bunny-free",
+      "skills": [
+        "git-discipline",
+        "testing",
+        "debugging",
+        "escalation",
+        "wrap-up"
+      ]
     }
   ]
 }

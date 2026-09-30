@@ -5,7 +5,12 @@
     {
       "name": "cto",
       "role": "decides what the company builds next",
-      "model": "kilo/kilo-auto/free"
+      "model": "kilo/kilo-auto/free",
+      "skills": [
+        "escalation",
+        "reviewing",
+        "wrap-up"
+      ]
     }
   ]
 }

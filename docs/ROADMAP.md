@@ -53,6 +53,19 @@ Nothing reviews and nothing lands. Agents commit to their own branch and stop.
 
 **Stage 5 — The company runs itself. NOT STARTED.**
 No cron drives the cycle, so the loop still needs a human to type `cod cycle`.
+The cycle, the meeting and the dispatch are all built and verified; what is
+missing is a scheduled tick that runs them.
+
+### The agent skill bundle
+
+`skills/agent/` ships six skills, injected into a job's `AGENTS.md` by the
+worker's `skills` list: `git-discipline`, `testing`, `debugging`, `escalation`,
+`reviewing`, `wrap-up`. `cod skills` lists them and audits a workspace against
+them, because a name that does not resolve is skipped silently - and a silently
+missing rule looks exactly like compliance.
+
+Adding one is a JSON-free operation: copy `templates/skills/_TEMPLATE.md` to
+`skills/agent/<name>/SKILL.md`.
 
 ---
 

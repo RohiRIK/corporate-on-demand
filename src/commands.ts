@@ -582,6 +582,39 @@ const commands: Record<
   },
 
   /**
+   * List the skills the bundle ships, and check this workspace against them.
+   *
+   * Exists because a skill name that does not resolve used to degrade silently:
+   * the agent ran with no rule at all and nothing on the surface said why. For a
+   * company with nobody watching, a quietly missing rule looks exactly like
+   * compliance.
+   */
+  async skills(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const workspace = readWorkspace(config);
+    const { availableSkills, auditWorkspaceSkills, resolveSkillsRoot } = await import("./skills");
+    const available = availableSkills(resolveSkillsRoot());
+    const audit = auditWorkspaceSkills(workspace);
+    print(
+      config,
+      { available, ...audit },
+      () => [
+        `${available.length} skill(s) in the bundle (skills/agent/):`,
+        ...available.map((name) => `  ${name}`),
+        "",
+        audit.known.length > 0 ? `in use: ${audit.known.join(", ")}` : "in use: nothing",
+        ...(audit.untouched.length > 0
+          ? [`workers with no skills: ${audit.untouched.join(", ")} (legal, but usually a gap)`]
+          : []),
+        ...(audit.unknown.length > 0
+          ? ["", `UNKNOWN - these will be silently skipped at dispatch:`, ...audit.unknown.map((u) => `  ${u}`)]
+          : []),
+        ...(available.length === 0 ? ["", "The bundle is empty. Copy templates/skills/_TEMPLATE.md to make one."] : []),
+      ].join("\n"),
+    );
+  },
+
+  /**
    * Run one full company cycle: departments propose, then the ledger reconciles.
    *
    * This is what makes the company unattended. Until it existed, `propose()`

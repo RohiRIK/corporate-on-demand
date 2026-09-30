@@ -13,9 +13,11 @@
  * and it fails in a way that looks like nondeterminism.
  */
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Department, Worker } from "./workspace";
+import type { Department, Worker, Workspace } from "./workspace";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * Where skill bodies live, relative to the repository root.
@@ -24,6 +26,63 @@ import type { Department, Worker } from "./workspace";
  * in the container, where the repository is at a different place entirely.
  */
 export const SKILLS_DIR = "skills/agent";
+
+/** Absolute path to the bundle, so an audit works from any working directory. */
+export function resolveSkillsRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", SKILLS_DIR);
+}
+
+/** Every skill name the bundle ships, sorted. */
+export function availableSkills(skillsRoot: string): string[] {
+  if (!existsSync(skillsRoot)) return [];
+  return readdirSync(skillsRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && existsSync(join(skillsRoot, entry.name, "SKILL.md")))
+    .map((entry) => entry.name)
+    .sort();
+}
+
+export interface SkillAudit {
+  /** Skills named by a worker that the bundle does not ship. */
+  readonly unknown: readonly string[];
+  /** Skills named by a worker that resolved. */
+  readonly known: readonly string[];
+  /** Workers that name no skills at all - a different problem from a typo. */
+  readonly untouched: readonly string[];
+}
+
+/**
+ * Check a workspace's skill names against the bundle.
+ *
+ * `resolveSkills` deliberately skips names it cannot find and notes the skip in
+ * AGENTS.md, so the run continues. That is right for a workspace written before
+ * a skill existed, and wrong for a **typo**: the agent then runs with no rule at
+ * all and nothing on the surface says why.
+ *
+ * This makes the difference visible, per worker, without refusing to start.
+ */
+export function auditWorkspaceSkills(workspace: Workspace): SkillAudit {
+  const skillsRoot = resolveSkillsRoot();
+  const available = new Set(availableSkills(skillsRoot));
+  const unknown: string[] = [];
+  const known: string[] = [];
+  const untouched: string[] = [];
+
+  for (const department of workspace.departments) {
+    for (const worker of department.workers) {
+      if (worker.skills.length === 0) {
+        untouched.push(`${department.name}/${worker.name}`);
+        continue;
+      }
+      for (const name of worker.skills) {
+        if (available.has(name)) known.push(name);
+        // Attributed to the worker: "unknown skill: x" does not say whose rules
+        // are quietly missing.
+        else unknown.push(`${name} (named by ${department.name}/${worker.name})`);
+      }
+    }
+  }
+  return { unknown: [...new Set(unknown)], known: [...new Set(known)], untouched };
+}
 
 /** The skills a worker is given, skipping any it names but the bundle lacks. */
 export function resolveSkills(skillsRoot: string, names: readonly string[]): string[] {

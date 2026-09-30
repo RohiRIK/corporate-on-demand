@@ -20,6 +20,7 @@ COMMANDS:
   container-name  The container and volume names this workspace will use
   meet     Hold a company meeting: every role speaks, the CEO decides, decisions become work
   cycle    Run one unattended company cycle: departments propose, then reconcile
+  skills   List the agent skill bundle and check this workspace against it
   work      The work ledger: list, propose, claim, commit (--status filters the list)
   reconcile Run the CEO's reconciler once (also runs on the supervisor's tick)
   config    Show resolved configuration and where each value came from
