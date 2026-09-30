@@ -18,7 +18,8 @@ COMMANDS:
   results   Read persisted job results — what ran, and did it work
   purge     Remove the work volume and every commit in it (--purge confirms)
   container-name  The container and volume names this workspace will use
-  meet     Hold a company meeting; the cast is derived from the workspace
+  meet     Hold a company meeting: every role speaks, the CEO decides, decisions become work
+  cycle    Run one unattended company cycle: departments propose, then reconcile
   work      The work ledger: list, propose, claim, commit (--status filters the list)
   reconcile Run the CEO's reconciler once (also runs on the supervisor's tick)
   config    Show resolved configuration and where each value came from

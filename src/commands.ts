@@ -20,7 +20,7 @@ import {
   allWorkers,
   type Department,
 } from "./workspace";
-import { loadStarterDepartment } from "./templates";
+import { loadStarterDepartments } from "./templates";
 
 export interface CommandFlags {
   readonly state?: string | undefined;
@@ -135,16 +135,21 @@ const commands: Record<
 
     // Non-interactive mode takes every default, so the scripted path is the
     // one the tests exercise. Prompts are added on top of it, never instead.
-    const department: Department = loadStarterDepartment();
+    // Every starter template, not one hardcoded name. A new department JSON
+    // file now actually joins the company instead of sitting on disk.
+    const departments: Department[] = loadStarterDepartments();
     // The workspace name doubles as the company name unless the operator
     // supplied a different one. Purpose is not guessable, so --yes gets the
     // honest placeholder rather than a fabricated description.
     const companyName = flags.company ?? name;
     const purpose = flags.purpose ?? `${companyName} workspace; edit cod.json to describe it properly`;
+    // A company purpose is not guessable and must not be fabricated, so
+    // --yes takes the honest placeholder and the operator edits it. That is
+    // deliberate and stays.
     const workspace: Workspace = {
       version: WORKSPACE_VERSION,
       company: { name: companyName, purpose },
-      departments: [department],
+      departments,
       crons: [],
       maxConcurrent: DEFAULT_MAX_CONCURRENT,
       // The HOST's zone, not UTC. A new workspace should be correct without
@@ -539,47 +544,64 @@ const commands: Record<
   },
 
   /**
-   * Hold a company meeting. The cast is DERIVED from the workspace.
+   * Hold a company meeting.
    *
-   * Not a hardcoded list: a department joins by existing. Today that is CEO,
-   * CTO and Engineering; CISO, CFO and CPO join the moment they are added to
-   * cod.json, with no code change.
+   * Every role speaks with a position about its OWN work, the CEO decides, and
+   * the decisions become ledger items. The version this replaces printed a
+   * derived table - which the roadmap had already named as "not a meeting", and
+   * which then happened anyway.
    *
-   * The output is a DECISION per role, not minutes. The deleted v3.8.0 board
-   * meeting collected activity and wrote markdown; no agent spoke, and the CEO
-   * synthesised nobody's position because nobody had one.
+   * Deterministic, and labelled as such in the output: no agent is called and
+   * no model is consulted. It decides real work from real state, which makes it
+   * a first version rather than a discussion. Turning the positions into model
+   * calls is the next step, and saying so here stops it being mistaken for one.
    */
   async meet(_positionals, flags, print) {
     const config = configFrom(flags);
     const workspace = readWorkspace(config);
-    const { openWork, listWork } = await import("./work");
-    const handle = openWork(config.stateDir);
-    try {
-      const cast = [
-        { role: "ceo", scope: "the whole company", name: "CEO" },
-        ...workspace.departments.map((d) => ({ role: d.name, scope: d.purpose || "(no purpose declared)", name: d.name.toUpperCase() })),
-      ];
-      const outstanding = listWork(handle).filter((w) => w.state === "ready" || w.state === "proposed");
-      const rows = cast.map((member) => ({
-        role: member.role,
-        position:
-          member.role === "ceo"
-            ? `${outstanding.length} item(s) outstanding; dispatch what each department proposed`
-            : `${outstanding.filter((w) => w.from_agent === member.role).length} item(s) proposed by this department`,
-      }));
-      print(
-        config,
-        rows,
-        () => [
-          `meeting cast: ${cast.map((c) => c.name).join(", ")}`,
-          ...rows.map((r) => `  ${r.role.padEnd(12)} ${r.position}`),
-          "",
-          "decide with: cod work run <id>   (the CEO dispatches; nothing self-dispatches)",
-        ].join("\n"),
-      );
-    } finally {
-      handle.close();
-    }
+    const { holdMeeting } = await import("./meeting");
+    const meeting = holdMeeting(workspace, config.stateDir);
+    print(
+      config,
+      meeting,
+      () => [
+        `cast: ${meeting.cast.map((c) => c.name).join(", ")}`,
+        "",
+        ...meeting.speaking.map((s) => `  ${s.role.padEnd(12)} ${s.position}`),
+        "",
+        ...(meeting.decisions.length === 0
+          ? ["decisions: none - nothing was waiting on the CEO"]
+          : [
+              `decisions: ${meeting.decisions.length}`,
+              ...meeting.decisions.map((d) => `  ${d.verdict.padEnd(8)} ${d.item}  ${d.reason}`),
+            ]),
+        "",
+        "deterministic: no model was consulted. Run `cod cycle` to propose, `cod work run <id>` to dispatch.",
+      ].join("\n"),
+    );
+  },
+
+  /**
+   * Run one full company cycle: departments propose, then the ledger reconciles.
+   *
+   * This is what makes the company unattended. Until it existed, `propose()`
+   * had exactly one caller - a human typing a CLI command - so the ledger, the
+   * fencing and the novelty guard were all real and all starved.
+   */
+  async cycle(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const workspace = readWorkspace(config);
+    const { runCycle } = await import("./cycle");
+    const result = runCycle(workspace, config.stateDir, { actor: "cycle" });
+    print(
+      config,
+      result,
+      () => [
+        result.summary,
+        ...result.proposed.map((p) => `  proposed  ${p.from} -> ${p.to}  ${p.goal}`),
+        ...(result.proposed.length === 0 ? ["  (every department already has this outstanding)"] : []),
+      ].join("\n"),
+    );
   },
 
   /**

@@ -7,6 +7,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { Registry } from "./registry";
 import { join } from "node:path";
 import { Workspace, findWorker } from "./workspace";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
@@ -42,6 +43,18 @@ function blastRadiusFor(cron: { readonly name: string; readonly task: string }):
   const cross = /(^|[-_.])(cross|crossdept)([-_.]|$)/i.test(cron.name);
   return cross ? 1 : 0;
 }
+
+/**
+ * One registry for the supervisor's whole life.
+ *
+ * Process-scoped on purpose. This is a heuristic for ejecting repeat offenders
+ * and failing over to another free model, not a ledger: losing it costs
+ * nothing and re-learns within a few jobs. A durable copy would be a second
+ * source of truth to keep in step with the work ledger, for a problem that does
+ * not need one - and the version that existed before this line was a class with
+ * tests and no callers, which is the same as not having it.
+ */
+const REGISTRY = new Registry();
 
 const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
 
@@ -196,7 +209,7 @@ function main(): void {
         log(`job "${cron.name}" worktree ${worktree.branch} at ${worktree.path}`);
 
         try {
-        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company, { workdir: worktree.path }), {
+        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company, { workdir: worktree.path }, REGISTRY), {
           onStep: (step): void => {
             log(`step ${step.no}/${step.kind}: ${step.label} (${step.ms}ms)`);
           },

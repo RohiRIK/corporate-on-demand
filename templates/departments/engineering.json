@@ -1,5 +1,6 @@
 {
   "name": "engineering",
+  "purpose": "Keep the product correct and shippable: tests green, no unexplained breakage, small reviewed changes.",
   "workers": [
     {
       "name": "builder",

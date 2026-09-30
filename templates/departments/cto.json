@@ -1,0 +1,11 @@
+{
+  "name": "cto",
+  "purpose": "Decide what gets built next: weigh proposals against the company purpose, sequence the work, and say no to things that are not the most useful thing right now.",
+  "workers": [
+    {
+      "name": "cto",
+      "role": "decides what the company builds next",
+      "model": "kilo/kilo-auto/free"
+    }
+  ]
+}

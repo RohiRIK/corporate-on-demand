@@ -306,7 +306,12 @@ describe("end to end", () => {
     const written: unknown = await Bun.file(join(home, "cod.json")).json();
     const parsed = Workspace.safeParse(written);
     expect(parsed.success).toBe(true);
-    expect(parsed.success && allWorkers(parsed.data).length).toBe(3);
+    // Asserted against the templates on disk rather than a fixed count. It was
+    // 3 because init seeded one hardcoded department, and it silently became
+    // wrong the moment a second template existed - which is how "adding a
+    // department needs no code change" stopped being true.
+    expect(parsed.success && parsed.data.departments.map((d) => d.name)).toContain("cto");
+    expect(parsed.success && allWorkers(parsed.data).length).toBeGreaterThanOrEqual(4);
   });
 
   test("an unknown command exits 2", async () => {

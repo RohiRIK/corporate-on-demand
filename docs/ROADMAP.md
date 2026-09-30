@@ -22,21 +22,48 @@ supervisor as PID 1).
 A scheduled job makes a genuine credential-free model call and returns its
 answer. Verified: a cron answered an arithmetic question the echo could not.
 
-Everything below this line is unbuilt.
+**Stage 2 — Agents that can act. DONE.**
+An agent reads its instructions, uses real tools, writes files and commits them
+on its own branch, inside a per-job worktree. Verified live: commit `43768f4`,
+`answer.txt` containing `SEVEN`, on the Kilo engine, chosen by model id.
+
+A run is judged by its **event stream**, not its exit code: a terminal
+`step_finish`, a completed tool, no error events, and a prompt long enough to
+be a real instruction. A failed agent is never recorded as `ok`.
+
+Two engines (`opencode` and Kilo, a fork of it) with failover on consecutive
+failure. Measured in the image: Kilo 10/10, opencode 3/5 on the same prompt.
+
+**Stage 3 — The org in code. DONE.**
+`cod cycle` — every department derives work from its standing purpose and
+proposes it to the CEO, then the ledger reconciles. `cod meet` — every role
+speaks with a position about its own work, the CEO decides, and each decision
+becomes a ledger item. `cod work run` dispatches it.
+
+Verified on a fresh `cod init`: 2 departments proposed, 2 decisions, and the
+CEO's decisions landed as `ceo -> cto` and `ceo -> engineering`.
+
+Two things about that meeting are deliberately unfinished, and are marked as
+such in `src/meeting.ts` rather than glossed: **the positions are computed, not
+spoken by a model**, so it decides real work from real state and is a first
+version rather than a discussion.
+
+**Stage 4 — Review and merge. NOT STARTED.**
+Nothing reviews and nothing lands. Agents commit to their own branch and stop.
+
+**Stage 5 — The company runs itself. NOT STARTED.**
+No cron drives the cycle, so the loop still needs a human to type `cod cycle`.
 
 ---
 
-## Stage 2 — Agents that can act
+## Stage 2 — Agents that can act (was: not started)
 
-**Today an agent returns text and is told it cannot change files.** No tools, no
-worktree, no commits. It is a company of people who can only talk.
+Superseded above; kept because the reasoning still applies to Stage 4. Agents
+that cannot act make coordination theatre, which is why Stage 3 was not
+attempted before this.
 
-This is the stage that makes the rest worth doing. Everything after it is
-coordination, and coordination over agents that cannot act is theatre.
-
-The isolation machinery already exists and is tested — per-job git worktrees,
-branch-per-job, a durable work volume. It is built and unused. This stage wires
-an agent to it.
+Still true, and now the constraint on Stage 4: **a reviewer watching an agent
+that cannot act reviews nothing.**
 
 **Not blocked. Decided: agents act automatically, and the CEO manages them.**
 There is no human gate anywhere in the chain and no autonomy question to ask

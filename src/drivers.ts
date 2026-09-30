@@ -9,7 +9,11 @@
  * the worker lookup and passes the result in.
  */
 
-import { runAgent, type RunAgentOptions } from "./agent";
+import { isAgentFailure, runAgent, type RunAgentOptions } from "./agent";
+import { backendForModel, modelIds } from "./backend";
+import { pickForJob } from "./rotate";
+import { Registry, type Candidate } from "./registry";
+import { DEFAULT_MODEL } from "./agent";
 import type { Company, Cron, Worker } from "./workspace";
 import type { Driver } from "./dispatch";
 
@@ -24,11 +28,33 @@ export function driverFor(
   worker: Worker | null,
   company: Company | null,
   options: RunAgentOptions = {},
+  registry?: Registry,
 ): Driver {
   return async (cron: Cron, step): Promise<string> => {
     if (worker === null) {
       await step("plan", `no worker named "${cron.agent}"; using the free default model`);
     }
-    return runAgent(cron, worker, step, { ...options, company });
+
+    // Model selection, then the run, then the record. The record is the part
+    // that was missing for a long time: a registry nothing writes to cannot
+    // learn anything, so rotation has to happen HERE, around every job, and
+    // not merely exist as a class with its own tests.
+    const named = options.model ?? worker?.model ?? DEFAULT_MODEL;
+    const preferred: Candidate = { backend: backendForModel(named), model: named };
+    const pool: Candidate[] = modelIds(preferred.backend).map((model) => ({ backend: preferred.backend, model }));
+    const chosen = pickForJob(registry ?? new Registry(), preferred, pool);
+
+    const out = await runAgent(cron, worker, step, { ...options, company, model: chosen?.model ?? named });
+
+    // Narrowed explicitly rather than by a non-null assertion: `chosen` is
+    // null only when the worker pinned a model no engine offers, and in that
+    // case there is nothing truthful to record.
+    const used: Candidate | undefined = chosen === null || chosen === undefined
+      ? undefined
+      : { backend: chosen.backend, model: chosen.model };
+    if (registry !== undefined && used !== undefined) {
+      registry.record({ backend: used.backend, model: used.model, ok: !isAgentFailure(out), at: Date.now() });
+    }
+    return out;
   };
 }

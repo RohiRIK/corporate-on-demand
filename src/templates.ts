@@ -43,6 +43,24 @@ export function loadStarterDepartment(): DepartmentType {
   return loadDepartmentTemplate(STARTER_DEPARTMENT);
 }
 
+/**
+ * Every department a fresh `cod init` should seed.
+ *
+ * Derived from the templates on disk, which is the last step of the design the
+ * comment above already claimed: adding a department means adding a JSON file
+ * and no code. It was true of the loader and false of `init`, which seeded one
+ * hardcoded name - so a new template would sit on disk doing nothing, and the
+ * company would be born with one department and no CTO.
+ */
+export function starterDepartmentNames(): string[] {
+  return listDepartmentTemplates();
+}
+
+/** All starter departments, in stable order. */
+export function loadStarterDepartments(): DepartmentType[] {
+  return starterDepartmentNames().map((name) => loadDepartmentTemplate(name));
+}
+
 /** Every department template available on disk, sorted for stable output. */
 export function listDepartmentTemplates(): string[] {
   if (!existsSync(TEMPLATE_DIR)) return [];
