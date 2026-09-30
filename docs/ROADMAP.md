@@ -64,17 +64,38 @@ The work ledger exists and **nothing self-proposes**: `propose()` has exactly on
 caller, the CLI, typed by a human. The reconciler, the fencing, the anti-loop
 gate — all real, all waiting for an agent to feed them.
 
-This stage makes departments propose their own work, the CEO consolidate and
-dispatch, and blast radius actually route. It is the stage where the thing
-becomes a company rather than a scheduler with agents attached.
+### Departments have a standing purpose
+
+A department is not a list of crons. It has a reason to exist, it works toward
+it, and its output is judged against it — as the deleted v3.8.0 skill had, and
+as `cod work` does not. Without this, self-proposed work has nothing to be
+proposed *for*, and the novelty guard catches only identical repeats of work
+that was never anchored to an aim in the first place.
+
+### The company meets
+
+Once or twice a day, depending on the job. **The meeting body is whoever
+exists** — derived from the roles in the workspace, never a hardcoded cast, so a
+department joins by existing rather than by a code change.
+
+**The deleted version was not a meeting.** It was a script that collected
+activity, read grades, listed the pipeline and escalations, and wrote markdown
+minutes; no agent spoke and nothing was decided. The old cross-department
+"meetings" were a CEO writing directive files into inboxes with no reply path.
+
+A real meeting is the moment each role states a position, the CEO decides, and
+the decision becomes work. **The product of a meeting is a decision, not
+minutes.** It is also the only place the self-grading problem gets solved: if
+Engineering proposes and grades its own work, the meeting is where that is
+pushed back on. A report has no such moment.
 
 **Two known weak spots are closed here, not later:** the duplicate-work guard
 catches only byte-identical repeats, and "needs the CEO" is self-asserted by the
 very agent it constrains. Both are trust boundaries, and a trust boundary that
 trusts its subject is not one.
 
-Done when: the company runs a cycle with nobody watching, and its work is
-traceable to who decided what.
+Done when: the company runs a cycle with nobody watching, holds meetings that
+end in decisions, and its work is traceable to who decided what.
 
 ---
 
