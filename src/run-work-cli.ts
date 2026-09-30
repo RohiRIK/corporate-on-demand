@@ -18,10 +18,11 @@
  * operator's runbook treats them differently.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { Workspace } from "./workspace";
 import { openWork, get } from "./work";
 import { runWorkItem, textOfItem } from "./runwork";
+import { resolveTarget } from "./assign";
 import { dispatch } from "./dispatch";
 import { driverFor } from "./drivers";
 import { acquireWorktree, releaseWorktree } from "./worktree";
@@ -59,15 +60,28 @@ if (item === null) {
   process.exit(2);
 }
 
-const worker = workspace.departments.flatMap((d) => d.workers).find((w) => w.name === item.to_agent);
-const department = workspace.departments.find((d) => d.workers.some((w) => w.name === item.to_agent));
+// WHO runs it. The item is addressed to a department; a worker runs it, and
+// this lookup used to search for a WORKER by a DEPARTMENT's name, always miss,
+// and then silently skip writing the instructions. See src/assign.ts.
+const target = resolveTarget(workspace, item.to_agent);
+if (target.worker === undefined) {
+  // A named failure. Running the agent anyway - with no purpose, no rules and
+  // no radius - is the worst outcome available, so it is refused.
+  process.stderr.write(`${workId} REFUSED: ${target.reason ?? "no worker could be resolved"}\n`);
+  process.exit(3);
+}
+if (target.note !== undefined) process.stderr.write(`${target.note}\n`);
+const worker = target.worker;
+const department = target.department;
 // The TEXT, not the JSON wrapper. The paths are bookkeeping; handing them to
 // the model as part of its instruction is the system showing its plumbing to
 // the thing it is directing.
 const goal = textOfItem(item);
 const cron: { name: string; agent: string; task: string; schedule: string; enabled: boolean } = {
   name: item.id,
-  agent: item.to_agent,
+  // The WORKER, not the addressee - so the log and the result line name who
+  // actually did the work rather than which department asked for it.
+  agent: worker.name,
   task: goal,
   schedule: "0 0 1 1 *",
   enabled: true,
@@ -75,8 +89,17 @@ const cron: { name: string; agent: string; task: string; schedule: string; enabl
 
 const worktree = acquireWorktree(workRoot, worktreeRoot, item.id);
 try {
-  if (worker !== undefined && department !== undefined) {
-    writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: goal }, 0, SKILLS_DIR));
+  // Unconditional now. The old `if (worker && department)` guard is what let a
+  // missing instruction file pass as a successful run.
+  if (department === undefined) throw new Error(`resolved worker ${worker.name} has no department`);
+  const instructionsPath = writeInstructions(
+    worktree.path,
+    buildInstructions(department, worker, { name: item.id, task: goal }, 0, SKILLS_DIR),
+  );
+  // Verified, not assumed. The whole bug was a file that was never written and
+  // nothing that noticed.
+  if (!existsSync(instructionsPath)) {
+    throw new Error(`instructions were not written to ${instructionsPath}`);
   }
   const result = await runWorkItem({
     stateDir,

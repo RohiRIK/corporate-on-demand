@@ -286,12 +286,31 @@ Verified live end to end: the CEO dispatched a self-contained item, a real
 credential-free model wrote `answer.txt`, and committed it as `3e63ab6` on
 branch `cod/w-munreomi-b7661c`. The worktree was released; the commit stayed.
 
-## Open: the dispatched agent did not read its instructions
+## Closed: the dispatched agent did not read its instructions (2026-09-30)
 
-The ledger-dispatched run reported "No AGENTS.md exists anywhere in the repo or
-work volume", while the CRON path reads it correctly from the same bundle. The
-two paths write and read instructions differently, and the ledger path's copy
-does not land where the agent looks. The work itself completed, so this is a
-prompt-delivery defect and not a boundary one - but an agent that never sees
-its operating rules is an agent running on defaults, and that is not acceptable
-for autonomous operation.
+A ledger item is addressed to a DEPARTMENT - "engineering". `run-work-cli.ts`
+resolved the worker with
+
+    departments.flatMap(d => d.workers).find(w => w.name === item.to_agent)
+
+which asks for a WORKER named "engineering", while the worker is called
+"builder". It therefore always returned `undefined`, the
+`if (worker && department)` guard skipped `writeInstructions` entirely, and a
+real model went to work with no purpose, no rules and no blast radius.
+
+It survived because THE JOB SUCCEEDED. The agent was competent enough to create
+the file without being told it could, so the output looked right and the
+missing prompt was invisible. That is the same trap as a check that greps a
+self-report: the work passing is not evidence the work was directed.
+
+`src/assign.ts` now bridges department to worker, and:
+- an addressee that resolves to NOTHING is a refusal (exit 3), never a
+  "run it anyway" - running with no instructions is the worst default there is;
+- the instruction write is unconditional and its path is `existsSync`-checked,
+  so a file that is not written is a hard failure rather than a silent skip;
+- the hand-off is printed, because a department choosing its own worker is the
+  system being autonomous, and autonomy you cannot audit is merely unlogged.
+
+Proven live with a real credential-free model: the dispatched agent opened
+AGENTS.md and quoted the rule verbatim - "Do not push, merge, or force-push. You
+have no authority to land anything." - a line that exists only in the file.
