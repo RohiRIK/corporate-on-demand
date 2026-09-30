@@ -87,8 +87,8 @@ describe("scheduling", () => {
     // reported success.
     const handles = scheduleWorkspace(
       workspaceWith([
-        { name: "broken", schedule: "@every 1s", agent: "builder", task: "bad", enabled: true },
-        { name: "good", schedule: "0 2 * * *", agent: "builder", task: "ok", enabled: true },
+        { name: "broken", schedule: "@every 1s", agent: "builder", task: "bad", enabled: true, expectTools: true },
+        { name: "good", schedule: "0 2 * * *", agent: "builder", task: "ok", enabled: true, expectTools: true },
       ]),
       { report: (line: string): void => void lines.push(line) },
     );
@@ -111,6 +111,7 @@ describe("scheduling", () => {
       agent: "builder",
       task: "work",
       enabled: true,
+      expectTools: true,
     }));
     const handles = scheduleWorkspace(workspaceWith(crons), {
       report: (): void => {},
@@ -212,8 +213,8 @@ describe("scheduling", () => {
     if (!cronSupportAvailable()) return;
     const handles = scheduleWorkspace(
       workspaceWith([
-        { name: "nightly", schedule: "0 2 * * *", agent: "builder", task: "build", enabled: true },
-        { name: "disabled", schedule: "* * * * *", agent: "builder", task: "noop", enabled: false },
+        { name: "nightly", schedule: "0 2 * * *", agent: "builder", task: "build", enabled: true, expectTools: true },
+        { name: "disabled", schedule: "* * * * *", agent: "builder", task: "noop", enabled: false, expectTools: true },
       ]),
       { report: (): void => {} },
     );
@@ -239,7 +240,7 @@ describe("scheduling", () => {
     scheduleWorkspace(
       workspaceWith([
         // "0 2 * * *" rather than "@every 1s": Bun.cron rejects the nickname.
-        { name: "flaky", schedule: "0 2 * * *", agent: "builder", task: "do a thing", enabled: true },
+        { name: "flaky", schedule: "0 2 * * *", agent: "builder", task: "do a thing", enabled: true, expectTools: true },
       ]),
       {
         report,
@@ -271,7 +272,7 @@ describe("a real job fires", () => {
     // run in the phase report verifies end to end.
     const handles = scheduleWorkspace(
       workspaceWith([
-        { name: "ticker", schedule: "* * * * *", agent: "builder", task: "tick", enabled: true },
+        { name: "ticker", schedule: "* * * * *", agent: "builder", task: "tick", enabled: true, expectTools: true },
       ]),
       {
         report: (): void => {},

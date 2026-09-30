@@ -21,6 +21,7 @@ const cron: Cron = {
   task: "do the thing",
   schedule: "0 3 * * *",
   enabled: true,
+  expectTools: true,
 };
 
 /** A driver that takes `n` steps and returns a fixed output. */

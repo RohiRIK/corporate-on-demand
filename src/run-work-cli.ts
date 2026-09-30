@@ -77,7 +77,7 @@ const department = target.department;
 // the model as part of its instruction is the system showing its plumbing to
 // the thing it is directing.
 const goal = textOfItem(item);
-const cron: { name: string; agent: string; task: string; schedule: string; enabled: boolean } = {
+const cron = {
   name: item.id,
   // The WORKER, not the addressee - so the log and the result line name who
   // actually did the work rather than which department asked for it.
@@ -85,6 +85,9 @@ const cron: { name: string; agent: string; task: string; schedule: string; enabl
   task: goal,
   schedule: "0 0 1 1 *",
   enabled: true,
+  // Strict, always: work dispatched from the ledger is expected to change
+  // something. A read-only job is a cron with a schedule, not a work item.
+  expectTools: true,
 };
 
 const worktree = acquireWorktree(workRoot, worktreeRoot, item.id);

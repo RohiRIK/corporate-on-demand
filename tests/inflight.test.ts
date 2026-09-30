@@ -50,6 +50,7 @@ const cron: Cron = {
   agent: "builder",
   task: "run the build",
   enabled: true,
+  expectTools: true,
 };
 
 describe("begin and settle", () => {
@@ -162,8 +163,8 @@ describe("the file format", () => {
     // own, because the old code searched for a filename *containing* the cron
     // name and deleted the first match - readdir order chose the victim. The
     // `build` job then reported as abandoned for ever.
-    const a: Cron = { name: "build", agent: "eng", task: "t", schedule: "0 3 * * *", enabled: true };
-    const b: Cron = { name: "build-docs", agent: "eng", task: "t", schedule: "0 4 * * *", enabled: true };
+    const a: Cron = { name: "build", agent: "eng", task: "t", schedule: "0 3 * * *", enabled: true, expectTools: true };
+    const b: Cron = { name: "build-docs", agent: "eng", task: "t", schedule: "0 4 * * *", enabled: true, expectTools: true };
     const markerA = beginJob(dir, a, 1_700_000_000_000);
     const markerB = beginJob(dir, b, 1_700_000_000_100);
     expect(markerA).not.toBeNull();
@@ -181,7 +182,7 @@ describe("the file format", () => {
     const dir = scratch();
     // A name search could never do this: two concurrent runs of one cron are
     // only distinguishable by the exact marker.
-    const c: Cron = { name: "nightly", agent: "eng", task: "t", schedule: "0 3 * * *", enabled: true };
+    const c: Cron = { name: "nightly", agent: "eng", task: "t", schedule: "0 3 * * *", enabled: true, expectTools: true };
     const first = beginJob(dir, c, 1_700_000_000_000);
     const second = beginJob(dir, c, 1_700_000_000_500);
     expect(second).not.toBeNull();

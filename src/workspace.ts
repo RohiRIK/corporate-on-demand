@@ -70,6 +70,19 @@ export const Cron = z.object({
   agent: z.string().min(1),
   task: z.string().min(1),
   enabled: z.boolean().default(true),
+  /**
+   * Set false for a job that only inspects and reports.
+   *
+   * Exists because the success assertion requires a completed tool, and a
+   * read-only job makes no tool call - so "tell me which departments exist"
+   * would be reported as a failure forever. The opt-out is PER JOB on purpose:
+   * a global relaxation is exactly how the wrong-reason class comes back,
+   * because then every job is allowed to claim work it did not do.
+   *
+   * Defaults to true, so a workspace written before this field existed keeps
+   * its strict behaviour.
+   */
+  expectTools: z.boolean().default(true),
 });
 export type Cron = z.infer<typeof Cron>;
 

@@ -19,6 +19,7 @@ const cron = (over: Partial<Cron> = {}): Cron => ({
   agent: "builder",
   task: "verify the container works",
   enabled: true,
+  expectTools: true,
   ...over,
 });
 

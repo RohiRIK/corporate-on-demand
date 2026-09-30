@@ -39,6 +39,15 @@ export interface JudgeInput {
   readonly promptLength: number;
   /** Wall-clock budget. A run that overran it has not been judged on merit. */
   readonly budgetMs?: number;
+  /**
+   * False for a read-only job, which legitimately completes no tool.
+   *
+   * The ONE relaxation of the tool rule, and it is opt-in per job. Everything
+   * else - the terminal step_finish, the absence of error events, the prompt -
+   * still has to hold, so "read-only" cannot be used to excuse a run that did
+   * not happen.
+   */
+  readonly expectTools?: boolean;
 }
 
 export interface Verdict {
@@ -98,11 +107,16 @@ export function judgeRun(input: JudgeInput): Verdict {
   if (parsed.answer === "") {
     return verdict(false, "agent produced no text");
   }
-  if (parsed.completedTools.length === 0) {
+  if (input.expectTools !== false && parsed.completedTools.length === 0) {
     // The wrong-reason case, stated plainly: confident text and a clean exit
     // with nothing having completed means the agent claimed to do something it
     // did not do. That is a failed job wearing a successful-looking record.
     return verdict(false, "no completed tool: the agent produced text without doing anything");
+  }
+  if (parsed.completedTools.length === 0) {
+    // Read-only and opt-in. Still required to have finished cleanly and to
+    // have been given a real prompt, so this is a narrower pass, not a bypass.
+    return verdict(true, "ok", "read-only run, no tool expected");
   }
   return verdict(true, "ok", `${parsed.completedTools.length} tool(s): ${parsed.completedTools.join(", ")}`);
 }

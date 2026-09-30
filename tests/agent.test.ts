@@ -92,7 +92,12 @@ describe("the agent runtime", () => {
     // paid model has entered the system and the security posture changed -
     // that should fail the build loudly, not pass quietly.
     expect(out).toContain('"cost":0');
-  });
+    // An explicit budget, because Bun's default is 5 SECONDS and this test does
+    // real network I/O that legitimately takes 5-15s. It had no timeout of its
+    // own, so it passed only when a container happened to be absent (early
+    // return) or the provider happened to answer fast. A live test with the
+    // default budget is a coin flip wearing a checkmark.
+  }, 180_000);
 
   test("the sandbox has opencode and deliberately has no docker", () => {
     // These two facts together are why the driver spawns opencode directly.
@@ -135,6 +140,7 @@ const cron: Cron = {
   task: "summarise the day",
   schedule: "0 3 * * *",
   enabled: true,
+  expectTools: true,
 };
 const worker: Worker = { name: "builder", role: "builds", model: "opencode/space-bunny-free", skills: [] };
 

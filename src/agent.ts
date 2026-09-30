@@ -252,12 +252,26 @@ export async function runAgent(
     elapsedMs: Date.now() - startedAt,
     promptLength: prompt.length,
     budgetMs: timeoutMs,
+    expectTools: cron.expectTools,
   });
   if (!verdict.ok) {
+    // The ref id is the join key to the engine's own log, and this is the
+    // only place that has both the id and a reason to look. Bounded to one
+    // line, and it never throws: a diagnostic that cannot find anything is
+    // not allowed to become a second failure.
+    let detail = verdict.detail;
+    if (verdict.ref !== undefined) {
+      try {
+        const { describeDiagnostic } = await import("./diagnose");
+        detail = `${detail ?? ""} | ${describeDiagnostic(verdict.ref)}`.trim();
+      } catch {
+        // A log we cannot read is not a reason to fail the reporting.
+      }
+    }
     if (result.timedOut) {
       return `${FAILURE_PREFIX} ${verdict.reason}; partial output: ${truncate(parsed.answer || "none", 400)}`;
     }
-    return `${FAILURE_PREFIX} ${verdict.reason}${verdict.detail === undefined ? "" : ` (${verdict.detail})`}`;
+    return `${FAILURE_PREFIX} ${verdict.reason}${detail === undefined || detail === "" ? "" : ` (${detail})`}`;
   }
   return parsed.answer;
 }

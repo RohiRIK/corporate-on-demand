@@ -508,7 +508,7 @@ const commands: Record<
           .flatMap((d) => d.workers)
           .find((w) => w.name === item.to_agent);
         const department = workspace.departments.find((d) => d.workers.some((w) => w.name === item.to_agent));
-        const cron = { name: item.id, agent: item.to_agent, task: item.payload, schedule: "0 0 1 1 *", enabled: true };
+        const cron = { name: item.id, agent: item.to_agent, task: item.payload, schedule: "0 0 1 1 *", enabled: true, expectTools: true };
         const worktree = acquireWorktree("/work", "/work/.cod-worktrees", item.id);
         try {
           if (worker !== undefined && department !== undefined) {

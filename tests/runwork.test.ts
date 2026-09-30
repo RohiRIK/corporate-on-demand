@@ -18,7 +18,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-const cron: Cron = { name: "author", agent: "builder", task: "write the answer", schedule: "0 3 * * *", enabled: true };
+const cron: Cron = { name: "author", agent: "builder", task: "write the answer", schedule: "0 3 * * *", enabled: true, expectTools: true };
 
 describe("radiusForWork", () => {
   test("DERIVES the radius from the target paths, never from the proposer", () => {
