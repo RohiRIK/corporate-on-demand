@@ -1,5 +1,10 @@
 node_modules/
 
+# Per-job git worktrees live inside the work volume, and git's own rule is
+# that a worktree cannot be nested in the repository it branches from. Keeping
+# them untracked is that rule made explicit.
+.cod-worktrees/
+
 # The 177 MB opencode binary is fetched by scripts/vendor-opencode.sh with a
 # pinned checksum, not committed. A binary blob in git is permanent and makes
 # every clone 177 MB heavier for no benefit.

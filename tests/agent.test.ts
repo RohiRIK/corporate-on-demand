@@ -157,23 +157,32 @@ describe("localRunner", () => {
 
 describe("buildArgs", () => {
   test("uses the model it is given, so per-worker routing works", () => {
-    const args = buildArgs(cron, "opencode/some-other-free", "hi");
+    const args = buildArgs(cron, "opencode/some-other-free", "hi", "/work/x");
     expect(args[args.indexOf("-m") + 1]).toBe("opencode/some-other-free");
   });
 
-  test("never grants tool-use permission", () => {
-    // No decision has been made about what an agent may touch, so --auto is
-    // withheld. If this test ever needs deleting, that decision was made.
-    expect(buildArgs(cron, "m", "hi")).not.toContain("--auto");
+  test("runs in the job's own worktree, not wherever the process happens to be", () => {
+    // The boundary. An agent with tools that runs in the wrong directory edits
+    // the wrong files, and "the worktree" is the only thing that makes the
+    // blast-radius check meaningful.
+    const args = buildArgs(cron, "m", "hi", "/work/nightly");
+    expect(args[args.indexOf("--dir") + 1]).toBe("/work/nightly");
+  });
+
+  test("grants tool use, because the agent now has a boundary to stay inside", () => {
+    // Decided: agents act automatically, the CEO manages them, no human gate.
+    // Paired with the radius-2 instruction in the bundle, which is what
+    // replaces the prompt line that used to forbid file changes.
+    expect(buildArgs(cron, "m", "hi", "/work/nightly")).toContain("--auto");
   });
 
   test("asks for the parseable stream format", () => {
-    const args = buildArgs(cron, "m", "hi");
+    const args = buildArgs(cron, "m", "hi", "/work/x");
     expect(args[args.indexOf("--format") + 1]).toBe("json");
   });
 
   test("is credential-free: no auth-shaped flag leaks into the command", () => {
-    expect(buildArgs(cron, "m", "hi").join(" ")).not.toMatch(/api[-_]?key|token|password|secret/i);
+    expect(buildArgs(cron, "m", "hi", "/work/x").join(" ")).not.toMatch(/api[-_]?key|token|password|secret/i);
   });
 });
 
@@ -188,8 +197,17 @@ describe("buildPrompt", () => {
     expect(buildPrompt(cron, null)).toContain("nobody reading");
   });
 
-  test("forbids claiming to have changed files, because it cannot", () => {
-    expect(buildPrompt(cron, null)).toContain("cannot");
+  test("no longer tells the agent it cannot change files", () => {
+    // The contradiction the plan called out: granting tools while the prompt
+    // still says "you cannot" puts two opposing instructions in front of the
+    // model. The boundary moved to the bundle, which is written per job.
+    expect(buildPrompt(cron, null)).not.toContain("Do not claim to have changed any files");
+  });
+
+  test("still tells the agent nobody is reading, so it does not stall on a question", () => {
+    // Unchanged, and still needed: an unattended agent that asks a question
+    // waits for an answer that will never come.
+    expect(buildPrompt(cron, null)).toContain("nobody reading");
   });
 });
 

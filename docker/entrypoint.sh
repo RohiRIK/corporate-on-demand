@@ -69,6 +69,26 @@ if [ -f "$WORKSPACE_FILE" ]; then
   else
     log "existing git repository in /work, leaving it alone"
   fi
+
+  # A worktree needs a BASE REF, and `git worktree add` against a repository
+  # with no commits fails with "fatal: invalid reference: HEAD" - measured,
+  # not theoretical. `git init` alone leaves HEAD pointing at a branch with
+  # nothing on it, so every job failed to acquire a worktree and the whole
+  # isolation design silently did nothing.
+  #
+  # Idempotent, and keyed on the COMMIT rather than on .git existing: a volume
+  # that has a repository but no commits is exactly the broken state above, and
+  # checking only for the directory would skip the repair.
+  if ! git -C /work rev-parse --verify HEAD >/dev/null 2>&1; then
+    # An empty first commit, so there is something to branch from. `.cod-repo`
+    # is the marker that says "this volume is a cod work volume", not content.
+    printf 'cod work volume\n' > /work/.cod-repo
+    git -C /work add -A
+    git -C /work commit -q -m "cod: initialise the work volume"
+    log "created the base commit per-job worktrees branch from"
+  else
+    log "work volume already has a base commit, leaving it alone"
+  fi
 fi
 
 # There are no credentials to install. opencode is unauthenticated by design,

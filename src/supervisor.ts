@@ -17,6 +17,17 @@ import { assertCronSupport, scheduleWorkspace, type ScheduledHandle } from "./sc
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
 const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
+/**
+ * Where the work repository lives, and where per-job worktrees go.
+ *
+ * `/work` is the volume, so these survive a container restart: a job that dies
+ * halfway leaves its branch and its work behind rather than losing it.
+ * The worktree root is INSIDE the volume and gitignored, because a worktree
+ * nested in the repository it branches from is git's own requirement.
+ */
+const WORK_REPO = "/work";
+const WORKTREE_ROOT = "/work/.cod-worktrees";
+
 const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
 
 /**
@@ -145,8 +156,32 @@ function main(): void {
         // so, rather than failing a job that could still have run.
         const { dispatch } = await import("./dispatch");
         const { driverFor } = await import("./drivers");
+        const { acquireWorktree, releaseWorktree } = await import("./worktree");
+        const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
+
+        // Each job gets its own git worktree, so concurrent jobs cannot collide
+        // and a half-finished job keeps its work. The worktree is ALSO the
+        // boundary: `--dir` confines the agent to it, which is what makes the
+        // blast-radius check mean anything.
+        const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, cron.name);
         const worker = findWorker(parsed.data, cron.agent);
-        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company), {
+        const department = worker === undefined
+          ? undefined
+          : parsed.data.departments.find((d) => d.workers.some((w) => w.name === worker.name));
+        if (worker !== undefined && department !== undefined) {
+          // Radius 0 - the NARROWEST boundary - because an agent now has tools.
+          // The ledger currently lets a proposer assert its own radius, which is
+          // a trust boundary trusting its subject; defaulting closed is the
+          // opposite and stays safe until that radius is derived server-side.
+          writeInstructions(
+            worktree.path,
+            buildInstructions(department, worker, { name: cron.name, task: cron.task }, 0, SKILLS_DIR),
+          );
+        }
+        log(`job "${cron.name}" worktree ${worktree.branch} at ${worktree.path}`);
+
+        try {
+        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company, { workdir: worktree.path }), {
           onStep: (step): void => {
             log(`step ${step.no}/${step.kind}: ${step.label} (${step.ms}ms)`);
           },
@@ -165,6 +200,16 @@ function main(): void {
           },
           { stateDir: STATE_DIR, seq: runSeq },
         );
+        } finally {
+          // The BRANCH is kept, the worktree is not. A job that dies halfway
+          // leaves its commits behind rather than losing them, and the
+          // directory does not accumulate one per job for ever.
+          try {
+            releaseWorktree(WORK_REPO, worktree);
+          } catch (releaseError) {
+            log(`could not release the worktree for "${cron.name}": ${(releaseError as Error).message}`, "error");
+          }
+        }
         settleJob(STATE_DIR, marker);
         runSeq += 1;
       } catch (error) {

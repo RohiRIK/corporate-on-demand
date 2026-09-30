@@ -113,9 +113,11 @@ export function buildPrompt(cron: Cron, company: { name: string; purpose: string
     "",
     `Your job: ${cron.task}`,
     "",
+    "Read AGENTS.md in your working directory first: it states your department's",
+    "purpose, this job, your boundaries, and your skills. Follow it.",
+    "",
     "Do the job and report what you did in plain text. Be brief.",
     "Do not ask questions - there is nobody reading this conversation.",
-    "Do not claim to have changed any files; you cannot.",
   ].join("\n");
 }
 
@@ -126,14 +128,21 @@ export function buildPrompt(cron: Cron, company: { name: string; purpose: string
  * meant to contain no code but the pinned binary. The model comes from the
  * worker, because per-worker routing is a settled decision.
  *
- * Deliberately NOT `--auto`: that grants tool-use permission, and no decision
- * has been made about what an agent may touch. The prompt is JSON-quoted so a
- * task containing quotes or newlines cannot break the shell command.
+ * `--auto` grants tool use. That is the decision: agents act automatically and
+ * the CEO manages them, with no human gate anywhere. What replaces the old
+ * "you cannot change files" prompt is a BOUNDARY - the job's own worktree via
+ * `--dir`, and a per-job AGENTS.md that names the blast radius and says plainly
+ * that no agent may push or merge. An agent with tools and no boundary is an
+ * unbounded actor; an agent with tools and a boundary is a worker.
+ *
+ * The prompt is JSON-quoted so a task containing quotes or newlines cannot
+ * break the shell command.
  */
-export function buildArgs(cron: Cron, model: string, prompt: string): string[] {
+export function buildArgs(cron: Cron, model: string, prompt: string, workdir: string): string[] {
   return [
-    OPENCODE_BIN, "run", "--pure", "--format", "json",
+    OPENCODE_BIN, "run", "--pure", "--auto", "--format", "json",
     "-m", model,
+    "--dir", workdir,
     "--title", `cod-${cron.name}`,
     JSON.stringify(prompt),
   ];
@@ -144,6 +153,8 @@ export interface RunAgentOptions {
   readonly timeoutMs?: number;
   readonly model?: string;
   readonly company?: { name: string; purpose: string } | null;
+  /** The job's own worktree. The agent is confined to it by --dir. */
+  readonly workdir?: string;
 }
 
 /**
@@ -166,7 +177,7 @@ export async function runAgent(
 
   let result: CommandResult;
   try {
-    result = await runner(buildArgs(cron, model, prompt), timeoutMs);
+    result = await runner(buildArgs(cron, model, prompt, options.workdir ?? "."), timeoutMs);
   } catch (error) {
     // The runner is injectable, so a caller could supply one that throws.
     // Reported, not propagated: the job still has to settle and record.
