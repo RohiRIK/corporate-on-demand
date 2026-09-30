@@ -38,12 +38,19 @@ The isolation machinery already exists and is tested — per-job git worktrees,
 branch-per-job, a durable work volume. It is built and unused. This stage wires
 an agent to it.
 
-**This stage is blocked on one decision from Rohi: how much autonomy an agent
-gets.** Tool use is currently withheld deliberately, because no decision has
-been made about what an agent may touch. That decision is the stage.
+**Not blocked. Decided: agents act automatically, and the CEO manages them.**
+There is no human gate anywhere in the chain and no autonomy question to ask
+Rohi. Tool use, commits, dispatch and merges are the CEO's to grant, not a
+human's. Rohi opens the computer and looks at what they did.
 
-Done when: a scheduled job produces a committed change on its own branch, and
-the change is recoverable if it dies halfway.
+Done when: a scheduled job produces a committed change on its own branch, under
+the CEO's authority, and the change is recoverable if it dies halfway.
+
+**What follows from "the CEO does all of it":** the blast-radius rule stops being
+a safety rail and becomes the main control on what an agent may touch. It is
+therefore Stage 2's problem, not Stage 3's — an agent that can write code needs
+the boundary in the same stage that gives it the ability, or Stage 2 ships an
+unbounded actor for one release.
 
 ---
 
@@ -105,18 +112,25 @@ consuming the machine or starving the others.
 
 ## Stage 6 — Operating it for real
 
-The difference between software that works and software that is used. Surviving
-reboots already work; what is missing is the operational surface: knowing what
-happened while nobody was watching, and knowing it cheaply.
+Surviving reboots already work. What remains is the operational surface at scale:
+retention, cost, and what happens over weeks rather than days.
 
-**The honest limit to carry into this stage:** a slow agent and a stuck agent
+**Most of the "see what they did" work moved earlier, to Stage 2, and that is
+the main change this decision caused.** Rohi's only interface with the whole
+system is opening the computer and looking at what the agents did. That makes
+"what happened while I was asleep" the product surface, not a diagnostic — so a
+readable, complete answer to it has to exist *before* agents can act, not after.
+A system that acts autonomously and can only be understood by reading raw logs is
+a system nobody will run.
+
+**The honest limit to carry into every stage:** a slow agent and a stuck agent
 look identical from outside, and an agent doing useless work looks exactly like
 an agent working. No local signal separates them. The only real defence is
-grading the outcome after the fact — which is Stage 4, not this one. Design
-around that limit rather than pretending to measure past it.
+grading the outcome after the fact — Stage 4. Design around that limit rather
+than pretending to measure past it.
 
 Done when: a week of unattended running can be understood after the fact
-without having watched it happen.
+without having watched it happen, at a glance rather than by reading logs.
 
 ---
 
