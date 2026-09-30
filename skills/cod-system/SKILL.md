@@ -1,13 +1,13 @@
 ---
 name: cod-system
 description: "Use when changing, extending, or debugging the cod CLI - onboarding, the shared container, cron scheduling, security controls, or what happens on a crash. Explains how the system actually works and why each boundary is where it is. NOT a runtime tool: this is the map you read before editing code."
-version: 1.0.0
+version: 1.1.0
 author: Rohi Rikman
 license: MIT
 metadata:
   hermes:
     tags: [cod, infrastructure, docker, cron, architecture]
-    related_skills: [create-cli, homelab-source]
+    related_skills: [create-cli, homelab-source, agent-proof]
 ---
 
 # cod System
@@ -25,6 +25,10 @@ stays thin; the detail lives in `references/`.
 | How does scheduling work, and what are its limits? | `references/scheduling.md` |
 | What happens when the supervisor dies? | `references/recovery.md` |
 | What must never be broken? | `references/invariants.md` |
+
+Changing agent execution, model calls, or the pass/fail decision? Read the
+`agent-proof` skill first: how to judge a run instead of trusting it, and the
+traps that each cost real time here.
 
 ## The four things to know before editing anything
 

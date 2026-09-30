@@ -379,6 +379,8 @@ than as bugs.
 | [scheduling](skills/cod-system/references/scheduling.md) | cron, concurrency, and the syntax that bites |
 | [recovery](skills/cod-system/references/recovery.md) | what happens when the supervisor dies |
 | [invariants](skills/cod-system/references/invariants.md) | the rules most changes are measured against |
+| [agent-proof](skills/agent-proof/SKILL.md) | judging a run instead of trusting it, and the traps that hide failure |
+| [cod-operations](skills/cod-operations/SKILL.md) | running a workspace from outside the container, including the destructive bits |
 
 ## Running on boot
 

@@ -553,3 +553,24 @@ code is worth nothing.
   root's home (build passes, container cannot start); the kilo bin is a Node
   shim in an image with no Node; and `--auto` is required by BOTH engines but
   documented by neither.
+
+## Unreleased - skills: agent-proof, and how to judge a run
+
+- **New skill `agent-proof`** (`skills/agent-proof/`), for changes that touch
+  agent execution, model calls, or the pass/fail decision. It holds what the
+  dual-backend work taught the expensive way: the assertion contract and its
+  order, the per-job relaxation that must not become a global one, the fixture
+  that quietly becomes a passing lie, and the requirement that the layer
+  *recording* a verdict actually reads it.
+- **`references/traps.md`** is the part worth the read. Eight failures that each
+  looked fine while happening: the agent that completed the task with no
+  instructions, the correct verdict recorded as `ok: true`, a flag stripped
+  because `--help` did not mention it, a global install that passed the build and
+  broke the container, a Node shim in an image with no Node, and a live test on
+  the runner's 5-second default that passed only by luck.
+- **`scripts/probe-live.sh`** reports the three numbers a single successful call
+  hides: answered, **truncated** (answered, but the stream lost its tail - these
+  exit 0 and any exit-code check counts them as passes), and no-answer. Verified
+  against a healthy model, a rate-limited one, and a missing binary.
+- **`cod-system` 1.1.0** cross-references it, because the map is where someone
+  lands first.
