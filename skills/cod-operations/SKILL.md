@@ -74,14 +74,35 @@ you do not have to wait it out.
 ### 3. It all looks stuck and nothing is moving
 
 Check the free model rather than the system. The provider is intermittent, and
-a hung call looks identical to a broken scheduler:
+a hung call looks identical to a broken scheduler. There are now **two
+engines**, so check both - one being down while the other works is the normal
+state of a free tier, and it is why both are installed:
 
 ```bash
-docker exec <container> sh -lc 'cd /work && timeout 60 opencode run --pure --format json -m opencode/space-bunny-free "What is 2 plus 2?"'
+docker exec <container> sh -lc 'cd /work && timeout 60 kilo run --pure --auto --format json -m kilo/kilo-auto/free "What is 2 plus 2?"'
+docker exec <container> sh -lc 'cd /work && timeout 60 opencode run --pure --auto --format json -m opencode/space-bunny-free "What is 2 plus 2?"'
 ```
 
-If that hangs or errors, the system is fine and the **model** is not. If it
-answers, the scheduler is the problem and `cod logs` will say so.
+If BOTH hang or error, the system is fine and the **providers** are not. If
+either answers, the scheduler is the problem and `cod logs` will say so.
+
+Note `--auto`: it is required by both engines, and without it every tool call is
+auto-rejected and the run reports success having done nothing.
+
+### 3a. A result says FAIL and the reason looks like a provider error
+
+`agent FAILED: agent reported an error: ...` means the run was **judged, not
+merely attempted**. `cod` now refuses to call a run successful unless the event
+stream proves work happened: a terminal `step_finish`, at least one completed
+tool, no error events, and a real prompt.
+
+So `FAIL` is a good outcome for a system that used to lie. The two you will see:
+
+- `no completed tool: the agent produced text without doing anything` - the
+  agent claimed the work without doing it. Treat the work as NOT done.
+- `no terminal step_finish: the run was truncated, not completed` - a known
+  upstream stream bug. Re-run it; a retry is safe because each job gets a fresh
+  worktree.
 
 ### 4. Everything is fine but you want it to start by itself
 
@@ -118,6 +139,12 @@ certain.
 - **Do not `docker rm -f` a container you did not create.** `cod down` only
   touches containers carrying this workspace's own label, which is why decoy
   containers survive it. Plain `docker rm` has no such guard.
+- **Do not add a paid model to `src/backend.ts` to unblock a job.** A test
+  fails the build if one appears, and it would: the container holds no
+  credential, so the run would fail rather than cost you - but the failure
+  would look like a provider outage.
+- **Do not re-pin a single model to "fix" flakiness.** That is the failure this
+  whole rotation mechanism exists to remove.
 - **Do not widen an agent's blast radius to unblock a job.** If a job is
   refused for touching `src/`, that refusal is the boundary working. The CEO
   re-proposes it deliberately; you do not.

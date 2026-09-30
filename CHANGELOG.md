@@ -531,3 +531,25 @@ code is worth nothing.
 - state.json coordination with pipeline tracking
 - Inbox-based cross-department communication protocol
 - Arcade Platform reference implementation: Snake, Pong, Breakout (+ Tetris, Space Invaders built autonomously by R&D)
+
+## Unreleased - two engines, and a run is judged by its stream
+
+- **A run is successful only if the stream proves it** (`src/assert.ts`). Exit
+  code 0 is not evidence: we shipped a bug where an agent given no instructions
+  completed the task anyway and the job looked fine. Now required: a terminal
+  `step_finish`, at least one completed tool, no error events, and a prompt long
+  enough to be a real instruction. Mutation-verified - every rule is load
+  bearing.
+- **A failed agent is no longer recorded as `ok`.** The assertion's verdict was
+  in the job output the whole time and nothing read it, so a run that had just
+  reported a provider outage was displayed as a success.
+- **A second engine**: `@kilocode/cli` 7.8.1 (MIT), pinned, chosen by model id
+  with no schema change. It is an opencode fork, so this diversifies the model
+  pool rather than the failure modes - which is the honest reason to run both.
+- **Rotation by measured success** (`src/registry.ts`). Per-model rot is
+  documented, not imagined, and one pinned model is how we rode a free tier to
+  a 25% success rate.
+- **Three image fixes** found by running it: `bun add --global` installs into
+  root's home (build passes, container cannot start); the kilo bin is a Node
+  shim in an image with no Node; and `--auto` is required by BOTH engines but
+  documented by neither.

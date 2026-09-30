@@ -146,3 +146,20 @@ The container refuses to pretend instead.
 3. **Never describe prompt-level rules, the token budget, or `--network none`-removal as
    mitigations.** If it is not in the table above, it is a policy, and policies are written in
    the prompt.
+
+## Two agent engines (2026-09-30)
+
+`@kilocode/cli` 7.8.1 is installed in the image alongside `opencode`. It is
+**MIT licensed**, published on npm, and **pinned** - an unpinned agent runtime
+is how a working image becomes a broken one on a random rebuild.
+
+`kilo-auto/free` and `kilo/openrouter/free` are Kilo's own gateways, not
+OpenRouter credentials: the container still holds **no API key and no
+credential of any kind**. A test asserts that every model the system advertises
+is a free one, because `kilo/anthropic/*` answers `401 PAID_MODEL_AUTH_REQUIRED`
+and a $0 system should not be one careless edit away from a bill.
+
+The published `kilo` bin is a Node shim. This image ships no Node, so the shim
+is replaced with one that runs on bun. No network surface or capability is added
+by this: the engine is a child process of the supervisor, confined to its
+worktree by its working directory, exactly as `opencode` was.

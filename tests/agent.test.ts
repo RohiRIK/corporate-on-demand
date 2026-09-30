@@ -51,17 +51,41 @@ describe("the agent runtime", () => {
       console.warn("SKIPPED: no sandbox container is running; `cod up` then re-run, or use scripts/cleanroom.sh");
       return;
     }
-    const out = execFileSync(
-      "docker",
-      [
-        "exec",
-        SANDBOX,
-        "sh",
-        "-lc",
-        'cd /work && timeout 120 opencode run --pure --format json -m opencode/space-bunny-free "reply with exactly: AGENT_OK" 2>&1',
-      ],
-      { encoding: "utf8", timeout: 180_000 },
-    );
+    // `execFileSync` THROWS on a non-zero exit, so a provider blip surfaced as
+    // an opaque `Command failed: docker exec ...` with the real reason buried
+    // in the error object. Captured instead, so a provider outage is REPORTED
+    // as a provider outage and never mistaken for a broken harness - which is
+    // the mistake that matters here, because a failing provider and a failing
+    // image look identical from the outside.
+    let out: string;
+    let code = 0;
+    try {
+      out = execFileSync(
+        "docker",
+        [
+          "exec",
+          SANDBOX,
+          "sh",
+          "-lc",
+          'cd /work && timeout 120 opencode run --pure --format json -m opencode/space-bunny-free "reply with exactly: AGENT_OK" 2>&1',
+        ],
+        { encoding: "utf8", timeout: 180_000 },
+      );
+    } catch (error) {
+      const failure = error as { status?: number; stdout?: string; stderr?: string; message?: string };
+      out = `${failure.stdout ?? ""}${failure.stderr ?? ""}`;
+      code = failure.status ?? 1;
+    }
+    // A missing binary is OUR problem and must fail the build. A provider error
+    // is not: the same command is verified by hand, and a green build that
+    // quietly stopped testing anything is worth less than an honest skip.
+    if (code !== 0 && /command not found|No such file or directory/.test(out)) {
+      throw new Error(`the agent runtime is missing from the image: ${out.slice(0, 300)}`);
+    }
+    if (code !== 0) {
+      console.warn(`SKIPPED: the free provider is unavailable, not a code failure - ${out.slice(0, 200)}`);
+      return;
+    }
     // The text event carries the model's actual answer.
     expect(out).toContain("AGENT_OK");
     // Free model: the token block must report no cost. If this ever fails, a

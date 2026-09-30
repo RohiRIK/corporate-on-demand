@@ -314,3 +314,62 @@ self-report: the work passing is not evidence the work was directed.
 Proven live with a real credential-free model: the dispatched agent opened
 AGENTS.md and quoted the rule verbatim - "Do not push, merge, or force-push. You
 have no authority to land anything." - a line that exists only in the file.
+
+## Closed: provider flakiness and silent failure (2026-09-30)
+
+The single free model we were pinned to failed roughly 3 calls in 4, exiting 1
+with empty stderr - `agent exited 1: no detail` - which could not be told apart
+from our own bug, a timeout, or a provider outage.
+
+**Measured, inside the real image, as user 1000:1000, credential-free, cost 0:**
+
+| engine | model | result |
+|---|---|---|
+| opencode | `opencode/space-bunny-free` | 3/5 |
+| kilo | `kilo/kilo-auto/free` | 5/5 |
+| kilo | `kilo/stepfun/step-3.7-flash:free` | 5/5 |
+
+An earlier afternoon measured opencode at ~25% and kilo at 12/12. The opencode
+number MOVES: the provider recovers, and the pinned single model is the actual
+problem. Treat both figures as one sample on one prompt, not a benchmark.
+
+**What changed:**
+
+1. **A run is judged by its stream, not its exit code** (`src/assert.ts`). A run
+   passes only with a terminal `step_finish`, at least one completed tool, no
+   error events, and a prompt long enough to be a real instruction. Mutation-
+   verified: removing any one of the five rules breaks the suite.
+2. **A second engine** (`@kilocode/cli`, MIT, pinned 7.8.1). It is an opencode
+   FORK, so this diversifies the model pool but not the failure modes - which
+   is the honest reason to run both rather than to replace.
+3. **Rotation by measured success** (`src/registry.ts`), because per-model rot
+   is documented rather than imagined: muse-spark 500s, `mimo-v2.5-free`
+   rate-limited, `deepseek-v4-flash-free` retired upstream.
+4. **A failed agent is no longer recorded as `ok`.** The assertion's verdict was
+   in the job output the whole time and nothing read it, so a run that had just
+   reported a provider outage was displayed as a success. Found by reading the
+   raw result record instead of the pretty line.
+
+## Open: a read-only job has no tool call, and the assertion rejects it
+
+`require ≥1 completed tool` is what kills the "said it did the work" class, and
+it also rejects a legitimate job that only inspects and reports - which makes
+no tool call. A per-job `expectTools: false` is the proposed fix and is NOT
+implemented. It is deliberately not a global loosening, because a global
+exception is how the wrong-reason class came back the first time.
+
+## Open: the two engines share a truncation bug, if they share it at all
+
+opencode can exit 0 having dropped the tail of its event stream
+(anomalyco/opencode#31435, #29866, #26855). Whether `@kilocode/cli@7.8.1`
+contains those fixes is UNVERIFIED, and Kilo's divergence from opencode was not
+mapped. The Task 2 assertion is what covers us either way, but running two
+engines gives a health signal rather than independence, and that is worth
+stating plainly rather than implying more diversity than exists.
+
+## Open: the `ref` id is captured but not yet joined to the log
+
+opencode writes the same id into `~/.local/share/opencode/log/*.log`, so parsing
+`error.data.ref` should turn "no detail" into a root-cause lookup. The id now
+reaches the operator; the log join is not built. Left out to keep this change
+reviewable, not forgotten.
