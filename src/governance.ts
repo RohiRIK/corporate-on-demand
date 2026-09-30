@@ -27,6 +27,13 @@ import { radiusForWork, targetPathsOfItem } from "./runwork";
 import { openWork, listWork, type WorkItem } from "./work";
 import type { Workspace } from "./workspace";
 
+/** What happened to a piece of finished work. */
+export type LandOutcome =
+  | { readonly outcome: "landed"; readonly branch: string; readonly reason: string }
+  | { readonly outcome: "changes-requested"; readonly reason: string }
+  | { readonly outcome: "rejected"; readonly reason: string }
+  | { readonly outcome: "skipped"; readonly reason: string };
+
 export interface DispatchOutcome {
   readonly ok: boolean;
   readonly output?: string;
@@ -36,6 +43,14 @@ export interface DispatchOutcome {
 export interface GovernanceOptions {
   /** Runs one item. Injected: the supervisor passes the real driver. */
   readonly dispatch: (workId: string) => Promise<DispatchOutcome>;
+  /**
+   * Reviews a finished item's diff and, if it passes, lands it.
+   *
+   * Optional because it needs git and the container, and the tick must stay
+   * testable without either. When absent, finished work stays on its branch -
+   * which is correct and safe, just not landed.
+   */
+  readonly land?: (workId: string) => Promise<LandOutcome>;
   /** Hard cap per tick. The reason this tick is safe to run unattended. */
   readonly maxDispatch?: number;
   readonly actor?: string;
@@ -45,6 +60,8 @@ export interface GovernanceReport {
   readonly cycle: CycleResult;
   readonly meeting: Meeting;
   readonly dispatched: readonly string[];
+  /** Finished work that was reviewed, and what happened to it. */
+  readonly landed: readonly { readonly id: string; readonly outcome: string }[];
   /**
    * Failures WITH their reason.
    *
@@ -110,6 +127,7 @@ export async function runGovernance(
       cycle: emptyCycle(`cycle failed: ${(error as Error).message}`),
       meeting: emptyMeeting(),
       dispatched: [],
+      landed: [],
       failed: [],
       summary: `governance tick failed: ${(error as Error).message}`,
     };
@@ -129,6 +147,9 @@ export async function runGovernance(
 
   const dispatched: string[] = [];
   const failed: { id: string; reason: string }[] = [];
+  // Once-per-process, so a landed branch is not re-landed every tick. A merge
+  // is not idempotent by accident.
+  const landedIds = new Set<string>();
   for (const item of queue.slice(0, Math.max(0, maxDispatch))) {
     try {
       const outcome = await options.dispatch(item.id);
@@ -141,15 +162,45 @@ export async function runGovernance(
     }
   }
 
+
+  // Review and merge, for work that is FINISHED. Not for work still running:
+  // a review of a diff that does not exist yet reviews nothing.
+  const landed: { id: string; outcome: string }[] = [];
+  if (options.land !== undefined) {
+    let finished: WorkItem[] = [];
+    try {
+      const handle = openWork(stateDir);
+      try {
+        finished = listWork(handle).filter((item) => item.state === "done" && !landedIds.has(item.id));
+      } finally {
+        handle.close();
+      }
+    } catch {
+      finished = [];
+    }
+    for (const item of finished.slice(0, Math.max(0, maxDispatch))) {
+      try {
+        const outcome = await options.land(item.id);
+        landed.push({ id: item.id, outcome: outcome.outcome });
+        if (outcome.outcome === "landed") landedIds.add(item.id);
+        // "changes-requested" is the ONE retry, and the item goes back to ready
+        // so the next tick re-runs it with the review as its brief. Not here:
+        // the lander owns that transition, because only it knows the diff.
+      } catch (error) {
+        landed.push({ id: item.id, outcome: `error: ${(error as Error).message}` });
+      }
+    }
+  }
+
   const summary = [
     `proposed ${cycle.proposed.length}`,
     `decisions ${meeting.decisions.length}`,
     `dispatched ${dispatched.length}`,
     `failed ${failed.length}`,
     `${queue.length} item(s) ready`,
+    ...(landed.length > 0 ? [`landed ${landed.filter((l) => l.outcome === "landed").length}/${landed.length} reviewed`] : []),
   ].join("; ");
-
-  return { cycle, meeting, dispatched, failed, summary };
+  return { cycle, meeting, dispatched, landed, failed, summary };
 }
 
 function emptyCycle(reason: string): CycleResult {

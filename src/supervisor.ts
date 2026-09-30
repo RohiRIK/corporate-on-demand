@@ -56,6 +56,9 @@ function blastRadiusFor(cron: { readonly name: string; readonly task: string }):
  */
 const REGISTRY = new Registry();
 
+/** The model the reviewer reads with. Free, and rot-prone like the others. */
+const REVIEW_MODEL = "kilo/kilo-auto/free";
+
 const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
 
 /**
@@ -117,6 +120,36 @@ async function governanceTick(workspace: Workspace): Promise<void> {
   const { runGovernance } = await import("./governance");
   const report = await runGovernance(workspace, STATE_DIR, {
     dispatch: (id) => dispatchWorkItem(workspace, id),
+    land: async (id) => {
+      // The one place that merges. The reviewer is a MODEL call, unlike the
+      // mechanical checks beside it, because judging scope and whether a test
+      // exists is a judgement. It is still only ever ADVISORY: a mechanical
+      // refusal cannot be talked past, and the radius decides who lands.
+      const { openWork, get } = await import("./work");
+      const { landWork } = await import("./land");
+      const { runAgent } = await import("./agent");
+      const handle = openWork(STATE_DIR);
+      let item;
+      try {
+        item = get(handle, id);
+      } finally {
+        handle.close();
+      }
+      if (item === null) return { outcome: "skipped", reason: `no such work item: ${id}` };
+      return landWork(WORK_REPO, item, {
+        repo: WORK_REPO,
+        stateDir: STATE_DIR,
+        ask: async (prompt) => {
+          const out = await runAgent(
+            { name: `review-${id}`, agent: "reviewer", task: prompt, schedule: "0 0 1 1 *", enabled: true, expectTools: false },
+            null,
+            async () => {},
+            { model: REVIEW_MODEL, workdir: WORK_REPO },
+          );
+          return out;
+        },
+      });
+    },
     // The bound is the company's own concurrency ceiling, not a second number:
     // a tick that launched more than the workspace allows would be the
     // scheduler's rule and the tick's rule disagreeing.
@@ -125,6 +158,7 @@ async function governanceTick(workspace: Workspace): Promise<void> {
   });
   log(`[governance] ${report.summary}`);
   for (const failure of report.failed) log(`[governance] failed: ${failure.id} - ${failure.reason}`);
+  for (const entry of report.landed) log(`[governance] review: ${entry.id} -> ${entry.outcome}`);
 }
 
 function parsedConcurrency(workspace: Workspace): number {
