@@ -78,6 +78,11 @@ Once or twice a day, depending on the job. **The meeting body is whoever
 exists** — derived from the roles in the workspace, never a hardcoded cast, so a
 department joins by existing rather than by a code change.
 
+The current body is **CEO + CTO + Engineering**. All three are *working* roles
+with a standing purpose; CTO is not a meeting-only attendee, it has work of its
+own. CISO, CPO and CFO join later by existing, which is the whole point of
+deriving the cast rather than hardcoding one.
+
 **The deleted version was not a meeting.** It was a script that collected
 activity, read grades, listed the pipeline and escalations, and wrote markdown
 minutes; no agent spoke and nothing was decided. The old cross-department
