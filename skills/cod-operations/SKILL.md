@@ -104,6 +104,24 @@ So `FAIL` is a good outcome for a system that used to lie. The two you will see:
   upstream stream bug. Re-run it; a retry is safe because each job gets a fresh
   worktree.
 
+Every provider failure now carries the engine's own log line, found by the
+`ref=err_...` id. If it says `no log entry found`, the engine wrote nothing for
+that id - which is a fact about the log, not about the failure.
+
+### 3b. A job is read-only and is reported as having done nothing
+
+A job that only inspects and reports makes no tool call, so the assertion would
+reject it. Those jobs are marked in `cod.json`:
+
+```json
+{ "name": "report", "expectTools": false, "task": "..." }
+```
+
+The default is **strict** - a job is expected to change something. Only set
+`expectTools: false` for a job that genuinely reads and reports; it is a
+narrower pass, not a bypass, so the job must still finish cleanly and have been
+given a real prompt.
+
 ### 4. Everything is fine but you want it to start by itself
 
 `cod down` stops the container. That is not the same as boot persistence - the

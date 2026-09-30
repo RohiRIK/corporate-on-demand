@@ -350,26 +350,50 @@ problem. Treat both figures as one sample on one prompt, not a benchmark.
    reported a provider outage was displayed as a success. Found by reading the
    raw result record instead of the pretty line.
 
-## Open: a read-only job has no tool call, and the assertion rejects it
+## Closed: a read-only job has no tool call (2026-09-30)
 
-`require ≥1 completed tool` is what kills the "said it did the work" class, and
-it also rejects a legitimate job that only inspects and reports - which makes
-no tool call. A per-job `expectTools: false` is the proposed fix and is NOT
-implemented. It is deliberately not a global loosening, because a global
-exception is how the wrong-reason class came back the first time.
+`expectTools: false` on a cron, defaulting to **true**. Per job, deliberately:
+a global relaxation is how the wrong-reason class comes back, because then every
+job may claim work it did not do. The default matters more than the flag.
 
-## Open: the two engines share a truncation bug, if they share it at all
+It is a narrower pass, not a bypass - a read-only job must still finish cleanly,
+report no errors, and have been given a real prompt. Proven live: three
+consecutive read-only jobs on the Kilo engine, all `ok`, none using a tool or
+touching a commit.
 
-opencode can exit 0 having dropped the tail of its event stream
-(anomalyco/opencode#31435, #29866, #26855). Whether `@kilocode/cli@7.8.1`
-contains those fixes is UNVERIFIED, and Kilo's divergence from opencode was not
-mapped. The Task 2 assertion is what covers us either way, but running two
-engines gives a health signal rather than independence, and that is worth
-stating plainly rather than implying more diversity than exists.
+## Answered by measurement: the truncation bug did not reproduce (2026-09-30)
 
-## Open: the `ref` id is captured but not yet joined to the log
+20 calls in the image, 10 per engine, watching for the exact signature - it
+answered but the stream has no terminal `step_finish`:
 
-opencode writes the same id into `~/.local/share/opencode/log/*.log`, so parsing
-`error.data.ref` should turn "no detail" into a root-cause lookup. The id now
-reaches the operator; the log join is not built. Left out to keep this change
-reviewable, not forgotten.
+| engine | answered | truncated | provider failure |
+|---|---|---|---|
+| `kilo/kilo-auto/free` | 10/10 | **0** | 0 |
+| `opencode/space-bunny-free` | 8/10 | **0** | 2 |
+
+So it did not reproduce on either engine, in this sample. That is **not** proof
+it is fixed: the report is under container latency on LONGER AGENTIC runs, and
+20 short arithmetic calls are not that. The assertion keeps its truncation rule
+regardless - it is cheap and the bug is documented - and the honest conclusion
+is "not observed", not "not present".
+
+What remains true either way: two engines give a health SIGNAL, not
+independence, because Kilo is a fork. That is stated rather than implied away.
+
+## Closed: the `ref` id is now joined to the log (2026-09-30)
+
+`ref=err_...` is the join key between the JSONL error event and the engine's own
+log, and the failure line now carries the resolved entry.
+
+Two measured facts made the first version useless, and both were found by
+looking inside the image rather than by reasoning:
+
+- **The engines use different log directories.** opencode writes under
+  `~/.local/share/opencode/log`, Kilo under `~/.local/share/kilo/log`, because
+  Kilo is a fork that renamed the data directory. Searching only opencode's
+  meant every Kilo failure silently found nothing - which is indistinguishable
+  from there being nothing to find.
+- Kilo's combined log file is literally named `opencode.log`.
+
+Bounded to one line, never throws, and says "no log entry found" rather than
+staying silent. Silence is the bug this replaces.
