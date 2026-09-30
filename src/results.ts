@@ -26,6 +26,16 @@ export interface JobResult {
   readonly output: string;
   /** Present when `ok` is false. */
   readonly error?: string;
+  /** The branch the job worked on. */
+  readonly branch?: string;
+  /** The files it changed, so the owner need not open a diff to learn that. */
+  readonly changedFiles?: readonly string[];
+  /** How many commits it made. */
+  readonly commitCount?: number;
+  /** The blast radius the job ran under. */
+  readonly blastRadius?: number;
+  /** Why a change was refused, when one was. */
+  readonly refused?: string;
 }
 
 /** Never read more than this many result files, whatever the caller asks for. */
@@ -178,5 +188,19 @@ export function pruneResults(
 export function formatResult(result: JobResult): string {
   const when = new Date(result.startedAt).toISOString();
   const status = result.ok ? "ok  " : "FAIL";
-  return `${when} ${status} ${result.cron.padEnd(16)} ${result.durationMs}ms  ${result.agent}: ${result.task}`;
+  // What CHANGED, on the same line as what ran.
+  //
+  // Not decoration. Looking at the computer is the owner's ONLY interface with
+  // this system, so "which files did they touch" has to be visible without
+  // opening a diff or piping through jq. A refusal is called out here rather
+  // than only in the log, because a refusal the owner cannot see is a refusal
+  // that looks like success.
+  const changed = result.changedFiles ?? [];
+  const change =
+    changed.length === 0
+      ? ""
+      : `  [${changed.length} file${changed.length === 1 ? "" : "s"}: ${changed.slice(0, 3).join(", ")}${changed.length > 3 ? ", …" : ""}]`;
+  const radius = result.blastRadius === undefined ? "" : ` r${result.blastRadius}`;
+  const refused = result.refused === undefined ? "" : `  REFUSED: ${result.refused}`;
+  return `${when} ${status} ${result.cron.padEnd(16)} ${result.durationMs}ms${radius}${change}${refused}  ${result.agent}: ${result.task}`;
 }

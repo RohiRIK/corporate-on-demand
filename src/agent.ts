@@ -43,7 +43,17 @@ export interface CommandResult {
   readonly timedOut: boolean;
 }
 
-export type CommandRunner = (args: readonly string[], timeoutMs: number) => Promise<CommandResult>;
+/**
+ * Run a command. `cwd` is how the agent is confined to its own worktree.
+ *
+ * Set on the PROCESS rather than passed to opencode, because `--dir` does not
+ * behave the same way for a git worktree - see buildArgs.
+ */
+export type CommandRunner = (
+  args: readonly string[],
+  timeoutMs: number,
+  cwd?: string,
+) => Promise<CommandResult>;
 
 /**
  * The real runner: spawn `opencode` here, in this container.
@@ -55,13 +65,18 @@ export type CommandRunner = (args: readonly string[], timeoutMs: number) => Prom
  * No `cd`: the supervisor's working directory is already the work volume, and
  * hardcoding one would silently run agents somewhere they did not ask to work.
  */
-export const localRunner: CommandRunner = async (args, timeoutMs) => {
+export const localRunner: CommandRunner = async (args, timeoutMs, cwd) => {
   const proc = Bun.spawn(["sh", "-lc", args.join(" ")], {
     stdout: "pipe",
     stderr: "pipe",
     // Closed, not inherited. An inherited stdin is an open pipe the model
     // process may wait on, and a job that waits is a job that never settles.
     stdin: "ignore",
+    // THE BOUNDARY. The agent can only reach its own worktree, and it reads
+    // the AGENTS.md bundle from there. If this is ever undefined the agent
+    // would run in /work with every worktree visible to it, which is the one
+    // thing that must never happen.
+    cwd,
   });
 
   // `Bun.spawn`, NOT `node:child_process` execFile. Measured: the identical
@@ -139,10 +154,17 @@ export function buildPrompt(cron: Cron, company: { name: string; purpose: string
  * break the shell command.
  */
 export function buildArgs(cron: Cron, model: string, prompt: string, workdir: string): string[] {
+  // The working directory is set on the PROCESS, not with --dir.
+  //
+  // Measured: `opencode run --dir <git worktree path>` fails with "Unexpected
+  // server error" while the identical command with the process cd-ed into the
+  // same directory works. `--dir` is evidently not equivalent to a working
+  // directory for a worktree, and the failure is opaque - it surfaces as
+  // "agent exited 1: no detail" with nothing in stderr.
+  void workdir;
   return [
     OPENCODE_BIN, "run", "--pure", "--auto", "--format", "json",
     "-m", model,
-    "--dir", workdir,
     "--title", `cod-${cron.name}`,
     JSON.stringify(prompt),
   ];
@@ -177,7 +199,7 @@ export async function runAgent(
 
   let result: CommandResult;
   try {
-    result = await runner(buildArgs(cron, model, prompt, options.workdir ?? "."), timeoutMs);
+    result = await runner(buildArgs(cron, model, prompt, options.workdir ?? "."), timeoutMs, options.workdir);
   } catch (error) {
     // The runner is injectable, so a caller could supply one that throws.
     // Reported, not propagated: the job still has to settle and record.

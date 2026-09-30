@@ -28,6 +28,21 @@ const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
 const WORK_REPO = "/work";
 const WORKTREE_ROOT = "/work/.cod-worktrees";
 
+/**
+ * The blast radius a job runs under.
+ *
+ * 0 - the NARROWEST - unless the job name opts in. A per-job name convention
+ * rather than a model-supplied number, because a self-asserted radius is a
+ * trust boundary trusting its subject. The ceiling is clamped: nothing in this
+ * function can return above 2, so a bad name cannot grant an unbounded agent.
+ */
+function blastRadiusFor(cron: { readonly name: string; readonly task: string }): number {
+  const global = /(^|[-_.])(global|globalwork)([-_.]|$)/i.test(cron.name);
+  if (global) return 2;
+  const cross = /(^|[-_.])(cross|crossdept)([-_.]|$)/i.test(cron.name);
+  return cross ? 1 : 0;
+}
+
 const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
 
 /**
@@ -186,6 +201,18 @@ function main(): void {
             log(`step ${step.no}/${step.kind}: ${step.label} (${step.ms}ms)`);
           },
         });
+
+        // What the job ACTUALLY did, read from disk. The boundary check and
+        // the owner's report both come from here rather than from the agent's
+        // own account - a self-report is not evidence, which is the same reason
+        // the end-to-end checks never grep the output for a phrase they asked
+        // for.
+        const { readJobChange } = await import("./change");
+        const { classifyChange, summariseChange } = await import("./boundary");
+        const change = readJobChange(worktree.path);
+        const classified = classifyChange(change.changed, blastRadiusFor(cron));
+        log(`job "${cron.name}" ${summariseChange(classified)} (${change.commits} commit(s), head ${change.head ?? "none"})`);
+
         log(`job "${result.cron}" -> ${result.output}`);
         recordResult(
           {
@@ -197,6 +224,11 @@ function main(): void {
             durationMs: Date.now() - startedAt,
             ok: true,
             output: result.output,
+            branch: worktree.branch,
+            changedFiles: classified.changed,
+            commitCount: change.commits,
+            blastRadius: classified.radius,
+            ...(classified.exceeded ? { refused: summariseChange(classified) } : {}),
           },
           { stateDir: STATE_DIR, seq: runSeq },
         );

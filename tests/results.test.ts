@@ -324,3 +324,49 @@ describe("formatResult", () => {
     expect(formatResult(result({ ok: false, error: "boom" }))).toContain("FAIL");
   });
 });
+
+
+describe("results carry what the owner needs to see", () => {
+  const base = {
+    cron: "author", agent: "builder", task: "write the answer",
+    startedAt: 1_700_000_000_000, finishedAt: 1_700_000_009_000,
+    durationMs: 9_000, ok: true, output: "done",
+  };
+
+  test("the human line shows WHICH files changed, not only that something did", () => {
+    // Looking at the computer is the owner's only interface, so this cannot
+    // require jq. The test is on the FORMATTED line, not the stored record,
+    // because a field nobody ever prints is a field nobody reads.
+    const line = formatResult({ ...base, branch: "cod/author", changedFiles: ["answer.txt", "src/a.ts"], blastRadius: 0 });
+    expect(line).toContain("2 files");
+    expect(line).toContain("answer.txt");
+    expect(line).toContain("r0");
+  });
+
+  test("a job that changed nothing says so rather than showing an empty bracket", () => {
+    expect(formatResult(base)).not.toContain("[]");
+  });
+
+  test("a REFUSAL is visible in the results, not only in the log", () => {
+    // A refusal the owner cannot see is a refusal that looks like success.
+    const line = formatResult({ ...base, changedFiles: ["src/a.ts"], blastRadius: 2, refused: "GLOBAL work not committed: src/a.ts" });
+    expect(line).toContain("REFUSED");
+    expect(line).toContain("src/a.ts");
+  });
+
+  test("the radius is absent rather than zero when nothing declared one", () => {
+    // r0 is the DEFAULT now, so printing r0 for a job that never declared a
+    // radius would claim an authority that was never granted.
+    expect(formatResult(base)).not.toContain("r0");
+  });
+
+  test("three files are truncated so one line stays one line", () => {
+    const line = formatResult({ ...base, changedFiles: ["a", "b", "c", "d", "e"], blastRadius: 0 });
+    expect(line).toContain("5 files");
+    expect(line).toContain("…");
+  });
+
+  test("a single file reads as singular", () => {
+    expect(formatResult({ ...base, changedFiles: ["only.ts"], blastRadius: 0 })).toContain("1 file:");
+  });
+});

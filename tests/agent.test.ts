@@ -161,12 +161,27 @@ describe("buildArgs", () => {
     expect(args[args.indexOf("-m") + 1]).toBe("opencode/some-other-free");
   });
 
-  test("runs in the job's own worktree, not wherever the process happens to be", () => {
+  test("confinement is a process working directory, not a --dir flag", () => {
     // The boundary. An agent with tools that runs in the wrong directory edits
-    // the wrong files, and "the worktree" is the only thing that makes the
-    // blast-radius check meaningful.
+    // the wrong files, and the worktree is the only thing that makes the
+    // blast-radius check mean anything.
+    //
+    // `--dir` is deliberately NOT used: measured, `opencode run --dir <git
+    // worktree>` fails with an opaque "Unexpected server error" while the
+    // identical command with the process cd-ed in works. The confinement is
+    // therefore the spawn's `cwd`, asserted in the runner test below.
     const args = buildArgs(cron, "m", "hi", "/work/nightly");
-    expect(args[args.indexOf("--dir") + 1]).toBe("/work/nightly");
+    expect(args).not.toContain("--dir");
+  });
+
+  test("runAgent hands the worktree to the runner as a working directory", async () => {
+    let seen: string | undefined;
+    const spy: CommandRunner = async (_args, _t, cwd) => {
+      seen = cwd;
+      return { stdout: STREAM, stderr: "", code: 0, timedOut: false };
+    };
+    await runAgent(cron, worker, async () => {}, { runner: spy, workdir: "/work/nightly" });
+    expect(seen).toBe("/work/nightly");
   });
 
   test("grants tool use, because the agent now has a boundary to stay inside", () => {
