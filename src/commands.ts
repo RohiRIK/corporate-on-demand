@@ -156,6 +156,10 @@ const commands: Record<
       // the operator having to know the field exists.
       timezone: hostTimezone(),
       resultRetention: 500,
+      governance: { enabled: true },
+      // ON by default, and saying so in the file rather than leaving it absent:
+      // a new workspace should govern itself without the operator reading this
+      // comment. An operator who wants it manual sets `enabled: false`.
     };
 
     const parsed = Workspace.safeParse(workspace);

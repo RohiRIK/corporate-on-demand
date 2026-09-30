@@ -14,7 +14,7 @@ import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
 import { beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
 import { heartbeatPath, type Heartbeat } from "./liveness";
-import { assertCronSupport, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
+import { assertCronSupport, scheduleGovernance, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
 const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
@@ -57,6 +57,81 @@ function blastRadiusFor(cron: { readonly name: string; readonly task: string }):
 const REGISTRY = new Registry();
 
 const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
+
+/**
+ * Dispatch one ledger item through the real agent driver.
+ *
+ * Shared by the cron path and the governance tick, deliberately: a job run from
+ * the ledger and a job run from a schedule must be the same machine, or the
+ * second one to change drifts from the first and nobody can tell which is the
+ * real behaviour.
+ */
+async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{ ok: boolean; reason?: string }> {
+  const { openWork, get } = await import("./work");
+  const { runWorkItem, textOfItem } = await import("./runwork");
+  const { resolveTarget } = await import("./assign");
+  const { driverFor } = await import("./drivers");
+  const { acquireWorktree, releaseWorktree } = await import("./worktree");
+  const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
+
+  const handle = openWork(STATE_DIR);
+  let item;
+  try {
+    item = get(handle, workId);
+  } finally {
+    handle.close();
+  }
+  if (item === null) return { ok: false, reason: `no such work item: ${workId}` };
+
+  // An item is addressed to a DEPARTMENT; a WORKER runs it. Bridging the two
+  // is not optional: skipping it is what once left a real agent running with no
+  // instructions at all, and still completing the task.
+  const target = resolveTarget(workspace, item.to_agent);
+  if (target.worker === undefined) {
+    return { ok: false, reason: target.reason ?? `no worker for "${item.to_agent}"` };
+  }
+  if (target.note !== undefined) log(target.note);
+  const worker = target.worker;
+  const department = target.department;
+  const goal = textOfItem(item);
+  const cron = { name: item.id, agent: worker.name, task: goal, schedule: "0 0 1 1 *", enabled: true, expectTools: true };
+
+  const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, item.id);
+  try {
+    if (department === undefined) return { ok: false, reason: `${worker.name} has no department` };
+    writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: goal }, 0, SKILLS_DIR));
+    const result = await runWorkItem({
+      stateDir: STATE_DIR,
+      workId,
+      cron,
+      driver: driverFor(worker, workspace.company, { workdir: worktree.path }, REGISTRY),
+    });
+    return { ok: result.ok, reason: result.reason };
+  } finally {
+    releaseWorktree(WORK_REPO, worktree);
+  }
+}
+
+/** One unattended company tick: propose, meet, dispatch. */
+async function governanceTick(workspace: Workspace): Promise<void> {
+  const { runGovernance } = await import("./governance");
+  const report = await runGovernance(workspace, STATE_DIR, {
+    dispatch: (id) => dispatchWorkItem(workspace, id),
+    // The bound is the company's own concurrency ceiling, not a second number:
+    // a tick that launched more than the workspace allows would be the
+    // scheduler's rule and the tick's rule disagreeing.
+    maxDispatch: parsedConcurrency(workspace),
+    actor: "governance",
+  });
+  log(`[governance] ${report.summary}`);
+  for (const failure of report.failed) log(`[governance] failed: ${failure.id} - ${failure.reason}`);
+}
+
+function parsedConcurrency(workspace: Workspace): number {
+  return typeof workspace.maxConcurrent === "number" && workspace.maxConcurrent > 0
+    ? workspace.maxConcurrent
+    : 2;
+}
 
 /**
  * Distinguishes two runs inside the same millisecond, which happens whenever
@@ -282,6 +357,24 @@ function main(): void {
         runSeq += 1;
       }
     },
+  });
+
+  // The company governing itself. Registered on its OWN interval, not as a cron
+  // entry: a cron is a job with a task and an agent, and routing the CEO's cycle
+  // through one makes an authority boundary impossible to point at later.
+  //
+  // Runs one tick immediately on startup rather than waiting a full interval:
+  // a company that takes 30 minutes to notice a pending item looks broken, and
+  // the first tick after a restart is exactly when there is work to do.
+  const governance = scheduleGovernance(parsed.data, async (): Promise<void> => {
+    beat(jobNames);
+    await governanceTick(parsed.data);
+  }, { report: log });
+  if (governance !== null) handles.push(governance);
+  // Fire and forget: a slow first tick must not delay the supervisor reporting
+  // healthy, and a failed tick is logged rather than thrown into startup.
+  void governanceTick(parsed.data).catch((error: unknown) => {
+    log(`[governance] first tick failed: ${(error as Error).message}`);
   });
 
   const shutdown = (): void => {

@@ -14,6 +14,7 @@
 import { DEFAULT_MAX_CONCURRENT, createGate } from "./limit";
 import { UnsupportedRuntimeError } from "./errors";
 import type { Cron, Workspace } from "./workspace";
+import { governanceIntervalFor } from "./governance";
 
 export interface SchedulerOptions {
   /** Now, in epoch milliseconds. Injected so tests are deterministic. */
@@ -46,6 +47,39 @@ export function assertCronSupport(): void {
   const bun = (globalThis as { Bun?: { cron?: unknown; version: string } }).Bun;
   if (typeof bun?.cron === "function") return;
   throw new UnsupportedRuntimeError("Bun 1.3.12 or newer", `Bun ${bun?.version ?? "unknown"}`);
+}
+
+/**
+ * Register the governance tick on its own interval.
+ *
+ * Separate from the cron path on purpose. A cron is a job with a task and an
+ * agent; governance is the company deciding what to work on, and routing it
+ * through a synthetic cron entry would make "the CEO's own cycle" look like a
+ * user's scheduled job - which is exactly the kind of blur that makes an
+ * authority boundary impossible to point at later.
+ *
+ * Returns null when governance is off or the interval is unusable, so the
+ * caller can say "not scheduled" instead of pretending.
+ */
+export function scheduleGovernance(
+  workspace: Workspace,
+  tick: () => Promise<void>,
+  options: { readonly report?: (line: string) => void } = {},
+): ScheduledHandle | null {
+  const minutes = governanceIntervalFor(workspace);
+  if (minutes <= 0) return null;
+
+  const report = options.report ?? ((line: string): void => { process.stdout.write(`${line}\n`); });
+  // Standard 5-field cron with a step in the minute field. `@every(...)` is NOT
+  // used: Bun.cron rejects it, and a scheduler that registers nothing while
+  // reporting healthy is the failure this file exists to prevent.
+  const handle = Bun.cron(`*/${minutes} * * * *`, () => {
+    void tick().catch((error: unknown) => {
+      report(`[governance] tick failed: ${(error as Error).message}`);
+    });
+  });
+  report(`[governance] the company will govern itself every ${minutes} minute(s)`);
+  return { stop: (): void => { handle.stop(); } };
 }
 
 /**

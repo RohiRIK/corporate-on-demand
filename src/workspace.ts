@@ -92,6 +92,20 @@ export type Cron = z.infer<typeof Cron>;
  */
 import { DEFAULT_TIMEZONE, isValidTimezone } from "./timezone";
 
+/**
+ * How often the company governs itself.
+ *
+ * Optional and defaulting to ON, because the default company is an autonomous
+ * one. A company that needs a human to type `cod cycle` is not autonomous, it
+ * is manual with extra steps - and a loop nobody runs is a loop that was never
+ * finished.
+ */
+const Governance = z.object({
+  enabled: z.boolean().default(true),
+  /** Minutes between ticks. Nonsense falls back to the default. */
+  cycleEveryMinutes: z.number().int().positive().optional(),
+});
+
 export const Workspace = z
   .object({
     version: z.literal(1),
@@ -111,6 +125,9 @@ export const Workspace = z
     // How many result files to keep. One file per run means an unbounded
     // directory otherwise: a job every minute is 525,600 files a year.
     resultRetention: z.number().int().min(1).max(100_000).default(500),
+    // Present-but-empty stays distinct from absent, so turning governance OFF
+    // is an explicit `{"enabled": false}` rather than a deleted block.
+    governance: Governance.prefault({ enabled: true }),
   })
   .strict();
 export type Workspace = z.infer<typeof Workspace>;

@@ -278,6 +278,8 @@ describe("workspace schema", () => {
       crons: [],
       maxConcurrent: 2,
       timezone: "UTC",
+
+      governance: { enabled: true },
       resultRetention: 500,
       };
     expect(allWorkers(workspace).map((w) => w.name)).toEqual(["w1", "w2"]);

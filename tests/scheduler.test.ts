@@ -23,6 +23,7 @@ function workspaceWith(crons: Workspace["crons"]): Workspace {
     maxConcurrent: 2,
     timezone: "UTC",
     resultRetention: 500,
+    governance: { enabled: true },
   };
 }
 
