@@ -82,3 +82,52 @@ describe("describeRun", () => {
     expect(describeRun(parsed)).toContain("no completion event");
   });
 });
+
+
+describe("the fields the success assertion needs", () => {
+  const GOOD = [
+    JSON.stringify({ type: "step_start", timestamp: 1, part: { type: "step-start" } }),
+    JSON.stringify({ type: "tool_use", timestamp: 2, part: { type: "tool", tool: "write", state: { status: "completed" } } }),
+    JSON.stringify({ type: "text", timestamp: 3, part: { type: "text", text: "done" } }),
+    JSON.stringify({ type: "step_finish", timestamp: 4, part: { type: "step-finish", reason: "stop" } }),
+  ].join("\n");
+
+  test("a finished run reports stop, a completed tool and no errors", () => {
+    const p = parseEventStream(GOOD);
+    expect(p.finished).toBe(true);
+    expect(p.finishReason).toBe("stop");
+    expect(p.completedTools).toEqual(["write"]);
+    expect(p.errors).toEqual([]);
+  });
+
+  test("a TRUNCATED stream is not finished - this is the upstream bug", () => {
+    // step_start with no step_finish: opencode broke out early and the run
+    // looks successful unless we check. See anomalyco/opencode#31435.
+    const truncated = GOOD.split("\n").slice(0, 3).join("\n");
+    expect(parseEventStream(truncated).finished).toBe(false);
+  });
+
+  test("a finish reason of 'unknown' is NOT a stop", () => {
+    const odd = GOOD.replace('"reason":"stop"', '"reason":"unknown"');
+    expect(parseEventStream(odd).finished).toBe(true);
+    expect(parseEventStream(odd).finishReason).toBe("unknown");
+  });
+
+  test("an error event is captured, not swallowed into unparsed", () => {
+    const boom = JSON.stringify({ type: "error", error: { name: "APIError", data: { message: "rate limited", statusCode: 429 } } });
+    const p = parseEventStream(`${GOOD}\n${boom}`);
+    expect(p.errors).toHaveLength(1);
+    expect(p.errors[0]?.message).toContain("rate limited");
+  });
+
+  test("only COMPLETED tool calls count", () => {
+    const failed = GOOD.replace('"status":"completed"', '"status":"error"');
+    expect(parseEventStream(failed).completedTools).toEqual([]);
+  });
+
+  test("a shell tool that exited non-zero is recorded as not completed", () => {
+    // A tool reporting `completed` while the command exited 1 did not complete.
+    const line = JSON.stringify({ type: "tool_use", part: { type: "tool", tool: "bash", state: { status: "completed", metadata: { exit: 1 } } } });
+    expect(parseEventStream(line).completedTools).toEqual([]);
+  });
+});
