@@ -17,10 +17,12 @@ describe("the two engines", () => {
 
   test("kilo uses the same flags - it is an opencode fork", () => {
     const args = buildFor("kilo", "kilo/kilo-auto/free", "hi", "cod-author");
-    expect(args.slice(0, 4)).toEqual(["kilo", "run", "--pure", "--format"]);
+    expect(args.slice(0, 5)).toEqual(["kilo", "run", "--pure", "--auto", "--format"]);
     expect(args).toContain("json");
-    // Verified on the real binary: kilo has no --auto flag.
-    expect(args).not.toContain("--auto");
+    // --auto is REQUIRED by both engines. It is absent from `kilo run --help`,
+    // and omitting it makes every tool call auto-reject, so the run does
+    // nothing and says it finished.
+    expect(args).toContain("--auto");
     expect(args[args.indexOf("-m") + 1]).toBe("kilo/kilo-auto/free");
   });
 
@@ -35,6 +37,15 @@ describe("the two engines", () => {
   test("the prompt is JSON-quoted, so a task with quotes cannot break the shell", () => {
     const args = buildFor("kilo", "kilo/kilo-auto/free", 'say "hi" now', "cod-x");
     expect(args[args.length - 1]).toBe(JSON.stringify('say "hi" now'));
+  });
+
+  test("BOTH engines grant tool use", () => {
+    // A regression guard on a real, expensive mistake: I stripped --auto from
+    // kilo believing it was opencode-only, and every kilo job then silently
+    // did nothing. Both engines need it or the agent cannot act.
+    for (const id of ["opencode", "kilo"]) {
+      expect(buildFor(id, modelIds(id)[0] ?? "m", "hi", "cod-x")).toContain("--auto");
+    }
   });
 
   test("an unknown backend is a named error, not a silent default", () => {

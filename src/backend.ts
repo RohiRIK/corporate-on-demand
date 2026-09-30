@@ -33,11 +33,17 @@ export interface Backend {
    */
   readonly models: readonly string[];
   /**
-   * Flags this engine needs that the other does not have.
+   * Flags this engine takes that are not universal.
    *
-   * `--auto` is an opencode extension; passing it to kilo is a usage error. It
-   * is declared rather than discovered at 3am, and it is PLACED in buildFor
-   * rather than filtered afterwards, because the position matters.
+   * Empty on purpose, and that is the finding rather than an omission. I read
+   * `--auto` as an opencode extension and stripped it from the kilo command;
+   * kilo then refused every autonomous run with "run ended with an
+   * auto-rejected permission; pass --auto for autonomous use". It has the flag
+   * too, it is not in `kilo run --help`, and both engines want it.
+   *
+   * Kept as a field because the two will not stay identical forever, and the
+   * next divergence should be a one-line change in review rather than a
+   * discovery in production.
    */
   readonly extra: readonly string[];
 }
@@ -70,7 +76,9 @@ export const BACKENDS: readonly Backend[] = [
       "kilo/nvidia/nemotron-3.5-lightning:free",
       "kilo/cohere/north-mini-code:free",
     ],
-    extra: [],
+    // `--auto` too, and REQUIRED: without it every tool call is
+    // auto-rejected and no autonomous work happens at all.
+    extra: ["--auto"],
   },
 ];
 
@@ -94,11 +102,25 @@ export function modelIds(backendId: string): readonly string[] {
  * problem.
  */
 export function backendForModel(model: string): string {
-  const match = BACKENDS.find((b) => b.models.includes(model));
+  // A bare id means "the default engine", which is opencode: it is what
+  // DEFAULT_MODEL names and what every workspace written before this change
+  // uses, so requiring a prefix would break all of them for no benefit.
+  const prefix = model.includes("/") ? model.split("/")[0] : "opencode";
+  const match = BACKENDS.find((b) => b.id === prefix);
   if (match === undefined) {
-    throw new Error(`no engine advertises model "${model}"; add it to src/backend.ts`);
+    // Not a whitelist, and deliberately so: the `models` list is a CURATED
+    // DEFAULT POOL for rotation, not the set of everything an engine can run.
+    // Routing by prefix keeps a workspace working the day either side lists a
+    // model the other has not heard of. What is refused is an unknown ENGINE,
+    // because that is the mistake worth catching loudly.
+    throw new Error(`no engine handles model "${model}"; known engines: ${BACKENDS.map((b) => b.id).join(", ")}`);
   }
   return match.id;
+}
+
+/** Is this model in the curated default pool? Used by the budget-safety tests. */
+export function isAdvertised(model: string): boolean {
+  return BACKENDS.some((b) => b.models.includes(model));
 }
 
 /**
@@ -113,6 +135,13 @@ export function backendForModel(model: string): string {
  */
 export function buildFor(backendId: string, model: string, prompt: string, title: string): string[] {
   const backend = backendById(backendId);
+  // Enforced here, at the lowest level, rather than only in the caller: a
+  // model dispatched on an engine that cannot serve it fails as a provider
+  // error, which is the most expensive possible way to report a typo.
+  const routed = backendForModel(model);
+  if (routed !== backendId) {
+    throw new Error(`model "${model}" belongs to the ${routed} engine, not ${backendId}`);
+  }
   // `--auto` sits right after `--pure`, where opencode expects it. Splicing it
   // in afterwards would produce a command that parses and then misbehaves,
   // which is worse than one that fails loudly.

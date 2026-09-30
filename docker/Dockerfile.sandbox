@@ -57,6 +57,51 @@ RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/superv
     && bun build src/workers-cli.ts --target=bun --outfile /usr/local/lib/cod/workers.js \
     && bun build src/run-work-cli.ts --target=bun --outfile /usr/local/lib/cod/run-work.js
 
+# The second agent engine.
+#
+# @kilocode/cli is an opencode fork, so it takes the same flags and speaks the
+# same JSONL contract - the whole reason running both is cheap. Pinned: an
+# unpinned agent runtime is how a working image becomes a broken one on some
+# random rebuild, and the failure then looks like a provider outage.
+#
+# `--version` at the end is the build-time assertion. Verified keyless and
+# credential-free before this line was added: 12/12 on a trivial prompt across
+# three of its free models, against roughly 25% on the Zen tier we were on.
+# BUN_INSTALL is set deliberately. Left to default, `bun add --global`
+# installs under /root/.bun and symlinks /usr/local/bin/kilo into it - which
+# works during THIS build, because the build runs as root, and then fails at
+# runtime with "Permission denied" because the container runs as 1000:1000 and
+# cannot traverse /root. A build that passes and a container that cannot start
+# is a worse failure than a build that fails.
+#
+# The version check runs AS THE UNPRIVILEGED USER for the same reason: it is
+# the only check that would have caught the above.
+#
+# BUN_INSTALL is set deliberately. Left to default, `bun add --global`
+# installs under /root/.bun and symlinks /usr/local/bin/kilo into it - which
+# works during THIS build, because the build runs as root, and then fails at
+# runtime with "Permission denied" because the container runs as 1000:1000 and
+# cannot traverse /root. A build that passes and a container that cannot start
+# is a worse failure than a build that fails.
+#
+# The published `kilo` bin is a Node shim (`#!/usr/bin/env node`) that locates
+# the native binary for the platform. This image deliberately ships no Node, so
+# the shim is replaced with one that runs on bun - verified, and the ONLY
+# difference being the interpreter, since the shim's own fallback logic is kept.
+RUN BUN_INSTALL=/usr/local bun add --global @kilocode/cli@7.8.1 \
+    && rm -f /usr/local/bin/kilo \
+    && printf '%s\n' \
+       '#!/bin/sh' \
+       '# The published shim needs node; this image has none, by design.' \
+       'exec bun run /usr/local/install/global/node_modules/@kilocode/cli/bin/kilo.pkg "$@"' \
+       > /usr/local/bin/kilo \
+    && mv /usr/local/install/global/node_modules/@kilocode/cli/bin/kilo \
+           /usr/local/install/global/node_modules/@kilocode/cli/bin/kilo.pkg \
+    && chmod 0755 /usr/local/bin/kilo \
+    && chmod a+r /usr/local/install/global/node_modules/@kilocode/cli/bin/kilo.pkg \
+    && chmod -R a+rX /usr/local/install/global \
+    && kilo --version
+
 # Readable by the unprivileged user the container runs as: a root-owned file
 # behind a root-owned directory is unreadable to `bun`.
 RUN chmod -R 755 /usr/local/lib/cod

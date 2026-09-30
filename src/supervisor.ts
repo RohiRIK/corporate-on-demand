@@ -207,6 +207,7 @@ function main(): void {
         // own account - a self-report is not evidence, which is the same reason
         // the end-to-end checks never grep the output for a phrase they asked
         // for.
+        const { isAgentFailure } = await import("./agent");
         const { readJobChange } = await import("./change");
         const { classifyChange, summariseChange } = await import("./boundary");
         const change = readJobChange(worktree.path);
@@ -222,7 +223,10 @@ function main(): void {
             startedAt,
             finishedAt: Date.now(),
             durationMs: Date.now() - startedAt,
-            ok: true,
+            // NOT unconditionally true. `ok` used to mean "the job settled",
+            // which is true of a run that FAILED - so a provider outage was
+            // displayed to the owner as a success.
+            ok: !isAgentFailure(result.output),
             output: result.output,
             branch: worktree.branch,
             changedFiles: classified.changed,

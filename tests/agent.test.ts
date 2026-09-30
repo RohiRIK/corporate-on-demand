@@ -101,7 +101,8 @@ describe("the agent runtime", () => {
 // a model and cannot be flaky. The live test at the top is the only one that
 // does.
 
-import { buildArgs, buildPrompt, runAgent, localRunner, type CommandRunner } from "../src/agent";
+import { runAgent, buildArgs, buildPrompt, localRunner, isAgentFailure, type CommandRunner } from "../src/agent";
+import { backendForModel, buildFor } from "../src/backend";
 import type { Cron, Worker } from "../src/workspace";
 
 const cron: Cron = {
@@ -331,5 +332,87 @@ describe("runAgent judges the run, not the exit code", () => {
     const err = JSON.stringify({ type: "error", error: { name: "UnknownError", data: { message: "Unexpected server error (ref err_a7a9b326)" } } });
     const out = await runAgent(cron, worker, async () => {}, { runner: runner(err, 1), workdir: "/work/x" });
     expect(out).toContain("err_a7a9b326");
+  });
+});
+
+
+describe("the engine is chosen per job", () => {
+  test("a kilo model id builds a kilo command", async () => {
+    let seen: readonly string[] = [];
+    const spy: CommandRunner = async (args) => { seen = args; return { stdout: STREAM, stderr: "", code: 0, timedOut: false }; };
+    await runAgent({ ...cron, agent: "builder" }, { ...worker, model: "kilo/kilo-auto/free" }, async () => {},
+      { runner: spy, workdir: "/work/x" });
+    expect(seen[0]).toBe("kilo");
+    expect(seen).toContain("kilo/kilo-auto/free");
+    // Both engines need it; without it the agent cannot use tools at all.
+    expect(seen).toContain("--auto");
+  });
+
+  test("an opencode model id still builds an opencode command", async () => {
+    let seen: readonly string[] = [];
+    const spy: CommandRunner = async (args) => { seen = args; return { stdout: STREAM, stderr: "", code: 0, timedOut: false }; };
+    await runAgent(cron, worker, async () => {}, { runner: spy, workdir: "/work/x" });
+    expect(seen[0]).toBe("opencode");
+    expect(seen).toContain("--auto");
+  });
+
+  test("an explicit backend option overrides the model id", async () => {
+    let seen: readonly string[] = [];
+    const spy: CommandRunner = async (args) => { seen = args; return { stdout: STREAM, stderr: "", code: 0, timedOut: false }; };
+    await runAgent(cron, worker, async () => {}, { runner: spy, backend: "kilo", model: "kilo/kilo-auto/free", workdir: "/work/x" });
+    expect(seen[0]).toBe("kilo");
+  });
+
+  test("an unknown ENGINE is a named error, not a silent fallback", () => {
+    // Dispatching a model on the wrong engine reports a config mistake as a
+    // provider problem, which costs hours to diagnose.
+    expect(() => backendForModel("mystery/model-1")).toThrow(/no engine handles model/);
+  });
+
+  test("an unlisted model on a KNOWN engine still routes", () => {
+    // The curated list is a default pool, not a whitelist. A workspace may name
+    // a free model either side has not enumerated yet, and the system should
+    // route it rather than refuse to start.
+    expect(backendForModel("kilo/some/new-free-model")).toBe("kilo");
+    expect(backendForModel("opencode/some-new-free")).toBe("opencode");
+  });
+
+  test("a backend option that contradicts the model is refused", () => {
+    // The two must never disagree: that is how a model gets dispatched on an
+    // engine that cannot serve it, reported as a provider fault.
+    expect(() => buildFor("opencode", "kilo/kilo-auto/free", "hi", "cod-x")).toThrow(/unknown backend|opencode/);
+  });
+});
+
+
+describe("a failed agent is never recorded as a success", () => {
+  test("isAgentFailure recognises the failure prefix", () => {
+    expect(isAgentFailure("agent FAILED: no completed tool: the agent produced text without doing anything")).toBe(true);
+    expect(isAgentFailure("agent FAILED: agent reported an error: Unexpected server error.")).toBe(true);
+  });
+
+  test("a real answer is not a failure", () => {
+    expect(isAgentFailure("wrote answer.txt and committed it")).toBe(false);
+    // A task that legitimately begins with those words must not be misread.
+    expect(isAgentFailure("agent FAILED to do nothing in particular")).toBe(false);
+  });
+
+  test("runAgent actually emits the prefix on a provider outage", async () => {
+    // The wiring, end to end: a stream carrying a provider error must produce
+    // output the supervisor will read as a failure. This is the bug where
+    // `ok: true` was written for a run that had reported an outage.
+    const boom = JSON.stringify({ type: "error", error: { name: "UnknownError", data: { message: "Unexpected server error. Check server logs for details." } } });
+    const out = await runAgent(cron, worker, async () => {}, {
+      runner: async () => ({ stdout: boom, stderr: "", code: 1, timedOut: false }), workdir: "/work/x",
+    });
+    expect(isAgentFailure(out)).toBe(true);
+    expect(out).toContain("Unexpected server error");
+  });
+
+  test("runAgent emits the prefix when the runner itself throws", async () => {
+    const out = await runAgent(cron, worker, async () => {}, {
+      runner: async () => { throw new Error("docker is not running"); }, workdir: "/work/x",
+    });
+    expect(isAgentFailure(out)).toBe(true);
   });
 });

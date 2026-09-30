@@ -20,6 +20,7 @@
 
 import { parseEventStream, describeRun, type ParsedStream } from "./events";
 import { judgeRun } from "./assert";
+import { backendForModel, buildFor } from "./backend";
 import type { Cron, Worker } from "./workspace";
 import type { StepKind } from "./dispatch";
 
@@ -154,21 +155,17 @@ export function buildPrompt(cron: Cron, company: { name: string; purpose: string
  * The prompt is JSON-quoted so a task containing quotes or newlines cannot
  * break the shell command.
  */
+/**
+ * The command for one run, on whichever engine the model belongs to.
+ *
+ * `workdir` is accepted and ignored, deliberately: confinement is the spawn's
+ * cwd, because `opencode run --dir <git worktree>` was measured to fail with an
+ * opaque "Unexpected server error". The parameter stays so callers that think
+ * in terms of a worktree do not have to be changed to use a different engine.
+ */
 export function buildArgs(cron: Cron, model: string, prompt: string, workdir: string): string[] {
-  // The working directory is set on the PROCESS, not with --dir.
-  //
-  // Measured: `opencode run --dir <git worktree path>` fails with "Unexpected
-  // server error" while the identical command with the process cd-ed into the
-  // same directory works. `--dir` is evidently not equivalent to a working
-  // directory for a worktree, and the failure is opaque - it surfaces as
-  // "agent exited 1: no detail" with nothing in stderr.
   void workdir;
-  return [
-    OPENCODE_BIN, "run", "--pure", "--auto", "--format", "json",
-    "-m", model,
-    "--title", `cod-${cron.name}`,
-    JSON.stringify(prompt),
-  ];
+  return buildFor(backendForModel(model), model, prompt, `cod-${cron.name}`);
 }
 
 export interface RunAgentOptions {
@@ -176,6 +173,11 @@ export interface RunAgentOptions {
   readonly timeoutMs?: number;
   readonly model?: string;
   readonly company?: { name: string; purpose: string } | null;
+  /**
+   * Which engine to use. Omit it and the model id decides - so a workspace
+   * picks its engine by naming a `kilo/...` model and needs no new field.
+   */
+  readonly backend?: string;
   /** The job's own worktree. The agent is confined to it by --dir. */
   readonly workdir?: string;
 }
@@ -195,6 +197,17 @@ export async function runAgent(
   const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
   const model = options.model ?? worker?.model ?? DEFAULT_MODEL;
   const prompt = buildPrompt(cron, options.company ?? null);
+  // The model id picks the engine unless the caller insists. An explicit
+  // backend is only honoured for a model that engine actually advertises, so
+  // the two can never disagree.
+  // The model id decides the engine, and an explicit `backend` is only honoured
+  // when it agrees with the model's own prefix. Letting the two disagree is how
+  // a model ends up dispatched on an engine that cannot serve it.
+  const routed = backendForModel(model);
+  const backendId = options.backend ?? routed;
+  if (options.backend !== undefined && options.backend !== routed) {
+    return `${FAILURE_PREFIX} model "${model}" belongs to the ${routed} engine, not ${options.backend}`;
+  }
   // The clock starts before the call, because the budget is about wall time the
   // operator is waiting, not about time the model spent generating.
   const startedAt = Date.now();
@@ -203,11 +216,15 @@ export async function runAgent(
 
   let result: CommandResult;
   try {
-    result = await runner(buildArgs(cron, model, prompt, options.workdir ?? "."), timeoutMs, options.workdir);
+    result = await runner(
+      buildFor(backendId, model, prompt, `cod-${cron.name}`),
+      timeoutMs,
+      options.workdir,
+    );
   } catch (error) {
     // The runner is injectable, so a caller could supply one that throws.
     // Reported, not propagated: the job still has to settle and record.
-    return `agent could not be started: ${truncate((error as Error).message, 400)}`;
+    return `${FAILURE_PREFIX} could not be started: ${truncate((error as Error).message, 400)}`;
   }
 
   const parsed: ParsedStream = parseEventStream(`${result.stdout}\n${result.stderr}`);
@@ -238,11 +255,31 @@ export async function runAgent(
   });
   if (!verdict.ok) {
     if (result.timedOut) {
-      return `agent FAILED: ${verdict.reason}; partial output: ${truncate(parsed.answer || "none", 400)}`;
+      return `${FAILURE_PREFIX} ${verdict.reason}; partial output: ${truncate(parsed.answer || "none", 400)}`;
     }
-    return `agent FAILED: ${verdict.reason}${verdict.detail === undefined ? "" : ` (${verdict.detail})`}`;
+    return `${FAILURE_PREFIX} ${verdict.reason}${verdict.detail === undefined ? "" : ` (${verdict.detail})`}`;
   }
   return parsed.answer;
+}
+
+/**
+ * Did the agent actually do the job?
+ *
+ * `runAgent` returns a string because that is what the dispatcher's Driver
+ * contract is, and the supervisor has been writing `ok: true` for every job
+ * that SETTLED - which is true of a run that failed, and so `cod results`
+ * cheerfully displayed `ok` for an agent that had reported a provider outage.
+ *
+ * The assertion's verdict was in the text the whole time; nothing read it. So
+ * a job could fail and still be recorded as a success, which is the exact
+ * wrong-reason failure this work exists to prevent - reintroduced one layer up.
+ * The prefix is therefore a contract, and this is the only thing allowed to
+ * interpret it.
+ */
+export const FAILURE_PREFIX = "agent FAILED:";
+
+export function isAgentFailure(output: string): boolean {
+  return output.startsWith(FAILURE_PREFIX);
 }
 
 function truncate(text: string, width: number): string {
