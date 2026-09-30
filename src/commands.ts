@@ -346,6 +346,25 @@ const commands: Record<
   },
 
   /**
+   * The container and volume names this workspace will use.
+   *
+   * Exists so tooling - the clean-room script especially - never hardcodes a
+   * name that the CLI then disagrees with. A hardcoded name is how the
+   * path-derivation bug stayed hidden: the script kept passing against the one
+   * workspace whose filename happened to produce the name it expected.
+   */
+  async "container-name"(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const { containerNameForFile, workVolume } = await import("./docker");
+    const container = containerNameForFile(config.workspaceFile);
+    print(
+      config,
+      { container, volume: workVolume(config) },
+      () => `container: ${container}\nvolume:    ${workVolume(config)}`,
+    );
+  },
+
+  /**
    * The work ledger. Read-only unless a subcommand says otherwise.
    */
   async work(positionals, flags, print) {

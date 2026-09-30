@@ -8,14 +8,16 @@
 
 import type { Config } from "./config";
 import { RuntimeFailure } from "./errors";
-import { containerName, defaultRunner, type Runner } from "./docker";
+import { containerNameForFile, defaultRunner, type Runner } from "./docker";
 
 /** The supervisor entrypoint inside the image. */
 export const SUPERVISOR_ENTRY = "/usr/local/bin/supervisor";
 
+// Delegates, rather than re-deriving from the basename. It used to, which is
+// how the CLI and docker.ts ended up computing two different names for the
+// same workspace - the class of bug this whole change exists to remove.
 export function containerNameFor(config: Config): string {
-  const base = config.workspaceFile.split(/[\\/]/).pop() ?? "";
-  return containerName(base.replace(/\.json$/, ""));
+  return containerNameForFile(config.workspaceFile);
 }
 
 export interface SupervisorResult {

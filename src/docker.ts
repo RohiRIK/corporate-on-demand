@@ -146,28 +146,63 @@ export const RESTART_LIMIT = 5;
 export const CONTAINER_PREFIX = "cod-sandbox";
 
 /**
- * The named volume holding `/work`: the git repo and every per-job worktree.
+ * The slug a workspace file maps to: its parent directory AND its name.
  *
- * Derived from the workspace name so two workspaces never share one. `down`
- * removes the container but deliberately KEEPS this volume - deleting an
- * agent's committed work on teardown would be the worst possible default.
+ * Both parts, because the name alone is not unique. The default workspace file
+ * is `cod.json` in every directory, so a name-only slug made every workspace on
+ * the machine the same workspace.
+ *
+ * The tail is kept preferentially: two deep paths that share a long prefix
+ * must still differ, so a length cap trims the FRONT, never the name.
  */
-export function workVolume(config: { workspaceFile: string }): string {
-  // The PARENT directory is part of the identity, not just the filename. Using
-  // the filename alone made /a/cod.json and /b/cod.json produce the same
-  // volume, so two workspaces in different places would silently share one
-  // repository and one set of worktrees - the exact collision the per-workspace
-  // volume exists to prevent.
-  const parts = config.workspaceFile.split(/[\\/]/).filter((part) => part !== "");
+function workspaceSlug(workspaceFile: string): string {
+  const parts = workspaceFile.split(/[\\/]/).filter((part) => part !== "");
   const parent = parts.length > 1 ? (parts[parts.length - 2] as string) : "";
   const name = (parts[parts.length - 1] ?? "workspace").replace(/\.json$/i, "");
-  const safe = [...parent, name]
+  // [parent, name], NOT [...parent, name]. Spreading a STRING spreads its
+  // CHARACTERS, so "beta" became "b-e-t-a" and every volume was named
+  // "c-o-d-e-2-e-acme-work". It was in the original workVolume and was
+  // invisible because the mangled name was still unique - just unreadable,
+  // and wildly longer than intended for something with a length cap.
+  const safe = [parent, name]
+    .filter((part) => part !== "")
     .join("-")
     .replace(/[^a-z0-9-]/gi, "-")
     .replace(/-+/g, "-")
     .replace(/^-|-$/g, "")
     .toLowerCase();
-  return `${CONTAINER_PREFIX}-${safe || "workspace"}-work`;
+  return safe || "workspace";
+}
+
+/**
+ * The container name for a workspace file.
+ *
+ * Derived from the PATH, not the basename. This was the bug: the volume used
+ * parent+name and the container used the basename alone, so every workspace
+ * whose file was called `cod.json` resolved to `cod-sandbox-cod`, and `cod up`
+ * adopted whichever container it found first. The second workspace's jobs then
+ * ran in the first workspace's container against the first workspace's
+ * cod.json, with no error anywhere. Measured, not theoretical.
+ *
+ * Sanitised rather than rejected, because a workspace file may legitimately sit
+ * in a directory with a space or a dot in it. The output is filtered to
+ * [a-z0-9-], so it can never carry a shell metacharacter into a command.
+ */
+export function containerNameForFile(workspaceFile: string): string {
+  return `${CONTAINER_PREFIX}-${workspaceSlug(workspaceFile)}`;
+}
+
+/**
+ * The named volume holding `/work`: the git repo and every per-job worktree.
+ *
+ * Same slug as the container, so the two always correspond and `docker ps` and
+ * `docker volume ls` read as a pair. `down` removes the container but
+ * deliberately KEEPS this volume - deleting an agent's committed work on
+ * teardown would be the worst possible default.
+ */
+export function workVolume(config: { workspaceFile: string }): string {
+  return `${CONTAINER_PREFIX}-${workspaceSlug(config.workspaceFile)}-work`;
+
 }
 const SAFE_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -338,6 +373,7 @@ async function containerWorkspaceLabel(
   if (result.code !== 0) return undefined;
   const label = result.stdout.trim();
   return label === "" ? undefined : label;
+
 }
 
 /** Whether a container of this name exists at all, labelled or not. */
@@ -347,7 +383,7 @@ async function containerExists(name: string, runner: Runner): Promise<boolean> {
 }
 
 export async function isRunning(config: Config, runner: Runner = defaultRunner): Promise<boolean> {
-  const name = containerName(workspaceFromConfig(config));
+  const name = containerNameForFile(config.workspaceFile);
   const result = await tryRun(runner, ["inspect", "--format", "{{.State.Running}}", name], 10_000);
   return result?.code === 0 && result.stdout.trim() === "true";
 }
@@ -427,16 +463,16 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
   return {
     async up(config: Config, workspace: Workspace): Promise<string> {
       const wsName = workspaceFromConfig(config);
-      const name = containerName(wsName);
+      const name = containerNameForFile(config.workspaceFile);
 
       // Idempotent, but only by label: a container of the same name that we did
       // not create is a conflict, not something to adopt.
       const state = await tryRun(runner, ["inspect", "--format", "{{.State.Running}}", name], 10_000);
       if (state?.code === 0 && state.stdout.trim() === "true") {
         const label = await containerWorkspaceLabel(name, runner);
-        if (label === wsName) return name;
+        if (label === config.workspaceFile) return name;
         throw new UsageError(
-          `a container named ${name} is already running but belongs to workspace "${label ?? "unknown"}"; ` +
+          `a container named ${name} is already running but belongs to a different workspace (${label ?? "unlabelled"}); ` +
             `refusing to adopt it. Stop it with \`docker rm -f ${name}\` first.`,
         );
       }
@@ -444,7 +480,11 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
       const spec: ContainerSpec = {
         name,
         image: config.image,
-        labels: { "cod.workspace": wsName },
+        // The full workspace PATH, not its name. This label is the only thing
+        // that decides whether `cod up` may adopt an already-running container,
+        // and a name-only label made every workspace called cod.json compare
+        // equal - so the guard adopted the wrong container instead of refusing.
+        labels: { "cod.workspace": config.workspaceFile },
         mounts: [
           // The workspace is a bind mount, so the repo and its worktrees live
           // in the container's own writable layer under /work. That keeps a
@@ -473,7 +513,7 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
     },
 
     async down(config: Config): Promise<boolean> {
-      const name = containerName(workspaceFromConfig(config));
+      const name = containerNameForFile(config.workspaceFile);
       // Confirm the container is really ours before destroying it. `docker rm
       // --force` removes whatever bears the name, and a name that merely
       // looks like ours is not ours. Matching on the exit status rather than

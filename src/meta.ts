@@ -17,6 +17,7 @@ COMMANDS:
   logs      Read the event log — the answer to "what happened"
   results   Read persisted job results — what ran, and did it work
   purge     Remove the work volume and every commit in it (--purge confirms)
+  container-name  The container and volume names this workspace will use
   work      The work ledger: list, propose, claim, commit (--status filters the list)
   reconcile Run the CEO's reconciler once (also runs on the supervisor's tick)
   config    Show resolved configuration and where each value came from

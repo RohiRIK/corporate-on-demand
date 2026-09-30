@@ -15,7 +15,7 @@ One container per workspace. On-device cron. No API key.
 
 [![Bun](https://img.shields.io/badge/bun-1.3.12-white?style=flat-square&logo=bun)](https://bun.sh)
 [![opencode](https://img.shields.io/badge/opencode-1.18.31-blue?style=flat-square)](https://github.com/sst/opencode)
-[![Tests](https://img.shields.io/badge/tests-293%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-310%20passing-brightgreen?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 
 </div>
@@ -347,7 +347,7 @@ Not claimed — measured, and re-checked by `scripts/cleanroom.sh` on every run:
 - a cron job firing on a real minute boundary, inside a real container
 - an agent producing real output, at **zero cost**, with no credential on disk
 - 11 security controls read back off a live container via `docker inspect`
-- **293 tests**, clean strict typecheck
+- **310 tests**, clean strict typecheck
 
 The ledger and the reconciler are verified by **mutation, not only by assertion**.
 An assertion proves the code does what you wrote; a mutation proves the test

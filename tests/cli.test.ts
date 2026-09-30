@@ -532,3 +532,100 @@ describe("harness integrity", () => {
     expect(typeof fake).toBe("function");
   });
 });
+
+
+describe("the adopt guard", () => {
+  /**
+   * `cod up` reuses a container that is already running under the name it
+   * wants. The ONLY thing stopping it from adopting a container that belongs
+   * to a different workspace is the `cod.workspace` label.
+   *
+   * The label was the workspace NAME, and the default workspace file is
+   * `cod.json` everywhere - so two workspaces both labelled "cod", compared
+   * equal, and `cod up` adopted the first workspace's container for the second
+   * workspace. Its jobs then ran against the wrong cod.json, with no error.
+   * Measured: a scheduled job in one workspace never fired because the
+   * supervisor it reached had another workspace's empty crons.
+   */
+
+  const runResult = (over: Partial<{ code: number; stdout: string }> = {}) => ({
+    code: over.code ?? 0,
+    stdout: over.stdout ?? "",
+    stderr: "",
+  });
+
+  test("up REFUSES a running container that belongs to a different workspace", async () => {
+    const { makeDocker } = await import("../src/docker");
+    // A container named for /tmp/beta/cod.json is already running, and its
+    // label says it belongs to /tmp/alpha/cod.json.
+    const runner = async (_cmd: string, args: string[]): Promise<ReturnType<typeof runResult>> => {
+      if (args[0] === "inspect" && args.join(" ").includes("cod.workspace")) {
+        return runResult({ stdout: "/tmp/alpha/cod.json" });
+      }
+      if (args[0] === "inspect") return runResult({ code: 0, stdout: "true" });
+      return runResult();
+    };
+    const docker = makeDocker({ runner, timeoutMs: 1000 });
+    const config = { workspaceFile: "/tmp/beta/cod.json" } as never;
+    await expect(docker.up(config, { crons: [] } as never)).rejects.toThrow(/different workspace/);
+  });
+
+  test("up ADOPTS a running container that is genuinely its own", async () => {
+    const { makeDocker } = await import("../src/docker");
+    const runner = async (_cmd: string, args: string[]): Promise<ReturnType<typeof runResult>> => {
+      if (args[0] === "inspect" && args.join(" ").includes("cod.workspace")) {
+        return runResult({ stdout: "/tmp/beta/cod.json" });
+      }
+      if (args[0] === "inspect") return runResult({ code: 0, stdout: "true" });
+      return runResult();
+    };
+    const docker = makeDocker({ runner, timeoutMs: 1000 });
+    const config = { workspaceFile: "/tmp/beta/cod.json" } as never;
+    expect(await docker.up(config, { crons: [] } as never)).toBe("cod-sandbox-beta-cod");
+  });
+
+  test("the label WRITTEN to docker is the full path, not the name", async () => {
+    // The comparison alone cannot catch this: the guard compares whatever the
+    // container reports against the path, so a name-only label still "fails
+    // closed" and the tests above still pass. What has to be pinned is what is
+    // actually written, because a container LABELLED "cod" is indistinguishable
+    // from any other workspace's container on the next `cod up`.
+    const { makeDocker } = await import("../src/docker");
+    const argvSeen: string[] = [];
+    const runner = async (_cmd: string, args: string[]): Promise<ReturnType<typeof runResult>> => {
+      argvSeen.push(args.join(" "));
+      if (args[0] === "inspect") return runResult({ code: 1, stdout: "" }); // nothing running
+      return runResult();
+    };
+    const docker = makeDocker({ runner, timeoutMs: 1000 });
+    await docker.up(
+      { workspaceFile: "/srv/team/one/cod.json" } as never,
+      { crons: [] } as never,
+    );
+    const runCall = argvSeen.find((a) => a.includes("--label")) ?? "";
+    expect(runCall).toContain("cod.workspace=/srv/team/one/cod.json");
+    // And specifically NOT the bare name, which is what made every workspace
+    // called cod.json look identical to the guard.
+    expect(runCall).not.toContain("cod.workspace=cod ");
+  });
+
+  test("two workspaces that share a filename do NOT compare equal", async () => {
+    // Stated directly, because it is the whole bug: same basename, different
+    // paths, and they must not be interchangeable.
+    const { makeDocker } = await import("../src/docker");
+    let seen: string[] = [];
+    const runner = async (_cmd: string, args: string[]): Promise<ReturnType<typeof runResult>> => {
+      if (args[0] === "inspect" && args.join(" ").includes("cod.workspace")) {
+        // Whatever the other workspace would have written as its label.
+        seen = ["/tmp/other/cod.json"];
+        return runResult({ stdout: seen[0] ?? "" });
+      }
+      if (args[0] === "inspect") return runResult({ code: 0, stdout: "true" });
+      return runResult();
+    };
+    const docker = makeDocker({ runner, timeoutMs: 1000 });
+    await expect(
+      docker.up({ workspaceFile: "/tmp/mine/cod.json" } as never, { crons: [] } as never),
+    ).rejects.toThrow(/different workspace/);
+  });
+});

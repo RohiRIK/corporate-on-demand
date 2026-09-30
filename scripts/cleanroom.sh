@@ -29,6 +29,28 @@ mkdir -p "$ROOT"
 export COD_WORKSPACE="$ROOT/cod.json"
 export COD_STATE_DIR="$ROOT/state"
 
+# The container name is DERIVED from the workspace path, not hardcoded.
+#
+# It used to be hardcoded as `cod-sandbox-cod`, which was correct only while the
+# name came from the workspace file's basename and every workspace was called
+# cod.json. Deriving it from the same place the CLI does means this script can
+# never drift from the real behaviour again - and a hardcoded name is exactly
+# what hid the path-derivation bug, because the script kept passing against the
+# one workspace whose name happened to match.
+# --json, because the human-readable form is TWO lines (container and volume)
+# and command substitution would capture both.
+CONTAINER="$("$CLI" container-name --json 2>/dev/null | jq -r '.container // empty' || true)"
+if [ -z "$CONTAINER" ]; then
+  # No such subcommand, or the JSON shape changed: fall back to the one
+  # container labelled for this workspace file, which is the property that
+  # actually matters - not any particular name.
+  CONTAINER="$(docker ps -q --filter "label=cod.workspace=$COD_WORKSPACE" | head -1)"
+fi
+if [ -z "$CONTAINER" ]; then
+  fail "could not determine the container name for $COD_WORKSPACE"
+  exit 1
+fi
+
 step "1. doctor - the host can run a container"
 if "$CLI" doctor >/dev/null 2>&1; then pass "docker is available"; else fail "doctor"; fi
 
@@ -55,7 +77,7 @@ step "5. up - the container starts"
 if "$CLI" up --json 2>/dev/null | jq -e '.started' >/dev/null; then pass "container started"; else fail "up"; fi
 
 step "6. the security posture is real, not decorative"
-INS=$(docker inspect cod-sandbox-cod --format '{{json .HostConfig}}')
+INS=$(docker inspect "$CONTAINER" --format '{{json .HostConfig}}')
 check_flag() {
   if printf '%s' "$INS" | jq -e "$1" >/dev/null 2>&1; then pass "$2"; else fail "$2"; fi
 }
@@ -83,7 +105,7 @@ step "7. the agent really runs inside it, with no credentials"
 AGENT_OUT=""
 attempt=1
 while [ "$attempt" -le 3 ]; do
-  AGENT_OUT=$(docker exec cod-sandbox-cod sh -lc \
+  AGENT_OUT=$(docker exec "$CONTAINER" sh -lc \
     'cd /work && opencode run --pure --format json -m opencode/space-bunny-free "reply with exactly: E2E_OK" 2>&1' || true)
   if printf '%s' "$AGENT_OUT" | grep -q 'E2E_OK'; then
     pass "an agent produced work (attempt $attempt)"
@@ -112,7 +134,7 @@ fi
 
 step "8. the runtime is the pinned one"
 check_runtime() {
-  if [ "$(docker exec cod-sandbox-cod "$1" --version 2>&1 | head -1)" = "$2" ]; then
+  if [ "$(docker exec "$CONTAINER" "$1" --version 2>&1 | head -1)" = "$2" ]; then
     pass "$1 $2"
   else
     fail "$1 is not $2"
