@@ -8,7 +8,7 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Workspace } from "./workspace";
+import { Workspace, findWorker } from "./workspace";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
 import { beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
@@ -136,11 +136,17 @@ function main(): void {
       // debug what you cannot see, and "it just stopped" is the worst report.
       try {
         // Through the dispatcher, not around it. The step loop is the reason
-        // `dispatch` exists, so the supervisor goes through it even with the
-        // echo driver - otherwise the seam would be proven only by its tests
-        // and never by the thing that uses it.
-        const { dispatch, echoDriver } = await import("./dispatch");
-        const result = await dispatch(cron, echoDriver, {
+        // `dispatch` exists: it is what turns a multi-minute model call into
+        // observable progress instead of one long silence.
+        //
+        // The worker's OWN model is resolved here, because the supervisor is
+        // the only thing that holds the parsed workspace. A cron naming a
+        // worker that does not exist falls back to the free default and says
+        // so, rather than failing a job that could still have run.
+        const { dispatch } = await import("./dispatch");
+        const { driverFor } = await import("./drivers");
+        const worker = findWorker(parsed.data, cron.agent);
+        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company), {
           onStep: (step): void => {
             log(`step ${step.no}/${step.kind}: ${step.label} (${step.ms}ms)`);
           },

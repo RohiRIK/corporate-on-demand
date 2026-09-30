@@ -7,14 +7,17 @@
  * modes is reported here rather than swallowed, because a failure that vanishes
  * is what makes a schedule untrustworthy.
  *
- * The command runner is injected so the logic is testable without Docker and
- * without a model. The real one uses `docker exec`, because the supervisor runs
- * inside the container and the runtime HANGS when invoked on the host: measured
- * 280s with no output, while the provider endpoint returns HTTP 200 in 0.45s.
- * The container path is the one measured working, so it is the one used.
+ * The command runner is injected so the logic is testable without a model.
+ *
+ * The real one spawns `opencode` DIRECTLY, in this process's own container. An
+ * earlier version of this plan used `docker exec`, on the reasoning that the
+ * runtime hangs on the host. That reasoning was right and the conclusion was
+ * wrong: the supervisor IS the container's PID 1, and the container has neither
+ * a docker binary nor a socket - deliberately, so an agent cannot reach the
+ * host. A nested `docker exec` therefore failed instantly, and the job reported
+ * "agent exited 1" in 4ms. `opencode` is already at /usr/local/bin/opencode.
  */
 
-import { execFile } from "node:child_process";
 import { parseEventStream, describeRun, type ParsedStream } from "./events";
 import type { Cron, Worker } from "./workspace";
 import type { StepKind } from "./dispatch";
@@ -43,33 +46,55 @@ export interface CommandResult {
 export type CommandRunner = (args: readonly string[], timeoutMs: number) => Promise<CommandResult>;
 
 /**
- * The real runner: run inside the container.
+ * The real runner: spawn `opencode` here, in this container.
  *
- * `-e` is not passed, because `sh -lc` would then swallow the command's exit
- * code; the code is read from the shell's status instead.
+ * `sh -lc` rather than execFile-with-args so the prompt can be a single
+ * JSON-quoted word, which is how buildArgs emits it. The exit code comes from
+ * the shell, so a non-zero opencode exit is visible rather than swallowed.
+ *
+ * No `cd`: the supervisor's working directory is already the work volume, and
+ * hardcoding one would silently run agents somewhere they did not ask to work.
  */
-export const dockerRunner: CommandRunner = (args, timeoutMs) =>
-  new Promise<CommandResult>((resolve) => {
-    let settled = false;
-    const finish = (result: CommandResult): void => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
-    const child = execFile(
-      "docker",
-      ["exec", CONTAINER, "sh", "-lc", `cd ${WORKDIR} && ${args.join(" ")}`],
-      { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        const killed = error !== null && "killed" in error && (error as { killed?: boolean }).killed === true;
-        const code = error === null ? 0 : typeof (error as { code?: unknown }).code === "number"
-          ? ((error as { code?: number }).code as number)
-          : 1;
-        finish({ stdout: stdout ?? "", stderr: stderr ?? "", code, timedOut: killed });
-      },
-    );
-    child.on("error", () => finish({ stdout: "", stderr: "docker exec could not start", code: 127, timedOut: false }));
+export const localRunner: CommandRunner = async (args, timeoutMs) => {
+  const proc = Bun.spawn(["sh", "-lc", args.join(" ")], {
+    stdout: "pipe",
+    stderr: "pipe",
+    // Closed, not inherited. An inherited stdin is an open pipe the model
+    // process may wait on, and a job that waits is a job that never settles.
+    stdin: "ignore",
   });
+
+  // `Bun.spawn`, NOT `node:child_process` execFile. Measured: the identical
+  // command resolves in 3.3s through Bun.spawn and HANGS to its own 40s timeout
+  // with empty output through execFile, on this exact runtime. The same command
+  // through python's subprocess takes 3.4s, so the child is fine and Bun's
+  // execFile is not. Using the native API avoids the bug rather than working
+  // around its symptoms.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<CommandResult>((resolve) => {
+    timer = setTimeout(() => {
+      proc.kill();
+      resolve({ stdout: "", stderr: "", code: 124, timedOut: true });
+    }, timeoutMs);
+  });
+
+  const finished = (async (): Promise<CommandResult> => {
+    // Both streams are drained concurrently: reading one to completion while the
+    // other fills can deadlock on a full pipe buffer.
+    const [stdout, stderr] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]);
+    const code = await proc.exited;
+    return { stdout, stderr, code, timedOut: false };
+  })();
+
+  try {
+    return await Promise.race([finished, timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+};
 
 /**
  * The prompt.
@@ -132,7 +157,7 @@ export async function runAgent(
   step: (kind: StepKind, label: string) => Promise<void>,
   options: RunAgentOptions = {},
 ): Promise<string> {
-  const runner = options.runner ?? dockerRunner;
+  const runner = options.runner ?? localRunner;
   const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
   const model = options.model ?? worker?.model ?? DEFAULT_MODEL;
   const prompt = buildPrompt(cron, options.company ?? null);
