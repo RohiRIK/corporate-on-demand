@@ -31,10 +31,17 @@ anywhere in the picture.
 git clone https://github.com/RohiRIK/corporate-on-demand.git
 cd corporate-on-demand
 bun install
-sh scripts/vendor-opencode.sh
+sh scripts/vendor-opencode.sh    # REQUIRED before verify.sh - see below
 
 ./src/index.ts init acme --yes    # write cod.json
-./src/index.ts up                 # build the image, start the container
+```
+
+`scripts/vendor-opencode.sh` is a required setup step, not an optional extra. It
+fetches the 177 MB agent binary, which is deliberately **not** committed; CI runs
+it in a step of the same name before verifying. Skipping it makes `verify.sh` and
+the image tests fail, and both now say so by name.
+
+```
 ./src/index.ts status             # confirm the schedule is live
 ```
 

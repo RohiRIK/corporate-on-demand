@@ -35,9 +35,24 @@ function configFor(image: string): Config {
 }
 
 describe("image inputs", () => {
-  test("every build input is present in the repository", () => {
-    for (const path of [DOCKERFILE, ENTRYPOINT, VENDORED_OPENCODE]) {
-      expect(existsSync(path)).toBe(true);
+  test("every build input is available, and a missing one says how to get it", () => {
+    // The name used to be "...present in the repository", which is wrong: the
+    // 177 MB opencode binary is deliberately NOT committed, and CI has its own
+    // step that vendors it. A fresh clone that skipped that step therefore got
+    // seven bare `expected true, received false` failures and no idea what to
+    // do about them.
+    //
+    // Now the message names the fix, which is the only part that was missing.
+    for (const path of [DOCKERFILE, ENTRYPOINT]) {
+      expect({ path, exists: existsSync(path) }).toEqual({ path, exists: true });
+    }
+    if (!existsSync(VENDORED_OPENCODE)) {
+      throw new Error(
+        `the opencode binary is not vendored yet: ${VENDORED_OPENCODE} is missing.\n` +
+          `It is deliberately not committed (177 MB). Run:\n\n` +
+          `    bun install && sh scripts/vendor-opencode.sh\n\n` +
+          `and re-run. CI does this in a step of the same name.`,
+      );
     }
   });
 
