@@ -257,3 +257,41 @@ than deleted.
   defence is to **grade the outcome at the reviewer gate** (question 2), not to
   ship a semantic-progress scorer that measures nothing and looks like it
   measures something.
+
+## Closed: the blast radius is now DERIVED, not self-asserted (2026-09-30)
+
+`blast_radius` was an integer the PROPOSING AGENT filled in. That means the rule
+constrained the thing it was supposed to constrain: an agent wanting to ship a
+global change simply wrote `0` and was believed.
+
+It is now derived from the TARGET PATHS. `--blast` may narrow, never widen -
+and it cannot narrow *past* global either, which is the subtle half: `min(derived,
+proposed)` looked safe and was not, because an agent writing `0` for work naming
+`src/workspace.ts` got exactly the authority it asked for. Global is a ceiling
+only the CEO can lift.
+
+Verified live: a department proposed a schema change naming `src/workspace.ts`
+while declaring `--blast 0`. The reconciler rejected it without the agent ever
+running.
+
+## Closed: the CEO can dispatch, and the work happens in the container
+
+`cod work run <id>` hands the job to the container, because the ledger and the
+`/work` volume are the container's and the host has neither - a host-side
+dispatch failed with "no git repository at /work", which is true and useless.
+The container has no Docker binary and no socket by design, so the seam runs
+the other way: `docker.execIn` on the host, `src/run-work-cli.ts` inside.
+
+Verified live end to end: the CEO dispatched a self-contained item, a real
+credential-free model wrote `answer.txt`, and committed it as `3e63ab6` on
+branch `cod/w-munreomi-b7661c`. The worktree was released; the commit stayed.
+
+## Open: the dispatched agent did not read its instructions
+
+The ledger-dispatched run reported "No AGENTS.md exists anywhere in the repo or
+work volume", while the CRON path reads it correctly from the same bundle. The
+two paths write and read instructions differently, and the ledger path's copy
+does not land where the agent looks. The work itself completed, so this is a
+prompt-delivery defect and not a boundary one - but an agent that never sees
+its operating rules is an agent running on defaults, and that is not acceptable
+for autonomous operation.

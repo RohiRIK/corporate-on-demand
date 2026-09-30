@@ -461,6 +461,32 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
   }
 
   return {
+    /**
+     * Run a command inside the workspace container.
+     *
+     * The container deliberately has no Docker binary, no socket and no host
+     * credentials, so anything needing the ledger or the /work volume CANNOT
+     * be done from in there. It is done from out here instead. That is what
+     * `cod work run` needs: the host has no /work, so a host-side dispatch
+     * failed with "no git repository at /work" - true, and useless.
+     */
+    async execIn(config: Config, args: readonly string[], subject: string): Promise<{ code: number; out: string }> {
+      const name = containerNameForFile(config.workspaceFile);
+      // The label check first. An exec is not destructive the way `rm` is, but
+      // running a command inside another workspace's container is still running
+      // it against the wrong volume.
+      const label = await containerWorkspaceLabel(name, runner);
+      if (label !== config.workspaceFile) {
+        throw new UsageError(
+          `cannot ${subject}: this workspace's container is not running (looked for ${name}, ` +
+            `label ${label ?? "unlabelled"}). Start it with \`cod up\`.`,
+        );
+      }
+      const result = await tryRun(runner, ["exec", name, ...args], timeoutMs);
+      if (result === undefined) throw new RuntimeFailure(`docker exec failed for ${subject}`);
+      return { code: result.code, out: `${result.stdout}${result.stderr}` };
+    },
+
     async up(config: Config, workspace: Workspace): Promise<string> {
       const wsName = workspaceFromConfig(config);
       const name = containerNameForFile(config.workspaceFile);

@@ -298,9 +298,19 @@ describe("reconcileOnce", () => {
     expect(second.rejected).toEqual([]);
   });
 
-  test("GLOBAL work is not runnable by a department - the blast-radius rule", () => {
+  test("GLOBAL work is not runnable by a department - DERIVED from its paths", () => {
     // A rule, not a judgement: radius 2 goes to the CEO whatever proposed it.
-    const { dir, id } = seeded("change the schema", "engineering", 2);
+    // A proposal that CLAIMS radius 0 while naming a global path is still
+    // refused. That is the whole point of deriving instead of reading.
+    const dir = scratch();
+    const seed = openWork(dir);
+    const made = propose(seed, {
+      from: "engineering", to: "engineering", kind: "task", payload: "change the schema",
+      goal: "schema-change", targetPaths: ["src/workspace.ts"], blastRadius: 0,
+    });
+    seed.close();
+    if (!made.ok || made.item === undefined) throw new Error("seed failed");
+    const id = made.item.id;
     const report = reconcileOnce({ stateDir: dir, actor: "ceo" });
     expect(report.rejected).toEqual([id]);
     const handle = openWork(dir);
@@ -316,10 +326,16 @@ describe("reconcileOnce", () => {
     expect(reconcileOnce({ stateDir: dir, actor: "ceo" }).promoted).toEqual([id]);
   });
 
-  test("needsCeo is a pure predicate over the row", () => {
-    expect(needsCeo({ blast_radius: 2 } as WorkItem)).toBe(true);
-    expect(needsCeo({ blast_radius: 1 } as WorkItem)).toBe(false);
-    expect(needsCeo({ blast_radius: null } as WorkItem)).toBe(false);
+  test("needsCeo is DERIVED from the target paths, not read from the row", () => {
+    // The row's blast_radius is written by the PROPOSING AGENT, so a predicate
+    // that trusted it meant the rule constrained the thing it constrains: an
+    // agent wanting a global change simply wrote 0. The PATHS decide instead.
+    const global = { blast_radius: 0, payload: JSON.stringify({ targetPaths: ["src/workspace.ts"] }) } as WorkItem;
+    expect(needsCeo(global)).toBe(true);
+    // A declared radius of 2 on a self-contained change is not enough alone.
+    const selfContained = { blast_radius: 2, payload: JSON.stringify({ targetPaths: ["notes/a.md"] }) } as WorkItem;
+    expect(needsCeo(selfContained)).toBe(false);
+    expect(needsCeo({ blast_radius: null, payload: "plain text" } as WorkItem)).toBe(false);
   });
 
   test("reclaims work that overran its per-item budget", () => {

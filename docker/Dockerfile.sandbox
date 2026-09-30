@@ -54,7 +54,8 @@ COPY package.json bun.lock ./
 COPY src ./src
 RUN bun install --production --frozen-lockfile
 RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/supervisor.js \
-    && bun build src/workers-cli.ts --target=bun --outfile /usr/local/lib/cod/workers.js
+    && bun build src/workers-cli.ts --target=bun --outfile /usr/local/lib/cod/workers.js \
+    && bun build src/run-work-cli.ts --target=bun --outfile /usr/local/lib/cod/run-work.js
 
 # Readable by the unprivileged user the container runs as: a root-owned file
 # behind a root-owned directory is unreadable to `bun`.

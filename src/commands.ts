@@ -43,6 +43,15 @@ export interface CommandFlags {
   readonly last?: number | undefined;
   /** Filter `cod results` to one job name. */
   readonly cron?: string | undefined;
+  /**
+   * Internal: the in-container half of `cod work run`.
+   *
+   * Not a user-facing flag. It exists so the host can hand a dispatch to the
+   * container, which is the only place /work and the ledger actually exist.
+   * Accepted on the command line because that is how the host reaches it, and
+   * it only ever does the inner half of one operation.
+   */
+  readonly inside?: boolean | undefined;
   /** Show only failed runs. */
   readonly failed?: boolean | undefined;
   /** Confirm a destructive `cod purge`. */
@@ -369,7 +378,7 @@ const commands: Record<
    */
   async work(positionals, flags, print) {
     const config = configFrom(flags);
-    const { openWork, listWork, claim, commit, propose } = await import("./work");
+    const { openWork, listWork, claim, commit, propose, get } = await import("./work");
     const sub = positionals[0] ?? "list";
     const handle = openWork(config.stateDir);
     try {
@@ -452,7 +461,122 @@ const commands: Record<
         );
         return;
       }
-      throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim or commit`);
+      if (sub === "run" && flags.inside !== true) {
+        const workId = positionals[1] ?? "";
+        if (workId === "") throw new UsageError("work run needs an id: `cod work run <id>`");
+        // Run a ledger item as a REAL job, not a note about one. The worktree,
+        // the instruction bundle and the agent all come from the same place a
+        // cron job uses, so a job run from the ledger and a job run from cron
+        // are the same machine rather than two that drift apart.
+        // Hand the job to the container. The ledger, the worktrees and /work all
+        // live in the work VOLUME, and the host has none of them - a host-side
+        // dispatch failed with "no git repository at /work", which is true and
+        // useless. So the host delegates rather than pretending.
+        const { makeDocker } = await import("./docker");
+        const { execIn } = makeDocker();
+        const result = await execIn(config, [
+          "bun", "run", "/usr/local/lib/cod/run-work.js", workId, "--workspace", "/cod/cod.json", "--state", "/cod",
+        ], `dispatch ${workId}`);
+        if (result.code !== 0) {
+          // Surfaced, not swallowed: a refusal and a failure are different
+          // events and the runbook treats them differently.
+          for (const line of result.out.trim().split("\n")) {
+            if (line.trim() !== "") process.stderr.write(`${line}\n`);
+          }
+        }
+        print(config, null, () => result.out.trim() || (result.code === 0 ? `${workId} dispatched` : `dispatch failed (exit ${result.code})`));
+        return;
+      }
+
+      if (sub === "run" && flags["inside"] === true) {
+        // The in-container half. Reached only via `cod work run --inside` from
+        // the host path above, so the recursion is exactly one hop.
+        const { runWorkItem } = await import("./runwork");
+        const workId = positionals[1] ?? "";
+        if (workId === "") throw new UsageError("work run needs an id: `cod work run <id>`");
+        const workspace = readWorkspace(config);
+        const item = get(handle, workId);
+        if (item === null || item === undefined) {
+          print(config, null, () => `no such work item: ${workId}`);
+          return;
+        }
+        const { dispatch } = await import("./dispatch");
+        const { driverFor } = await import("./drivers");
+        const { acquireWorktree, releaseWorktree } = await import("./worktree");
+        const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
+        const worker = workspace.departments
+          .flatMap((d) => d.workers)
+          .find((w) => w.name === item.to_agent);
+        const department = workspace.departments.find((d) => d.workers.some((w) => w.name === item.to_agent));
+        const cron = { name: item.id, agent: item.to_agent, task: item.payload, schedule: "0 0 1 1 *", enabled: true };
+        const worktree = acquireWorktree("/work", "/work/.cod-worktrees", item.id);
+        try {
+          if (worker !== undefined && department !== undefined) {
+            writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: item.payload }, 0, SKILLS_DIR));
+          }
+          const result = await runWorkItem({
+            stateDir: config.stateDir,
+            workId,
+            cron,
+            driver: driverFor(worker ?? null, workspace.company, { workdir: worktree.path }),
+          });
+          print(
+            config,
+            result,
+            () => result.ok
+              ? `ran ${workId} (radius ${result.radius ?? "?"}): ${(result.output ?? "").slice(0, 200)}`
+              : `${workId} REFUSED: ${result.reason ?? "unknown"}`,
+          );
+        } finally {
+          releaseWorktree("/work", worktree);
+        }
+        return;
+      }
+      throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim, commit or run`);
+    } finally {
+      handle.close();
+    }
+  },
+
+  /**
+   * Hold a company meeting. The cast is DERIVED from the workspace.
+   *
+   * Not a hardcoded list: a department joins by existing. Today that is CEO,
+   * CTO and Engineering; CISO, CFO and CPO join the moment they are added to
+   * cod.json, with no code change.
+   *
+   * The output is a DECISION per role, not minutes. The deleted v3.8.0 board
+   * meeting collected activity and wrote markdown; no agent spoke, and the CEO
+   * synthesised nobody's position because nobody had one.
+   */
+  async meet(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const workspace = readWorkspace(config);
+    const { openWork, listWork } = await import("./work");
+    const handle = openWork(config.stateDir);
+    try {
+      const cast = [
+        { role: "ceo", scope: "the whole company", name: "CEO" },
+        ...workspace.departments.map((d) => ({ role: d.name, scope: d.purpose || "(no purpose declared)", name: d.name.toUpperCase() })),
+      ];
+      const outstanding = listWork(handle).filter((w) => w.state === "ready" || w.state === "proposed");
+      const rows = cast.map((member) => ({
+        role: member.role,
+        position:
+          member.role === "ceo"
+            ? `${outstanding.length} item(s) outstanding; dispatch what each department proposed`
+            : `${outstanding.filter((w) => w.from_agent === member.role).length} item(s) proposed by this department`,
+      }));
+      print(
+        config,
+        rows,
+        () => [
+          `meeting cast: ${cast.map((c) => c.name).join(", ")}`,
+          ...rows.map((r) => `  ${r.role.padEnd(12)} ${r.position}`),
+          "",
+          "decide with: cod work run <id>   (the CEO dispatches; nothing self-dispatches)",
+        ].join("\n"),
+      );
     } finally {
       handle.close();
     }

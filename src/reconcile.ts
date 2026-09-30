@@ -31,6 +31,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { claim, commit, get, listWork, openWork, reject, type WorkDb, type WorkItem } from "./work";
+import { radiusForWork, targetPathsOfItem } from "./runwork";
 
 /** Default per-item budget. Generous, because the cost of a wrong timeout is asymmetric. */
 export const DEFAULT_BUDGET_MS = 300_000;
@@ -55,14 +56,30 @@ export interface ReconcileReport {
 }
 
 /**
- * Is this proposal runnable by the agent it is addressed to?
+ /**
+  * Global work is not runnable by a department, whatever it proposed.
+  *
+  * DERIVED from the target paths, not read from the row. The row's own
+  * `blast_radius` is filled in by the proposing agent, so trusting it here would
+  * mean the rule once again constrains the thing it constrains - an agent
+  * wanting a global change simply writes 0.
+  */
+ function derivedRadius(item: WorkItem): number {
+   return radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius);
+ }
+
+ /**
+ * Does this proposal need the CEO?
  *
- * The blast-radius rule, which is a RULE and not a judgement: anything global
- * goes to the CEO. Kept as a predicate so the policy is testable and cannot
- * quietly drift into "whatever the agent felt like".
+ * DERIVED, not read from the row. The row's own `blast_radius` is filled in by
+ * the proposing agent, so trusting it means the rule once again constrains the
+ * thing it constrains - an agent wanting a global change simply writes 0.
+ *
+ * The old predicate is kept for the row's declared value, because it is still
+ * the reason recorded alongside the decision.
  */
 export function needsCeo(item: WorkItem): boolean {
-  return item.blast_radius !== null && item.blast_radius >= 2;
+  return derivedRadius(item) >= 2;
 }
 
 /** Is a proposal addressed to an agent that exists? Kept pluggable for tests. */
@@ -93,7 +110,7 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
           continue;
         }
         // Global work is not runnable by a department, whatever it proposed.
-        if (needsCeo(item)) {
+        if (needsCeo(item) || derivedRadius(item) >= 2) {
           const outcome = reject(handle, item.id, "blast radius is global; the CEO must dispatch this itself");
           if (outcome.ok) report.rejected.push(item.id);
           else report.errors.push(`${item.id}: ${outcome.reason ?? "fenced"}`);

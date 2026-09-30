@@ -258,12 +258,23 @@ export function propose(
     return { ok: false, reason: `blast radius must be a whole number 0, 1 or 2 (got ${String(radius)})` };
   }
   const id = fields.id ?? `w-${Date.now().toString(36)}-${key.slice(0, 6)}`;
+  // The target paths are STORED, not just hashed into the novelty key.
+  //
+  // They were accepted and then discarded, so nothing downstream could read
+  // them - which meant the blast radius had nothing to derive from and every
+  // item looked self-contained. The payload becomes JSON only when there are
+  // paths to carry, so the common case stays a plain readable string.
+  const paths = fields.targetPaths ?? [];
+  const payload =
+    paths.length === 0
+      ? fields.payload
+      : JSON.stringify({ text: fields.payload, targetPaths: paths });
   const item: WorkItem = {
     id,
     from_agent: fields.from,
     to_agent: fields.to,
     kind: fields.kind,
-    payload: fields.payload,
+    payload,
     state: "proposed",
     lease_owner: null,
     lease_epoch: 0,

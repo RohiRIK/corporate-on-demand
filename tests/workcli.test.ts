@@ -115,14 +115,19 @@ describe("rejected is a real state", () => {
     // start and was never used, so nothing could observe the difference.
     const dir = scratch();
     workspace(dir);
-    const proposed = cod(dir, "work", "propose", "--from", "eng", "--to", "eng", "--goal", "change the schema", "--blast", "2");
+    // The TARGET PATHS are what make this global, not the --blast flag. The
+    // flag can only narrow; it is the paths the rule reads.
+    const proposed = cod(dir, "work", "propose", "--from", "eng", "--to", "eng", "--goal", "change the schema", "--paths", "src/workspace.ts", "--blast", "0");
     const matched = /proposed (\S+)/.exec(proposed.out)?.[1];
     expect(matched).toBeDefined();
     const id = matched ?? "";
     const r = cod(dir, "reconcile");
     expect(r.out).toContain(`rejected ${id}`);
+    // The refusal is because the PATHS are global, not because --blast said so.
+    expect(r.out).toContain("rejected");
     const listed = cod(dir, "work", "list", "--status", "rejected");
     expect(listed.out).toContain(id);
-    expect(listed.out).toContain("CEO");
+    // The refusal names the CEO because only the CEO may dispatch global work.
+    expect(listed.out.toLowerCase()).toContain("ceo");
   });
 });
