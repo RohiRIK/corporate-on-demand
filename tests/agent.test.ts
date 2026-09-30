@@ -111,7 +111,7 @@ const cron: Cron = {
   schedule: "0 3 * * *",
   enabled: true,
 };
-const worker: Worker = { name: "builder", role: "builds", model: "opencode/space-bunny-free" };
+const worker: Worker = { name: "builder", role: "builds", model: "opencode/space-bunny-free", skills: [] };
 
 /** Echo canned stdout, so these tests are pure. */
 function runnerReturning(stdout: string, code = 0, timedOut = false): CommandRunner {

@@ -11,19 +11,52 @@
 
 import { z } from "zod";
 
+/**
+ * A skill name.
+ *
+ * Validated as a plain lowercase identifier because it reaches a FILE PATH in
+ * the per-job instruction bundle - the same reason the work-item id and the
+ * worktree name validate at their boundaries rather than at the point of use.
+ */
+const SkillName = z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "use lowercase letters, digits and hyphens");
+
 /** Workers write only inside their own directory; this names that directory. */
 export const Worker = z.object({
   name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "use lowercase letters, digits and hyphens"),
   role: z.string().min(1),
   model: z.string().min(1),
+  /**
+   * The skills this worker's JOB needs, resolved from the bundle at dispatch
+   * time. Optional and defaulting to empty, so every workspace written before
+   * this field existed still loads.
+   */
+  skills: z.array(SkillName).default([]),
 });
 export type Worker = z.infer<typeof Worker>;
+/**
+ * The shape a workspace FILE may contain, before defaults are applied.
+ *
+ * Distinct from `Worker` because `skills` is optional on disk and present after
+ * parsing. A test or a template writing a workspace should be able to omit it
+ * without pretending the field exists.
+ */
+export type WorkerInput = z.input<typeof Worker>;
 
 export const Department = z.object({
   name: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, "use lowercase letters, digits and hyphens"),
+  /**
+   * What this department is FOR. It works from this, not from a list of crons.
+   *
+   * Optional and defaulting to empty on purpose: an empty purpose must be
+   * visible as empty rather than silently invented, so the instruction bundle
+   * can tell the agent to ask the CEO instead of guessing at a mission.
+   */
+  purpose: z.string().default(""),
   workers: z.array(Worker).min(1),
 });
 export type Department = z.infer<typeof Department>;
+/** The shape a workspace FILE may contain, before defaults are applied. */
+export type DepartmentInput = z.input<typeof Department>;
 
 export const Company = z.object({
   name: z.string().min(1, "the company needs a name"),

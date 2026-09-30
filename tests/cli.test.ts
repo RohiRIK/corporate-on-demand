@@ -240,7 +240,7 @@ describe("workspace schema", () => {
     const result = Workspace.safeParse({
       version: 1,
       company: { name: "a", purpose: "b" },
-      departments: [{ name: "d", workers: [{ name: "w", role: "r", model: "m" }] }],
+      departments: [{ name: "d", workers: [{ name: "w", role: "r", model: "m", skills: [] }] }],
       crons: [],
       surprise: true,
     });
@@ -251,7 +251,7 @@ describe("workspace schema", () => {
     const result = Workspace.safeParse({
       version: 1,
       company: { name: "a" },
-      departments: [{ name: "d", workers: [{ name: "w", role: "r", model: "m" }] }],
+      departments: [{ name: "d", workers: [{ name: "w", role: "r", model: "m", skills: [] }] }],
       crons: [],
     });
     expect(result.success).toBe(false);
@@ -261,7 +261,7 @@ describe("workspace schema", () => {
     const result = Workspace.safeParse({
       version: 1,
       company: { name: "a", purpose: "b" },
-      departments: [{ name: "d", workers: [{ name: "../evil", role: "r", model: "m" }] }],
+      departments: [{ name: "d", workers: [{ name: "../evil", role: "r", model: "m", skills: [] }] }],
       crons: [],
     });
     expect(result.success).toBe(false);
@@ -272,8 +272,8 @@ describe("workspace schema", () => {
       version: 1,
       company: { name: "a", purpose: "b" },
       departments: [
-        { name: "one", workers: [{ name: "w1", role: "r", model: "m" }] },
-        { name: "two", workers: [{ name: "w2", role: "r", model: "m" }] },
+        { name: "one", purpose: "", workers: [{ name: "w1", role: "r", model: "m", skills: [] }] },
+        { name: "two", purpose: "", workers: [{ name: "w2", role: "r", model: "m", skills: [] }] },
       ],
       crons: [],
       maxConcurrent: 2,
