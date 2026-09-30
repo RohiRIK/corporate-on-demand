@@ -564,7 +564,7 @@ const commands: Record<
     const config = configFrom(flags);
     const workspace = readWorkspace(config);
     const { holdMeeting } = await import("./meeting");
-    const meeting = holdMeeting(workspace, config.stateDir);
+    const meeting = await holdMeeting(workspace, config.stateDir);
     print(
       config,
       meeting,

@@ -53,6 +53,11 @@ export interface GovernanceOptions {
   readonly land?: (workId: string) => Promise<LandOutcome>;
   /** Hard cap per tick. The reason this tick is safe to run unattended. */
   readonly maxDispatch?: number;
+  /**
+   * Gives the meeting a voice. Optional: without it positions are computed, and
+   * the meeting SAYS SO rather than passing arithmetic off as discussion.
+   */
+  readonly askRole?: (prompt: string) => Promise<string>;
   readonly actor?: string;
 }
 
@@ -121,7 +126,7 @@ export async function runGovernance(
   let meeting: Meeting;
   try {
     cycle = runCycle(workspace, stateDir, { actor });
-    meeting = holdMeeting(workspace, stateDir);
+    meeting = await holdMeeting(workspace, stateDir, options.askRole);
   } catch (error) {
     return {
       cycle: emptyCycle(`cycle failed: ${(error as Error).message}`),
@@ -213,7 +218,7 @@ function emptyCycle(reason: string): CycleResult {
 }
 
 function emptyMeeting(): Meeting {
-  return { cast: [], speaking: [], decisions: [], summary: "meeting did not run" };
+  return { cast: [], speaking: [], decisions: [], summary: "meeting did not run", spoken: false };
 }
 
 /**

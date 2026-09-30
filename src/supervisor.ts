@@ -120,6 +120,18 @@ async function governanceTick(workspace: Workspace): Promise<void> {
   const { runGovernance } = await import("./governance");
   const report = await runGovernance(workspace, STATE_DIR, {
     dispatch: (id) => dispatchWorkItem(workspace, id),
+    // The meeting gets a VOICE in the live loop. Without it the positions are
+    // computed from the ledger - honest arithmetic, but arithmetic - and the
+    // output says so. This is the step that makes the meeting a discussion.
+    askRole: async (prompt) => {
+      const { runAgent } = await import("./agent");
+      return runAgent(
+        { name: "meeting", agent: "cto", task: prompt, schedule: "0 0 1 1 *", enabled: true, expectTools: false },
+        null,
+        async () => {},
+        { model: REVIEW_MODEL, workdir: WORK_REPO },
+      );
+    },
     land: async (id) => {
       // The one place that merges. The reviewer is a MODEL call, unlike the
       // mechanical checks beside it, because judging scope and whether a test

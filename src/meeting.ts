@@ -53,6 +53,14 @@ export interface Meeting {
   readonly speaking: readonly Statement[];
   readonly decisions: readonly Decision[];
   readonly summary: string;
+  /**
+   * True when every position came from a model rather than from arithmetic.
+   *
+   * Reported rather than assumed. A meeting that computed its positions and
+   * printed them in a discussion's shape is the old report wearing a costume,
+   * and the only defence is saying which one happened.
+   */
+  readonly spoken: boolean;
 }
 
 /** The CEO first, then every department that exists. */
@@ -115,14 +123,43 @@ function decide(item: WorkItem, ceo: string): Decision {
  * what they dispatch, so a global decision arrives with global authority and a
  * narrow one does not.
  */
-export function holdMeeting(workspace: Workspace, stateDir: string): Meeting {
+/**
+ * Optional: give every role a VOICE.
+ *
+ * With an `ask`, the positions are argued by a model that can look at what the
+ * department actually produced and say what it thinks is next. Without one, they
+ * are computed from the ledger, which is honest but is arithmetic wearing a
+ * meeting's clothes - and the output says which happened.
+ */
+export async function holdMeeting(
+  workspace: Workspace,
+  stateDir: string,
+  ask?: (prompt: string) => Promise<string>,
+): Promise<Meeting> {
   const cast = castFor(workspace);
   const handle = openWork(stateDir);
   try {
     const items = listWork(handle);
     const open = items.filter((w) => w.state === "ready" || w.state === "proposed");
 
-    const speaking = cast.map((role) => positionFor(role, workspace.company.name, open));
+    const computed = cast.map((role) => positionFor(role, workspace.company.name, open));
+
+    // The voice. Sequential rather than parallel: a meeting where everyone
+    // speaks at once is a mailing list, and the order is the order the room
+    // finds out things in.
+    let speaking: Statement[] = computed;
+    let spoken = false;
+    if (ask !== undefined) {
+      spoken = true;
+      const voiced: Statement[] = [];
+      for (const statement of computed) {
+        voiced.push({
+          ...statement,
+          position: await voiceFor(statement, workspace.company.name, ask),
+        });
+      }
+      speaking = voiced;
+    }
 
     // The CEO decides about what is OPEN. Deciding about finished work is
     // theatre, and deciding about nothing is manufacturing work from nothing.
@@ -155,12 +192,51 @@ export function holdMeeting(workspace: Workspace, stateDir: string): Meeting {
       `cast: ${cast.map((c) => c.name).join(", ")}`,
       ...speaking.map((s) => `  ${s.role}: ${s.position}`),
       `decisions: ${decisions.length}`,
+      spoken ? "positions spoken by a model" : "positions COMPUTED - no model was consulted",
     ].join("\\n");
 
-    return { cast, speaking, decisions, summary };
+    return { cast, speaking, decisions, summary, spoken };
   } finally {
     handle.close();
   }
 }
 
 
+
+
+/**
+ * One role's position, in its own voice.
+ *
+ * Falls back to the computed position on any failure. A meeting that cannot be
+ * held is worse than one that is thin: the point of an autonomous company is
+ * that it keeps going, and a provider outage must not delete the company`s
+ * agenda.
+ */
+async function voiceFor(
+  statement: Statement,
+  company: string,
+  ask: (prompt: string) => Promise<string>,
+): Promise<string> {
+  try {
+    const answer = await ask(
+      [
+        `You are the ${statement.role} of ${company}, speaking in a company meeting.`,
+        `Ledger so far: ${statement.position}`,
+        `You have ${statement.concerning.length} item(s) concerning you.`,
+        "",
+        "Say your position in at most three sentences: what you think should happen",
+        "next and why. Be specific. Do not ask questions - nobody is reading this.",
+      ].join("\n"),
+    );
+    const text = answer.trim();
+    if (text === "" || /could not|failed|exited/i.test(text.slice(0, 40))) return statement.position;
+    return truncate(text, 400);
+  } catch {
+    return statement.position;
+  }
+}
+
+function truncate(text: string, width: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= width ? flat : `${flat.slice(0, width - 1)}\u2026`;
+}
