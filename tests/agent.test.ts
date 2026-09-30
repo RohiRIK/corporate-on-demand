@@ -118,10 +118,20 @@ function runnerReturning(stdout: string, code = 0, timedOut = false): CommandRun
   return async () => ({ stdout, stderr: "", code, timedOut });
 }
 
+/**
+ * A run that actually worked: it started, used a tool that completed, said
+ * something, and finished cleanly.
+ *
+ * The `tool_use` line is not decoration. It is what makes this a VALID
+ * successful run under the assertion - a stream with text and a clean
+ * step_finish but no completed tool is exactly the wrong-reason failure, and
+ * using it as the happy path would quietly re-open the hole.
+ */
 const STREAM = [
   '{"type":"step_start","part":{"type":"step-start"}}',
+  '{"type":"tool_use","part":{"type":"tool","tool":"write","state":{"status":"completed"}}}',
   '{"type":"text","part":{"type":"text","text":"I did the thing."}}',
-  '{"type":"step_finish","part":{"type":"step-finish","tokens":{"total":10,"input":9,"output":1},"cost":0}}',
+  '{"type":"step_finish","part":{"type":"step-finish","reason":"stop","tokens":{"total":10,"input":9,"output":1},"cost":0}}',
 ].join("\n");
 
 describe("localRunner", () => {
@@ -284,5 +294,42 @@ describe("runAgent", () => {
     const out = await runAgent(cron, worker, async () => {},
       { runner: async () => { throw new Error("docker is not running"); } });
     expect(out).toContain("docker is not running");
+  });
+});
+
+
+describe("runAgent judges the run, not the exit code", () => {
+  const GOOD = [
+    JSON.stringify({ type: "step_start", part: { type: "step-start" } }),
+    JSON.stringify({ type: "tool_use", part: { type: "tool", tool: "write", state: { status: "completed" } } }),
+    JSON.stringify({ type: "text", part: { type: "text", text: "wrote it" } }),
+    JSON.stringify({ type: "step_finish", part: { type: "step-finish", reason: "stop" } }),
+  ].join("\n");
+  const runner = (stdout: string, code = 0): CommandRunner => async () => ({ stdout, stderr: "", code, timedOut: false });
+
+  test("a complete run returns the model's text", async () => {
+    const out = await runAgent(cron, worker, async () => {}, { runner: runner(GOOD), workdir: "/work/x" });
+    expect(out).toContain("wrote it");
+  });
+
+  test("exit 0 with a TRUNCATED stream is reported as a failure", async () => {
+    const out = await runAgent(cron, worker, async () => {}, { runner: runner(GOOD.split("\n").slice(0, 2).join("\n")), workdir: "/work/x" });
+    expect(out).toContain("truncated");
+  });
+
+  test("exit 0 with text but no completed tool is a FAILURE, not a success", async () => {
+    // The AGENTS.md bug, exactly: confident text, clean exit, nothing done.
+    const noTools = [
+      JSON.stringify({ type: "text", part: { type: "text", text: "All done!" } }),
+      JSON.stringify({ type: "step_finish", part: { type: "step-finish", reason: "stop" } }),
+    ].join("\n");
+    const out = await runAgent(cron, worker, async () => {}, { runner: runner(noTools), workdir: "/work/x" });
+    expect(out).toContain("no completed tool");
+  });
+
+  test("the provider's ref id reaches the operator", async () => {
+    const err = JSON.stringify({ type: "error", error: { name: "UnknownError", data: { message: "Unexpected server error (ref err_a7a9b326)" } } });
+    const out = await runAgent(cron, worker, async () => {}, { runner: runner(err, 1), workdir: "/work/x" });
+    expect(out).toContain("err_a7a9b326");
   });
 });

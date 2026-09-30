@@ -19,6 +19,7 @@
  */
 
 import { parseEventStream, describeRun, type ParsedStream } from "./events";
+import { judgeRun } from "./assert";
 import type { Cron, Worker } from "./workspace";
 import type { StepKind } from "./dispatch";
 
@@ -194,6 +195,9 @@ export async function runAgent(
   const timeoutMs = options.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS;
   const model = options.model ?? worker?.model ?? DEFAULT_MODEL;
   const prompt = buildPrompt(cron, options.company ?? null);
+  // The clock starts before the call, because the budget is about wall time the
+  // operator is waiting, not about time the model spent generating.
+  const startedAt = Date.now();
 
   await step("plan", `${model}: preparing ${cron.name}`);
 
@@ -215,16 +219,28 @@ export async function runAgent(
   }
   await step("observe", describeRun(parsed));
 
-  if (result.timedOut) {
-    // Partial output is kept: a killed call often produced most of the answer.
-    return `agent timed out after ${timeoutMs}ms; partial output: ${truncate(parsed.answer || "none", 400)}`;
-  }
-  if (result.code !== 0) {
-    const detail = result.stderr.trim() || parsed.unparsed.join(" ") || "no detail";
-    return `agent exited ${result.code}: ${truncate(detail, 400)}`;
-  }
-  if (parsed.answer === "") {
-    return `agent produced no text; ${parsed.unparsed.length} unreadable line(s)`;
+  // ONE judgement, from the stream, rather than a ladder of exit-code checks.
+  //
+  // The ladder this replaces could not tell a truncated run from a finished
+  // one, because both exit 0, and it could not tell "did the work" from "said
+  // it did the work". Both of those are exactly the failures this system is
+  // built to make impossible, and both were reachable through it.
+  //
+  // The timeout branch keeps its partial output, because a killed call often
+  // produced most of the answer and throwing that away helps nobody.
+  const verdict = judgeRun({
+    raw: `${result.stdout}\n${result.stderr}`,
+    code: result.code,
+    timedOut: result.timedOut,
+    elapsedMs: Date.now() - startedAt,
+    promptLength: prompt.length,
+    budgetMs: timeoutMs,
+  });
+  if (!verdict.ok) {
+    if (result.timedOut) {
+      return `agent FAILED: ${verdict.reason}; partial output: ${truncate(parsed.answer || "none", 400)}`;
+    }
+    return `agent FAILED: ${verdict.reason}${verdict.detail === undefined ? "" : ` (${verdict.detail})`}`;
   }
   return parsed.answer;
 }
