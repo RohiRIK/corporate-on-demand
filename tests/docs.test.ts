@@ -56,6 +56,18 @@ describe("OPEN_QUESTIONS.md agrees with the code", () => {
     }
   });
 
+  test("the code does not claim a containment the security doc says is absent", () => {
+    // The bug was never a missing control. It was that agent.ts called `cwd`
+    // "THE BOUNDARY" while SECURITY_POSTURE.md said read isolation is a
+    // convention and not a control - and an agent with tool use proved the doc
+    // right. A comment that contradicts the threat model is worse than no
+    // comment, because it is the version someone believes.
+    const posture = read("docs/SECURITY_POSTURE.md");
+    expect(posture).toContain("not enforced");
+    const agent = read("src/agent.ts");
+    expect(agent).not.toContain("THE BOUNDARY.");
+  });
+
   test("no doc points at a test file that is not there", () => {
     // A renamed test makes every doc reference a lie, and nothing else notices.
     const tests = new Set(readdirSync(resolve(REPO, "tests")));

@@ -87,10 +87,20 @@ export const localRunner: CommandRunner = async (args, timeoutMs, cwd) => {
     // Closed, not inherited. An inherited stdin is an open pipe the model
     // process may wait on, and a job that waits is a job that never settles.
     stdin: "ignore",
-    // THE BOUNDARY. The agent can only reach its own worktree, and it reads
-    // the AGENTS.md bundle from there. If this is ever undefined the agent
-    // would run in /work with every worktree visible to it, which is the one
-    // thing that must never happen.
+    // `cwd` is a WORKING DIRECTORY, NOT A BOUNDARY.
+    //
+    // This comment used to say "THE BOUNDARY" and that was false. The agent
+    // runs with tool use, and cwd sets where the process starts - it does not
+    // confine it. Verified live: asked to run `ls /cod/work`, a model did
+    // exactly that, from its own worktree.
+    //
+    // docs/SECURITY_POSTURE.md has always said so plainly - "read isolation
+    // between agents is not enforced... this is a convention, not a control" -
+    // so the codebase contradicted itself, and the convenient half won.
+    //
+    // Keeping cwd pointed at the worktree is still correct: it is what makes the
+    // AGENTS.md bundle and the task land in the right place. It is a placement
+    // decision, and the honest name for it is placement.
     cwd,
   });
 
