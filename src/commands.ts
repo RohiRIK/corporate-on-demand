@@ -490,6 +490,35 @@ const commands: Record<
         );
         return;
       }
+      if (sub === "unblock") {
+        // The way OUT of the blocked queue. Deliberately manual: an automatic
+        // clear would let a rejected item re-enter the queue on its own.
+        const id = positionals[1] ?? "";
+        if (id === "") throw new UsageError("work unblock needs an id: `cod work unblock <id> [why]`");
+        const why = positionals.slice(2).join(" ");
+        const { openWork, clearReview, blockedWork } = await import("./work");
+        const handle = openWork(config.stateDir);
+        try {
+          const result = clearReview(handle, id, why);
+          if (!result.ok) {
+            print(config, result, () => `${id} NOT cleared: ${result.reason ?? "unknown"}`);
+            return;
+          }
+          const still = blockedWork(handle);
+          print(
+            config,
+            { cleared: id, stillBlocked: still.length },
+            () => [
+              `cleared ${id}${why === "" ? "" : ` (${why})`}`,
+              `  it will be reviewed again on the next tick`,
+              `  ${still.length} item(s) still waiting on a person`,
+            ].join("\n"),
+          );
+        } finally {
+          handle.close();
+        }
+        return;
+      }
       if (sub === "blocked") {
         // Work that stopped and needs a person. The company is autonomous, which
         // does not mean it never halts - it means that when it halts it says so.
@@ -588,7 +617,7 @@ const commands: Record<
         }
         return;
       }
-      throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim, commit, run or blocked`);
+      throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim, commit, run, blocked or unblock`);
     } finally {
       handle.close();
     }

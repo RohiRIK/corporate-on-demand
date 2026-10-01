@@ -477,6 +477,32 @@ export function blockedWork(handle: WorkDb): { readonly item: WorkItem; readonly
   return rows.map((item) => ({ item, review: latestReview(handle, item.id) as ReviewRecord }));
 }
 
+/**
+ * A person's decision to look at a rejected item again.
+ *
+ * MANUAL on purpose. An automatic clear would let a rejected item re-enter the
+ * queue on its own, which is the company arguing with itself.
+ *
+ * Refused for a LANDED item: that work is already in master, and un-blocking it
+ * would put it back in the queue to be merged on top of itself.
+ *
+ * The reason is written onto the item, so the next rejection does not look like
+ * the first. A ledger that simply forgets is how the same mistake gets made
+ * twice and looks like new information the second time.
+ */
+export function clearReview(handle: WorkDb, id: string, note: string): { ok: boolean; reason?: string } {
+  const previous = latestReview(handle, id);
+  if (previous === null) return { ok: false, reason: `no review to clear for ${id}` };
+  if (previous.outcome === "landed") {
+    return { ok: false, reason: `${id} was already LANDED (${previous.landedSha || "no sha"}); clearing it would merge it twice` };
+  }
+  handle.db.query("DELETE FROM review WHERE work_id = ?").run(id);
+  if (note.trim() !== "") {
+    handle.db.query("UPDATE work SET reason = ? WHERE id = ?").run(`cleared by operator: ${note.trim()}`, id);
+  }
+  return { ok: true };
+}
+
 export function reject(handle: WorkDb, id: string, reason: string): CommitOutcome {
   const result = handle.db
     .query("UPDATE work SET state = 'rejected', reason = ?, lease_owner = NULL WHERE id = ? RETURNING *")

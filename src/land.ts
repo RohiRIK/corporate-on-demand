@@ -126,8 +126,17 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
   // The merge itself. `-c` flags mean the repo's own config cannot redirect
   // this: a branch that could add a pre-merge hook would be a way to run code
   // in the CEO's hands.
+  // Identity passed EXPLICITLY, alongside the hooks guard.
+  //
+  // The merge relied on whatever identity happened to be configured. That works
+  // in the container, where the image sets one globally, and fails anywhere that
+  // does not - which is exactly where CI runs, and the four failures there were
+  // all `git merge failed` for this reason. Ambient identity is not a thing a
+  // merge should depend on.
   const merged = git(repo, [
     "-c", "core.hooksPath=/dev/null",
+    "-c", "user.name=cod",
+    "-c", "user.email=cod@localhost",
     "merge", "--no-ff", "-m", `cod: land ${branch}`, branch,
   ]);
   if (merged === null) {

@@ -619,3 +619,17 @@ code is worth nothing.
   Absent by default; the default mount list is asserted by name and by count,
   and the docker socket cannot be smuggled in through the new field.
 - 547 tests, `verify.sh` PASS. All seven new guards mutation-verified.
+
+## Unreleased - two open items closed, and the one only CI found
+
+- **`cod work unblock <id> [why]`** - clears a terminal review so an item can be
+  looked at again. Refused for a LANDED item, which is in master already.
+  Deliberately manual.
+- **`landing.repo` is validated at `cod up`**, before the container exists: a
+  path that is missing, is not a repository, or has no `origin` is refused by
+  name, each with its own fix. Checking it later meant checking it per merge.
+- **The merge no longer depends on an ambient git identity.** Four `landWork`
+  tests passed locally and failed on CI with `git merge failed`, because the
+  container sets a global identity and the runner does not. Real, not a test
+  artefact.
+- 563 tests, `verify.sh` PASS with no global git identity.

@@ -547,6 +547,24 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
 
     async up(config: Config, workspace: Workspace): Promise<string> {
       const wsName = workspaceFromConfig(config);
+
+      // The landing repository is checked BEFORE the container exists.
+      //
+      // Checked here because checking it later means checking it per merge: the
+      // container would start, agents would work, work would be reviewed and
+      // merged, and only then would the push fail on a path that was a typo
+      // from the beginning. Nothing is lost in that case, but the operator
+      // finds out far too late.
+      if (workspace.landing !== undefined) {
+        const { checkLandingRepo } = await import("./landing");
+        const check = checkLandingRepo(workspace.landing.repo);
+        if (!check.ok) {
+          throw new UsageError(
+            `landing.repo is unusable: ${check.reason ?? "unknown"}. ` +
+              `Fix it, or remove the "landing" block from cod.json to keep landed work in the work volume.`,
+          );
+        }
+      }
       const name = containerNameForFile(config.workspaceFile);
 
       // Idempotent, but only by label: a container of the same name that we did
