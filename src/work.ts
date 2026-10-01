@@ -514,12 +514,36 @@ export function blockedWork(handle: WorkDb): { readonly item: WorkItem; readonly
  * the first. A ledger that simply forgets is how the same mistake gets made
  * twice and looks like new information the second time.
  */
-export function clearReview(handle: WorkDb, id: string, note: string): { ok: boolean; reason?: string } {
+export function clearReview(
+  handle: WorkDb,
+  id: string,
+  note: string,
+  override = false,
+): { ok: boolean; reason?: string } {
   const previous = latestReview(handle, id);
   if (previous === null) return { ok: false, reason: `no review to clear for ${id}` };
   if (previous.outcome === "landed") {
     return { ok: false, reason: `${id} was already LANDED (${previous.landedSha || "no sha"}); clearing it would merge it twice` };
   }
+  // A LIVE objection cannot be cleared quietly.
+  //
+  // `request-changes` means the worker still owes a fix and the loop is waiting
+  // for it. Clearing that silently is a side door around the loop: the
+  // objection is not fixed, it is forgotten, and the record afterwards reads as
+  // though the reviewer had accepted the work.
+  //
+  // Found by Alex. The override exists because there are legitimate reasons -
+  // the reviewer is simply wrong about this one - but a human overriding a
+  // review is an EVENT, and it is written into the archive as one.
+  if (previous.outcome === "changes-requested" && !override) {
+    return {
+      ok: false,
+      reason:
+        `${id} is MID-RETRY: the reviewer is still asking for changes - "${previous.reason}". ` +
+        `Either let the worker fix it, or pass --override to say you checked it yourself.`,
+    };
+  }
+
   // Refused rather than allowed: clearing something already cleared would
   // archive the operator's OWN note instead of the verdict, and the second note
   // would be lost with the error message nobody reads.
@@ -537,7 +561,10 @@ export function clearReview(handle: WorkDb, id: string, note: string): { ok: boo
   const operatorNote = note.trim() === "" ? "cleared by operator" : `cleared by operator: ${note.trim()}`;
   handle.db
     .query("UPDATE review SET outcome = 'cleared', reason = ? WHERE work_id = ?")
-    .run(`cleared by operator: ${note.trim() || "no reason given"} | was ${previous.outcome}: ${previous.reason}`, id);
+    .run(
+      `${override ? "OPERATOR OVERRIDE of the reviewer" : "cleared by operator"}: ${note.trim() || "no reason given"} | was ${previous.outcome}: ${previous.reason}`,
+      id,
+    );
   handle.db.query("UPDATE work SET reason = ? WHERE id = ?").run(operatorNote, id);
   return { ok: true };
 }

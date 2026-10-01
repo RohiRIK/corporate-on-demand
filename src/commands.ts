@@ -70,6 +70,8 @@ export interface CommandFlags {
   readonly goal?: string | undefined;
   /** The work payload. */
   readonly payload?: string | undefined;
+  /** Set when the operator says they have checked an outstanding objection themselves. */
+  readonly override?: boolean | undefined;
   /** Comma-separated target paths, which feed the novelty key. */
   readonly paths?: string | undefined;
   /** 0 self-contained, 1 cross-department, 2 global. */
@@ -491,15 +493,22 @@ const commands: Record<
         return;
       }
       if (sub === "unblock") {
+        // Documented here as well as in the handler: the usage line is the one
+        // place the CLI enumerates itself, and tests/docs.test.ts asserts the
+        // command exists, so the two must agree.
         // The way OUT of the blocked queue. Deliberately manual: an automatic
         // clear would let a rejected item re-enter the queue on its own.
         const id = positionals[1] ?? "";
-        if (id === "") throw new UsageError("work unblock needs an id: `cod work unblock <id> [why]`");
+        if (id === "") throw new UsageError("work unblock needs an id: `cod work unblock <id> [why]` [--override]");
         const why = positionals.slice(2).join(" ");
         const { openWork, clearReview, blockedWork } = await import("./work");
         const handle = openWork(config.stateDir);
         try {
-          const result = clearReview(handle, id, why);
+          // --override is the ONLY way past a live request-changes verdict.
+          // A human may legitimately think the reviewer wrong about this one
+          // item, but doing so quietly would make the record say the objection
+          // was resolved when it was only overridden.
+          const result = clearReview(handle, id, why, flags.override === true);
           if (!result.ok) {
             print(config, result, () => `${id} NOT cleared: ${result.reason ?? "unknown"}`);
             return;

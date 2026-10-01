@@ -61,6 +61,7 @@ async function main(argv: string[]): Promise<void> {
       to: { type: "string" },
       goal: { type: "string" },
       payload: { type: "string" },
+    override: { type: "boolean" },
       paths: { type: "string" },
       blast: { type: "string" },
       kind: { type: "string" },

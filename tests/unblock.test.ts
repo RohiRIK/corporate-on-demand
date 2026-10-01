@@ -103,6 +103,47 @@ describe("clearing a rejection", () => {
     handle.close();
   });
 
+  test("an item MID-RETRY cannot be unblocked without an explicit override", () => {
+    // The loop is the whole point: a request-changes verdict means the worker
+    // still owes a fix. Clearing it silently is a side door around the loop -
+    // the objection was never fixed, it was just forgotten.
+    const { handle, id } = seed("changes-requested");
+    const refused = clearReview(handle, id, "looks fine to me actually");
+    expect(refused.ok).toBe(false);
+    expect(refused.reason).toContain("override");
+    // And the verdict is untouched.
+    expect(latestReview(handle, id)?.outcome).toBe("changes-requested");
+    handle.close();
+  });
+
+  test("the refusal NAMES the outstanding objection, so the operator can judge", () => {
+    const { handle, id } = seed("changes-requested");
+    const refused = clearReview(handle, id, "x");
+    expect(refused.reason).toContain("no test was added");
+    handle.close();
+  });
+
+  test("with the override it is allowed, and the override is RECORDED", () => {
+    const { handle, id } = seed("changes-requested");
+    const result = clearReview(handle, id, "I checked it myself", true);
+    expect(result.ok).toBe(true);
+    const row = latestReview(handle, id);
+    expect(row?.outcome).toBe("cleared");
+    // The record must say a human overrode the reviewer, not that the reviewer
+    // changed their mind.
+    expect(row?.reason?.toLowerCase()).toContain("override");
+    expect(row?.reason).toContain("no test was added");
+    expect(row?.reason).toContain("I checked it myself");
+    handle.close();
+  });
+
+  test("a TERMINAL rejection is still unblockable without an override", () => {
+    // The override is for bypassing a LIVE loop, not for reaching the queue.
+    const { handle, id } = seed("rejected");
+    expect(clearReview(handle, id, "fixed it by hand").ok).toBe(true);
+    handle.close();
+  });
+
   test("an unknown id is a named failure", () => {
     const dir = scratch();
     const handle = openWork(dir);

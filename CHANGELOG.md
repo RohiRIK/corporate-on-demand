@@ -646,3 +646,12 @@ code is worth nothing.
 - **`cod work unblock` archives rather than deletes** the verdict, so an
   unblocked item is no longer indistinguishable from a new one.
 - 583 tests. Every new guard mutation-verified; two gaps found and closed.
+
+## Unreleased - unblock can no longer quietly skip an outstanding objection
+
+- **`cod work unblock` refuses an item that is MID-RETRY** and quotes the
+  reviewer's outstanding objection. Found by Alex: the old behaviour let a
+  person bypass the review loop without the objection ever being fixed.
+- **`--override` records an `OPERATOR OVERRIDE`**, never a resolution, so the
+  record cannot imply the reviewer changed their mind.
+- 587 tests.

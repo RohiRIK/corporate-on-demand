@@ -500,3 +500,27 @@ given a test, and deleting the real one inside `judgeReview` now fails three.
 
 An existing test asserted the OLD policy and failed correctly. It was rewritten,
 not deleted: the invariant that matters is that the count is DURABLE.
+
+## Closed: unblock was a side door around the review loop (2026-10-01)
+
+Found by Alex.
+
+`cod work unblock` cleared any non-landed verdict, including a LIVE
+`request-changes` one. That means an item mid-retry could be fast-tracked by a
+person while the outstanding objection was never fixed - and afterwards the
+record read as though the reviewer had accepted the work. A loop with a door
+around it is not a loop.
+
+An item that is mid-retry is now REFUSED, and the refusal quotes the outstanding
+objection so the operator can judge it rather than just being told no.
+
+`--override` exists because reviewers are sometimes simply wrong about one
+item. When it is used the archive says `OPERATOR OVERRIDE of the reviewer`,
+never `cleared by operator` - a human overriding a review is an event, and the
+record must not imply the reviewer changed their mind.
+
+A TERMINAL rejection is still unblocked without any flag. The override is for
+bypassing a LIVE loop, not for reaching the queue.
+
+Both guards mutation-verified: removing the refusal fails two tests, removing
+the OVERRIDE wording fails one.
