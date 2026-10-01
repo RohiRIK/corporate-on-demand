@@ -632,4 +632,4 @@ code is worth nothing.
   tests passed locally and failed on CI with `git merge failed`, because the
   container sets a global identity and the runner does not. Real, not a test
   artefact.
-- 563 tests, `verify.sh` PASS with no global git identity.
+- 560 tests, `verify.sh` PASS with no global git identity.
