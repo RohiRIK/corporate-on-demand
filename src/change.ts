@@ -39,8 +39,13 @@ function git(workdir: string, args: readonly string[]): string | null {
  * HEAD of the main line, so it reports THIS job's work and not whatever landed
  * on the line while it ran.
  */
-export function readJobChange(workdir: string, baseRef = "master"): JobChange {
-  const base = git(workdir, ["merge-base", "HEAD", baseRef]);
+import { resolveBase } from "./land";
+
+export function readJobChange(workdir: string, baseRef?: string): JobChange {
+  // baseRef is a caller-supplied override; the DEFAULT is resolved from the
+  // repository rather than being the literal "master", which made every call on
+  // a main-based repository merge-base against a branch that does not exist.
+  const base = git(workdir, ["merge-base", "HEAD", baseRef ?? resolveBase(workdir)]);
   if (base === null || base === "") return EMPTY;
   const changed = git(workdir, ["diff", "--name-only", `${base}..HEAD`]);
   const commits = git(workdir, ["rev-list", "--count", `${base}..HEAD`]);

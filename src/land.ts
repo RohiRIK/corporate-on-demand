@@ -82,8 +82,43 @@ function git(repo: string, args: readonly string[]): string | null {
 
 
 
+/**
+ * The branch work is merged INTO, discovered from the repository.
+ *
+ * This was the literal string "master", in two files. On a repository whose
+ * initial branch is `main` - git's own default since 2.28 - `git diff
+ * master...branch` fails with "ambiguous argument", `landWork` sees null, and
+ * reports `skipped`. NOT a failure: a skip. So every item was silently skipped
+ * for ever while the review loop looked perfectly healthy.
+ *
+ * That is the single most likely reason nothing has ever been merged, and every
+ * fixture in this repository ran `git init -b master`, which made the
+ * assumption invisible to the suite.
+ *
+ * Resolution order, most authoritative first:
+ *   1. `refs/remotes/origin/HEAD` - what the remote actually calls default
+ *   2. the branch HEAD points at right now
+ *   3. `master`, then `main` - only if that ref genuinely exists
+ *
+ * Step 3 is last and verified, so a repo on `main` can never resolve to `master`.
+ */
+export function resolveBase(repo: string): string {
+  const candidates: string[] = [];
+  const symbolic = git(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+  if (symbolic !== null && symbolic !== "") candidates.push(symbolic.replace(/^origin\//, ""));
+  const head = git(repo, ["symbolic-ref", "--short", "HEAD"]);
+  if (head !== null && head !== "") candidates.push(head);
+  candidates.push("master", "main");
+  for (const candidate of candidates) {
+    const exists = git(repo, ["rev-parse", "--verify", "--quiet", candidate]);
+    if (exists !== null && exists !== "") return candidate;
+  }
+  return "HEAD";
+}
+
 export async function landWork(repo: string, item: WorkItem, options: LandOptions): Promise<LandOutcome> {
   const branch = `cod/${item.id}`;
+  const base = resolveBase(repo);
 
   // The durable guard. A landed or rejected item is not looked at again: the
   // old guard was a Set, and a Set is empty after a restart, which is how a
@@ -108,7 +143,7 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
   // counter is zero after every restart.
   const attemptsSoFar = previous?.outcome === "changes-requested" ? (previous.attempts ?? 1) : 0;
 
-  const diff = git(repo, ["diff", `master...${branch}`]);
+  const diff = git(repo, ["diff", `${base}...${branch}`]);
   if (diff === null) {
     return note(options, item, { outcome: "skipped", reason: `no diff for ${branch}` });
   }
