@@ -490,6 +490,33 @@ const commands: Record<
         );
         return;
       }
+      if (sub === "blocked") {
+        // Work that stopped and needs a person. The company is autonomous, which
+        // does not mean it never halts - it means that when it halts it says so.
+        // An item the reviewer rejected has no further authority to fix itself,
+        // and an operator who cannot SEE it has no way to unblock it.
+        const { openWork, blockedWork } = await import("./work");
+        const handle = openWork(config.stateDir);
+        try {
+          const blocked = blockedWork(handle);
+          print(
+            config,
+            blocked,
+            () =>
+              blocked.length === 0
+                ? "nothing is blocked"
+                : [
+                    `${blocked.length} item(s) waiting on a person:`,
+                    ...blocked.map(({ item, review }) => `  ${item.id}  ${review.branch}\n      ${review.reason}`),
+                    "",
+                    "to retry one by hand: cod work run <id>",
+                  ].join("\n"),
+          );
+        } finally {
+          handle.close();
+        }
+        return;
+      }
       if (sub === "run" && flags.inside !== true) {
         const workId = positionals[1] ?? "";
         if (workId === "") throw new UsageError("work run needs an id: `cod work run <id>`");
@@ -561,7 +588,7 @@ const commands: Record<
         }
         return;
       }
-      throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim, commit or run`);
+      throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim, commit, run or blocked`);
     } finally {
       handle.close();
     }
