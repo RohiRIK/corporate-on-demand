@@ -445,6 +445,64 @@ export async function doctor(
   };
 }
 
+/**
+ * The container spec for a workspace.
+ *
+ * Extracted from `up()` because the mounts are the security boundary and an
+ * inline literal cannot be asserted on. The mount list now has a test that says
+ * what a DEFAULT workspace gets, which is the only way to notice that being
+ * handed something new.
+ */
+export function buildWorkspaceSpec(config: Config, workspace: Workspace): ContainerSpec {
+  return {
+          name: containerNameForFile(config.workspaceFile),
+          image: config.image,
+          // The full workspace PATH, not its name. This label is the only thing
+          // that decides whether `cod up` may adopt an already-running container,
+          // and a name-only label made every workspace called cod.json compare
+          // equal - so the guard adopted the wrong container instead of refusing.
+          labels: { "cod.workspace": config.workspaceFile },
+          mounts: [
+            // The workspace is a bind mount, so the repo and its worktrees live
+            // in the container's own writable layer under /work. That keeps a
+            // job's commits out of the operator's workspace file, which is
+            // mounted read-only precisely so the system cannot rewrite it.
+            { source: config.workspaceFile, target: "/cod/cod.json", readOnly: true },
+            { source: config.stateDir, target: "/cod", readOnly: false },
+            // /work holds the git repo and every per-job worktree. It is a NAMED
+            // VOLUME, not the container's writable layer: verified, that layer is
+            // destroyed by `docker rm`, so a container restart took every commit
+            // and every worktree with it. A volume survives both the restart and
+            // the removal, which is what makes a worktree worth having.
+            { source: workVolume(config), target: "/work", readOnly: false, volume: true },
+            // OPT-IN ONLY, and absent unless the operator named a path.
+            //
+            // A writable mount of host state is the single most dangerous thing
+            // this container could be given, so it happens on request only, at a
+            // fixed target rather than wherever the host happens to keep it,
+            // and it goes through assertMountAllowed like every other mount.
+            ...(workspace.landing === undefined
+              ? []
+              : (() => {
+                  // Asserted here rather than filtered later: the guard exists
+                  // to REFUSE, so its result cannot be a value that goes on
+                  // being used.
+                  assertMountAllowed(workspace.landing.repo);
+                  return [{ source: workspace.landing.repo, target: "/landing", readOnly: false }];
+                })()),
+          ],
+          // Egress is deliberate: agents install packages, so --network none is
+          // incompatible with the requirement and was removed on purpose. This
+          // container is a trusted host process, not a containment boundary.
+          network: "bridge",
+          memory: "2g",
+          cpus: "2",
+          env: { TZ: workspace.timezone },
+          user: "1000:1000",
+  };
+}
+
+
 export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { runner?: Runner; timeoutMs?: number } = {}) {
   async function run(args: string[], subject: string): Promise<RunResult> {
     let result: RunResult;
@@ -503,37 +561,7 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
         );
       }
 
-      const spec: ContainerSpec = {
-        name,
-        image: config.image,
-        // The full workspace PATH, not its name. This label is the only thing
-        // that decides whether `cod up` may adopt an already-running container,
-        // and a name-only label made every workspace called cod.json compare
-        // equal - so the guard adopted the wrong container instead of refusing.
-        labels: { "cod.workspace": config.workspaceFile },
-        mounts: [
-          // The workspace is a bind mount, so the repo and its worktrees live
-          // in the container's own writable layer under /work. That keeps a
-          // job's commits out of the operator's workspace file, which is
-          // mounted read-only precisely so the system cannot rewrite it.
-          { source: config.workspaceFile, target: "/cod/cod.json", readOnly: true },
-          { source: config.stateDir, target: "/cod", readOnly: false },
-          // /work holds the git repo and every per-job worktree. It is a NAMED
-          // VOLUME, not the container's writable layer: verified, that layer is
-          // destroyed by `docker rm`, so a container restart took every commit
-          // and every worktree with it. A volume survives both the restart and
-          // the removal, which is what makes a worktree worth having.
-          { source: workVolume(config), target: "/work", readOnly: false, volume: true },
-        ],
-        // Egress is deliberate: agents install packages, so --network none is
-        // incompatible with the requirement and was removed on purpose. This
-        // container is a trusted host process, not a containment boundary.
-        network: "bridge",
-        memory: "2g",
-        cpus: "2",
-        env: { TZ: workspace.timezone },
-        user: "1000:1000",
-      };
+      const spec = buildWorkspaceSpec(config, workspace);
       await run(buildRunArgv(spec), wsName);
       return name;
     },

@@ -71,6 +71,20 @@ A job that stays `running` across two reconciles is a **zombie**, and its
 result will be fenced when it finally returns. Reconcile exists precisely so
 you do not have to wait it out.
 
+### 2a. It says "up" but nothing is happening
+
+`cod status` reports container state and ledger state as DIFFERENT claims. If
+the blocked line is non-zero, work has stopped and is waiting on you:
+
+```bash
+cod status                 # the "blocked" line
+cod work blocked           # what stopped, oldest first, with the reason
+```
+
+To retry one by hand: `cod work run <id>`. Nothing clears a rejection
+automatically - an automatic clear would let a rejected item re-enter the queue
+on its own, which is the company arguing with itself.
+
 ### 3. It all looks stuck and nothing is moving
 
 Check the free model rather than the system. The provider is intermittent, and
@@ -135,6 +149,10 @@ systemctl --user enable cod-workspace@acme.service
 ## Destructive steps, and their undo
 
 These are the only ones that lose anything. Each says what is lost first.
+
+Where landed work goes: a workspace naming `landing.repo` has it mounted
+read-write and reviewed changes are pushed to `refs/heads/cod-landed`. Without
+it, merges stay in the `/work` volume, which is not visible from the host.
 
 ```bash
 cod down               # STOPS the container. The work VOLUME is kept.

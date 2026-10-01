@@ -397,3 +397,52 @@ looking inside the image rather than by reasoning:
 
 Bounded to one line, never throws, and says "no log entry found" rather than
 staying silent. Silence is the bug this replaces.
+
+## Closed: a review verdict nobody recorded (2026-09-30)
+
+Reported as "a rejected item just sits". Inspecting it, it was worse:
+`landWork` wrote ledger state only on `changes-requested`, so a `rejected`
+item's row was never touched. It stayed `done`, the tick's filter kept offering
+it, and **every tick re-reviewed it with a model, for ever**. Both guards were
+module-level `Set`s - empty after every supervisor restart - so it came back on
+every boot too.
+
+A `review` table now holds one row per item, upserted, and every return path in
+`landWork` writes through `note()`. `IF NOT EXISTS`, so existing databases gain it
+on next open with no migration.
+
+`cod work blocked` lists what stopped, oldest first, with the reviewer's reason.
+`cod status` counts it, because a status line that only says "up" cannot tell an
+operator that items have stopped and are waiting on them.
+
+## Closed: landing reaches only the volume (2026-09-30)
+
+Reviewed work was merged into `master` in the `/work` **Docker volume**, which
+nobody outside can see. `/work` is a named volume and the workspace file is
+mounted read-only on purpose, so this was not an oversight and could not be
+fixed by pointing at the existing mount.
+
+Now opt-in: a workspace names `landing.repo`, the container mounts it read-write
+at a fixed `/landing` target, and the merge is pushed to `refs/heads/cod-landed`.
+
+**Absent by default, and that is the part with a test.** The default mount list
+is asserted by name and by count, the docker socket cannot be smuggled in through
+the new field, and the extraction of `buildWorkspaceSpec` out of `up()` exists
+because an inline literal cannot be asserted on at all.
+
+## Open: landing.repo is not validated at `cod up` time
+
+A typo means the push fails at land time, AFTER the merge already happened in
+the volume. The merge is not lost and the item still reports `landed`, with the
+failure in the reason - but the operator finds out late. Validating that the path
+is a repository with an `origin` would refuse to start instead. Cheap, and
+deliberately not done here: it is a start-up behaviour change for a workspace
+that currently works.
+
+## Open: nothing clears a rejection
+
+`cod work blocked` shows the reason and offers one next action, `cod work run
+<id>` by hand. There is no command that says "look again" and clears the record,
+so an operator must re-dispatch manually. Deliberate for now - an automatic
+clear would let a rejected item re-enter the queue on its own, which is the
+company arguing with itself.

@@ -48,13 +48,28 @@ such in `src/meeting.ts` rather than glossed: **the positions are computed, not
 spoken by a model**, so it decides real work from real state and is a first
 version rather than a discussion.
 
-**Stage 4 — Review and merge. NOT STARTED.**
-Nothing reviews and nothing lands. Agents commit to their own branch and stop.
+**Stage 4 — Review and merge. DONE.**
+Mechanical checks (secrets, a push or merge in the diff, a global path) are
+deterministic and no model may override them. The reviewer is a model call for
+scope and tests, and its verdict is recorded in a `review` table so it survives a
+restart. One retry with the review as the brief, then it stops.
+`cod work blocked` is the queue of things that stopped.
 
-**Stage 5 — The company runs itself. NOT STARTED.**
-No cron drives the cycle, so the loop still needs a human to type `cod cycle`.
-The cycle, the meeting and the dispatch are all built and verified; what is
-missing is a scheduled tick that runs them.
+Verified unattended: two branches created and commit `94c9f55` written by an
+agent nobody supervised.
+
+**Stage 5 — The company runs itself. DONE.**
+`runGovernance` is one tick - propose, meet, dispatch, review - registered on its
+own interval and on the workspace's concurrency ceiling. Global work is never
+dispatched by a tick; the boundary does not relax because nobody is watching.
+
+A tick is deliberately ONE STAGE BEHIND: it proposes, the meeting decides, and
+the next tick reconciles and dispatches the decisions. A meeting must not
+dispatch work it has not reconciled.
+
+Landing is opt-in: a workspace naming `landing.repo` gets it mounted read-write
+at `/landing` and landed work is pushed to `refs/heads/cod-landed`. Absent by
+default, and the default mount list is asserted by a test.
 
 ### The agent skill bundle
 

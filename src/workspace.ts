@@ -128,6 +128,17 @@ export const Workspace = z
     // Present-but-empty stays distinct from absent, so turning governance OFF
     // is an explicit `{"enabled": false}` rather than a deleted block.
     governance: Governance.prefault({ enabled: true }),
+    /**
+     * Where landed work is pushed, if anywhere.
+     *
+     * Optional and ABSENT by default, which is the important part. A fresh
+     * workspace gets no writable host mount beyond its own state directory, so
+     * the operator opts in by naming a path, and until then the behaviour is
+     * exactly what it has always been.
+     */
+    landing: z.object({
+      repo: z.string().min(1),
+    }).optional(),
   })
   .strict();
 export type Workspace = z.infer<typeof Workspace>;

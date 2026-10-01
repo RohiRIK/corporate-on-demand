@@ -601,3 +601,21 @@ code is worth nothing.
   worker who named it.
 - Engineering workers carry `git-discipline, testing, debugging, escalation,
   wrap-up`; CTO carries `escalation, reviewing, wrap-up`.
+
+## Unreleased - the review verdict is recorded, and where landed work goes
+
+- **A rejected item is reviewed ONCE, and the verdict survives a restart.** The
+  bug was worse than "it just sits": `landWork` wrote no state on `rejected`, so
+  the item stayed `done` and every tick re-reviewed it with a model, for ever -
+  and both guards were module-level `Set`s that a restart emptied. Now one row
+  per item in a `review` table, written through a single helper every return
+  path goes through.
+- **`cod work blocked`** - the queue that did not exist, oldest first, with the
+  reviewer's own reason. **`cod status`** counts it, because a status line that
+  only says "up" cannot say three items are waiting.
+- **`buildWorkspaceSpec`** extracted out of `up()`. The mounts are the security
+  boundary and an inline literal cannot be asserted on at all.
+- **Opt-in `landing.repo`**, so reviewed work can reach a shared repository.
+  Absent by default; the default mount list is asserted by name and by count,
+  and the docker socket cannot be smuggled in through the new field.
+- 547 tests, `verify.sh` PASS. All seven new guards mutation-verified.

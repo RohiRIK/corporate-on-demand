@@ -22,6 +22,13 @@ import type { LandOutcome } from "./governance";
 export interface LandOptions {
   readonly repo: string;
   readonly stateDir: string;
+  /**
+   * The shared repository to push landed work into, if the workspace named one.
+   *
+   * Undefined is the default and the common case: the merge stays in the
+   * volume, exactly as it always has.
+   */
+  readonly landingRepo?: string;
   /** Asks the model. Injected so this is testable without a provider. */
   readonly ask: (prompt: string) => Promise<string>;
   readonly maxRetries?: number;
@@ -127,6 +134,23 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
     return note(options, item, { outcome: "rejected", reason: `git merge failed for ${branch}` });
   }
   const sha = git(repo, ["rev-parse", "HEAD"]);
+
+  // Push it somewhere it can be seen from outside, if the operator named a
+  // place. A fixed ref rather than whatever HEAD points at, so a bad day in the
+  // volume cannot redirect the push onto a branch nobody chose.
+  if (options.landingRepo !== undefined) {
+    const pushed = git(options.landingRepo, ["push", "origin", "HEAD:refs/heads/cod-landed"]);
+    if (pushed === null) {
+      // The merge already happened locally, so this is NOT rolled back and NOT
+      // reported as a lost merge. The operator has to check the landing repo.
+      return note(options, item, {
+        outcome: "landed",
+        branch,
+        reason: `merged ${branch} into master, but could NOT push to ${options.landingRepo} - check that repository`,
+      }, sha ?? "");
+    }
+  }
+
   return note(options, item, { outcome: "landed", branch, reason: `merged ${branch} into master` }, sha ?? "");
 }
 
