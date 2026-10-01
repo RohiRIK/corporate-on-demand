@@ -71,7 +71,7 @@ const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
  */
 async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{ ok: boolean; reason?: string }> {
   const { openWork, get } = await import("./work");
-  const { runWorkItem, textOfItem } = await import("./runwork");
+  const { runWorkItem, briefFor } = await import("./runwork");
   const { resolveTarget } = await import("./assign");
   const { driverFor } = await import("./drivers");
   const { acquireWorktree, releaseWorktree } = await import("./worktree");
@@ -96,7 +96,7 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   if (target.note !== undefined) log(target.note);
   const worker = target.worker;
   const department = target.department;
-  const goal = textOfItem(item);
+  const goal = briefFor(item);
   const cron = { name: item.id, agent: worker.name, task: goal, schedule: "0 0 1 1 *", enabled: true, expectTools: true };
 
   const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, item.id);

@@ -112,6 +112,34 @@ export function textOfItem(item: WorkItem): string {
   return item.payload;
 }
 
+/**
+ * What the agent is actually told, including any objection it must fix.
+ *
+ * `textOfItem` reads the payload alone, so a retried item was handed the exact
+ * same prompt as its first attempt and had no way to know what the reviewer had
+ * objected to. The retry existed; the fix demand did not.
+ *
+ * Only feedback the review loop itself wrote is treated as a review: it all
+ * starts with `review`. An unrelated reason - "could not reach the model" - is
+ * left alone rather than dressed up as a reviewer's verdict, because telling a
+ * model "the reviewer said X" when nobody said X is worse than saying nothing.
+ *
+ * The task stays FIRST. The objection is context, not the objective, and an
+ * agent that reads a wall of criticism before it knows what it was asked to do
+ * is being asked something else.
+ */
+export function briefFor(item: WorkItem): string {
+  const task = textOfItem(item);
+  const reason = (item.reason ?? "").trim();
+  if (!reason.startsWith("review")) return task;
+  return [
+    task,
+    "",
+    "Your previous attempt was reviewed and returned. Fix these points:",
+    reason,
+  ].join("\n");
+}
+
 /** The target paths a work item names, parsed out of its payload. */
 export function targetPathsOfItem(item: WorkItem): string[] {
   try {

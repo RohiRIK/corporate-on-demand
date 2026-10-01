@@ -21,7 +21,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { Workspace } from "./workspace";
 import { openWork, get } from "./work";
-import { runWorkItem, textOfItem } from "./runwork";
+import { runWorkItem, briefFor } from "./runwork";
 import { resolveTarget } from "./assign";
 import { dispatch } from "./dispatch";
 import { driverFor } from "./drivers";
@@ -76,7 +76,7 @@ const department = target.department;
 // The TEXT, not the JSON wrapper. The paths are bookkeeping; handing them to
 // the model as part of its instruction is the system showing its plumbing to
 // the thing it is directing.
-const goal = textOfItem(item);
+const goal = briefFor(item);
 const cron = {
   name: item.id,
   // The WORKER, not the addressee - so the log and the result line name who
