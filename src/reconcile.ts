@@ -152,15 +152,37 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
     // existence meaningful in the first place.
     for (const item of listWork(handle, "running")) {
       const file = join(options.stateDir, "work", `${item.id}.json`);
-      let recorded: { state?: string } | null = null;
+      let recorded: { state?: string; lease_epoch?: number } | null = null;
       try {
-        recorded = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as { state?: string }) : null;
+        recorded = existsSync(file)
+          ? (JSON.parse(readFileSync(file, "utf8")) as { state?: string; lease_epoch?: number })
+          : null;
       } catch {
         // Unreadable or half-written: not evidence of anything. Leave it alone;
         // the budget rule will reclaim it.
         recorded = null;
       }
       if (recorded === null) continue;
+
+      // The result file is an acknowledgement OF AN EPOCH, and an epoch cannot
+      // acknowledge a later run.
+      //
+      // Found by Max, and it silently defeated the entire review loop: when
+      // landWork sends an item back for a retry it bumps the epoch and the file
+      // from the PREVIOUS attempt is never removed. On the next tick the item is
+      // running again, this loop found that stale file, committed it, and
+      // reported "recovered from a durable result file after a lost
+      // acknowledgement" - a fabricated ack. Attempt two was fenced out before
+      // it could act, and the item was reviewed carrying attempt one's diff.
+      //
+      // The discriminator was already in the data: commit() writes the file by
+      // spreading the WorkItem, so it carries the epoch that produced it.
+      if (recorded.lease_epoch !== undefined && recorded.lease_epoch !== item.lease_epoch) {
+        // Stale: it describes a run that has already been superseded.
+        report.unchanged += 1;
+        continue;
+      }
+
       if (recorded.state !== "done" && recorded.state !== "failed") {
         // A file that does not describe a finished result is not an ack.
         report.unchanged += 1;
