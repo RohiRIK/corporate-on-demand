@@ -28,6 +28,7 @@ import { execFileSync } from "node:child_process";
 import { judgeReview, mechanicalChecks, canMerge, REVIEW_SKILL } from "./review";
 import { openWork, recordReview, latestReview, type WorkItem } from "./work";
 import { isGlobalPath } from "./boundary";
+import { SAFE_DIFF_FLAGS, NO_EXT_DIFF } from "./change";
 import type { LandOutcome } from "./governance";
 
 export interface LandOptions {
@@ -132,7 +133,7 @@ export function resolveBase(repo: string): string {
  */
 export function changedPaths(repo: string, branch: string, base?: string): string[] {
   const from = base ?? resolveBase(repo);
-  const raw = git(repo, ["diff", "--name-status", "--find-renames", `${from}...${branch}`]);
+  const raw = git(repo, [...SAFE_DIFF_FLAGS, "diff", ...NO_EXT_DIFF, "--name-status", "--find-renames", `${from}...${branch}`]);
   if (raw === null || raw === "") return [];
   const paths: string[] = [];
   for (const line of raw.split("\n")) {
@@ -176,7 +177,7 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
   // counter is zero after every restart.
   const attemptsSoFar = previous?.outcome === "changes-requested" ? (previous.attempts ?? 1) : 0;
 
-  const diff = git(repo, ["diff", `${base}...${branch}`]);
+  const diff = git(repo, [...SAFE_DIFF_FLAGS, "diff", ...NO_EXT_DIFF, `${base}...${branch}`]);
   if (diff === null) {
     return note(options, item, { outcome: "skipped", reason: `no diff for ${branch}` });
   }

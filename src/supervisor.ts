@@ -362,7 +362,18 @@ function main(): void {
             // NOT unconditionally true. `ok` used to mean "the job settled",
             // which is true of a run that FAILED - so a provider outage was
             // displayed to the owner as a success.
-            ok: !isAgentFailure(result.output),
+            // `ok` is not "the process exited 0".
+            //
+            // It used to be, which meant an agent that streamed a perfectly
+            // well-formed answer, exited 0, and committed NOTHING was recorded
+            // as a success with zero changed files. The most common real
+            // outcome - the agent chatted and shipped nothing - produced a
+            // clean success line and no demand for a fix.
+            //
+            // A read-only job is the legitimate exception and has always opted
+            // out explicitly via `expectTools: false`, so this cannot reject
+            // work that was told to only report.
+            ok: !isAgentFailure(result.output) && !(cron.expectTools !== false && change.commits === 0),
             output: result.output,
             branch: worktree.branch,
             changedFiles: classified.changed,
