@@ -101,7 +101,8 @@ CREATE TABLE IF NOT EXISTS review (
   reason      TEXT NOT NULL,
   branch      TEXT NOT NULL DEFAULT '',
   landed_sha  TEXT NOT NULL DEFAULT '',
-  reviewed_at INTEGER NOT NULL
+  reviewed_at INTEGER NOT NULL,
+  attempts    INTEGER NOT NULL DEFAULT 0
 );
 `;
 
@@ -157,6 +158,16 @@ export function openWork(stateDir: string): WorkDb {
   database.transaction(() => {
     database.run("INSERT OR IGNORE INTO meta (k, v) VALUES ('created_seq', '0')");
   })();
+  // A column is not a table: CREATE TABLE IF NOT EXISTS cannot add one, so an
+  // existing database gains `attempts` only here. Checked, not assumed - an
+  // unconditional ALTER fails on every database that already has it, and this
+  // runs on every single open.
+  const reviewColumns = new Set(
+    (database.query("PRAGMA table_info(review)").all() as { name: string }[]).map((r) => r.name),
+  );
+  if (!reviewColumns.has("attempts")) {
+    database.run("ALTER TABLE review ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+  }
   return { db: database, close: (): void => database.close() };
 }
 
@@ -411,6 +422,8 @@ export interface ReviewRecord {
   readonly branch: string;
   readonly landedSha: string;
   readonly reviewedAt: number;
+  /** How many times this item has been sent back to the worker. Durable. */
+  readonly attempts?: number;
 }
 
 /**
@@ -426,14 +439,15 @@ export function recordReview(
 ): void {
   handle.db
     .query(
-      `INSERT INTO review (work_id, outcome, reason, branch, landed_sha, reviewed_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO review (work_id, outcome, reason, branch, landed_sha, reviewed_at, attempts)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(work_id) DO UPDATE SET
          outcome = excluded.outcome,
          reason = excluded.reason,
          branch = excluded.branch,
          landed_sha = excluded.landed_sha,
-         reviewed_at = excluded.reviewed_at`,
+         reviewed_at = excluded.reviewed_at,
+         attempts = excluded.attempts`,
     )
     .run(
       record.workId,
@@ -442,6 +456,7 @@ export function recordReview(
       record.branch,
       record.landedSha,
       record.reviewedAt ?? Date.now(),
+      record.attempts ?? 0,
     );
 }
 
@@ -449,11 +464,11 @@ export function recordReview(
 export function latestReview(handle: WorkDb, workId: string): ReviewRecord | null {
   const row = handle.db
     .query(
-      `SELECT work_id, outcome, reason, branch, landed_sha, reviewed_at
+      `SELECT work_id, outcome, reason, branch, landed_sha, reviewed_at, attempts
          FROM review WHERE work_id = ?`,
     )
     .get(workId) as
-    | { work_id: string; outcome: string; reason: string; branch: string; landed_sha: string; reviewed_at: number }
+    | { work_id: string; outcome: string; reason: string; branch: string; landed_sha: string; reviewed_at: number; attempts?: number }
     | null;
   if (row === null) return null;
   return {
@@ -463,6 +478,7 @@ export function latestReview(handle: WorkDb, workId: string): ReviewRecord | nul
     branch: row.branch,
     landedSha: row.landed_sha,
     reviewedAt: row.reviewed_at,
+    attempts: row.attempts ?? 0,
   };
 }
 

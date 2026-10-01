@@ -104,6 +104,17 @@ const Governance = z.object({
   enabled: z.boolean().default(true),
   /** Minutes between ticks. Nonsense falls back to the default. */
   cycleEveryMinutes: z.number().int().positive().optional(),
+  /**
+   * How many times a piece of work may be sent back to its worker.
+   *
+   * Omitted means DEFAULT_MAX_RETRIES (3). Zero means the first objection is
+   * final, which is the lever an operator reaches for when a reviewer and a
+   * worker are arguing rather than reviewing.
+   *
+   * Capped at 10 because past that it is not a review loop, it is a deadlock
+   * that spends a model call per pass.
+   */
+  maxReviewRetries: z.number().int().min(0).max(10).optional(),
 });
 
 export const Workspace = z

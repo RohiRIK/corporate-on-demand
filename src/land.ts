@@ -34,6 +34,20 @@ export interface LandOptions {
   readonly maxRetries?: number;
 }
 
+/**
+ * Three, not one.
+ *
+ * One retry with an UNBRIEFED agent was a coin flip, so it was never worth more
+ * than one. The brief is real now - the agent is handed the reviewer's actual
+ * objection - so the retries are worth spending.
+ *
+ * Still bounded on purpose. An unbounded loop is a company that argues for ever
+ * and never converges, and it spends a free model call on each pass. An operator
+ * who wants fewer sets `governance.maxReviewRetries`; zero means the first
+ * objection is final.
+ */
+export const DEFAULT_MAX_RETRIES = 3;
+
 function git(repo: string, args: readonly string[]): string | null {
   try {
     return execFileSync("git", ["-C", repo, ...args], {
@@ -76,7 +90,13 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
 
   // A retry is counted from the RECORD, not from `attempts`, which counts
   // dispatches and would grant a fresh retry every time.
-  const alreadyRetried = previous?.outcome === "changes-requested";
+  // How many times this has already been sent back, from the RECORD.
+  //
+  // This was a boolean, and a boolean cannot count - so maxRetries above 1 was
+  // inert no matter what it was set to. Every value except 1 was decoration.
+  // Durable for the same reason the landed/rejected guard is: a module-level
+  // counter is zero after every restart.
+  const attemptsSoFar = previous?.outcome === "changes-requested" ? (previous.attempts ?? 1) : 0;
 
   const diff = git(repo, ["diff", `master...${branch}`]);
   if (diff === null) {
@@ -87,17 +107,28 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
     return note(options, item, { outcome: "skipped", reason: `${branch} changed nothing` });
   }
 
-  const verdict = await judgeReview({
-    diff,
-    task: item.payload,
-    mechanical: mechanicalChecks(diff),
-    ask: options.ask,
-  });
+  const mechanical = mechanicalChecks(diff);
+
+  // Terminal BEFORE the model is asked, whatever the retry cap is.
+  //
+  // A global path, a secret shape or a forbidden action is a RULE, not an
+  // opinion. Sending it back would invite the worker to argue with a
+  // deterministic check and spend a free model call doing it. And it is not
+  // recorded as review feedback, because briefFor would then present a rule
+  // violation as something the worker can negotiate.
+  if (!mechanical.ok) {
+    return note(options, item, {
+      outcome: "rejected",
+      reason: `refused before review: ${mechanical.findings.join("; ")}`,
+    });
+  }
+
+  const verdict = await judgeReview({ diff, task: item.payload, mechanical, ask: options.ask });
 
   const radius = item.blast_radius ?? 0;
   if (!canMerge(verdict, radius)) {
     const changes = verdict.outcome === "request-changes";
-    if (changes && !alreadyRetried && (options.maxRetries ?? 1) > 0) {
+    if (changes && attemptsSoFar < (options.maxRetries ?? DEFAULT_MAX_RETRIES)) {
       // THE ONE RETRY, with the review as the brief. Recorded on the item, so
       // the next attempt carries the reviewer's words rather than starting over.
       const handle = openWork(options.stateDir);
@@ -109,17 +140,29 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
         // `release` clears the lease and bumps the epoch WITHOUT changing state,
         // so the item stays `done`-shaped for the tick's filter while no stale
         // run can ever commit against it again.
+        // EVERY objection so far, not only the newest. Attempt three that sees
+        // only attempt two's objection may fix that one and regress the first,
+        // and the reviewer will then say so for a fourth time.
+        const priorRow = handle.db.query("SELECT reason FROM work WHERE id = ?").get(item.id) as
+          | { reason: string | null }
+          | undefined;
+        const priorReview = (priorRow?.reason ?? "").startsWith("review") ? `${priorRow?.reason}${""}` + String.fromCharCode(10) : "";
         handle.db.query("UPDATE work SET lease_owner = NULL, lease_epoch = lease_epoch + 1, reason = ? WHERE id = ?")
-          .run(`review: ${verdict.reason}`, item.id);
+          .run(`${priorReview}review (attempt ${attemptsSoFar + 1}): ${verdict.reason}`, item.id);
         handle.db.query("UPDATE work SET state = 'ready' WHERE id = ?").run(item.id);
       } finally {
         handle.close();
       }
-      return note(options, item, { outcome: "changes-requested", reason: verdict.reason });
+      return note(options, item, { outcome: "changes-requested", reason: verdict.reason }, "", attemptsSoFar + 1);
     }
     return note(options, item, {
       outcome: "rejected",
-      reason: changes ? `still not right after the one retry: ${verdict.reason}` : verdict.reason,
+      // Says what it was told to fix and how many chances it had, because an
+      // item sitting in the blocked queue with "rejected" and nothing else has
+      // told the operator nothing.
+      reason: changes
+        ? `still not right after ${attemptsSoFar} retr${attemptsSoFar === 1 ? "y" : "ies"}: ${verdict.reason}`
+        : verdict.reason,
     });
   }
 
@@ -170,7 +213,13 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
  * that returned without recording, and a rejected item nobody records is an
  * item nobody skips.
  */
-function note(options: LandOptions, item: WorkItem, outcome: LandOutcome, landedSha = ""): LandOutcome {
+function note(
+  options: LandOptions,
+  item: WorkItem,
+  outcome: LandOutcome,
+  landedSha = "",
+  attempts = 0,
+): LandOutcome {
   const handle = openWork(options.stateDir);
   try {
     recordReview(handle, {
@@ -179,6 +228,7 @@ function note(options: LandOptions, item: WorkItem, outcome: LandOutcome, landed
       reason: outcome.reason,
       branch: `cod/${item.id}`,
       landedSha,
+      attempts,
     });
   } finally {
     handle.close();

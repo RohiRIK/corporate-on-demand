@@ -152,6 +152,7 @@ async function governanceTick(workspace: Workspace): Promise<void> {
         repo: WORK_REPO,
         stateDir: STATE_DIR,
         landingRepo: workspace.landing === undefined ? undefined : "/landing",
+        maxRetries: workspace.governance.maxReviewRetries,
         ask: async (prompt) => {
           const out = await runAgent(
             { name: `review-${id}`, agent: "reviewer", task: prompt, schedule: "0 0 1 1 *", enabled: true, expectTools: false },

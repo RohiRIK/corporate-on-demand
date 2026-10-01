@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { openWork, propose, get, latestReview } from "../src/work";
 import { landWork } from "../src/land";
+import { briefFor } from "../src/runwork";
 
 /**
  * The only code in the project that merges.
@@ -115,25 +116,52 @@ describe("landWork", () => {
     expect(updated?.state).toBe("ready");
   });
 
-  test("a second request-changes is NOT retried again", async () => {
-    // One retry is the whole policy. A company that argues with a reviewer for
-    // ever is a company that never converges.
+  test("the retry count comes from the RECORD, so it survives a restart", async () => {
+    // This used to assert the opposite - "a second request-changes is NOT
+    // retried again" - because one retry WAS the policy. It is not any more: a
+    // rejection is only valid if the system then demands a fix and works on it.
+    // The invariant that actually matters is that the count is durable, so the
+    // cap cannot be reset by a restart into an infinite loop.
+    //
+    // `openWork` is called fresh between attempts precisely to stand in for the
+    // supervisor dying and coming back: the count lives in the database, not in
+    // anything a process was holding.
     const dir = repo();
     const state = stateDir();
     const { id } = seeded(state);
     branchWith(dir, `cod/${id}`, "notes/a.md", "v1\n");
-    const handle = openWork(state);
-    const first = get(handle, id);
-    handle.close();
-    await landWork(dir, first!, { ...opts, repo: dir, stateDir: state, ask: async () => "request changes - still no test" });
-    const handle2 = openWork(state);
-    const second = get(handle2, id);
-    handle2.close();
-    const result = await landWork(dir, second!, { ...opts, repo: dir, stateDir: state, ask: async () => "request changes - still no test" });
-    expect(result.outcome).toBe("rejected");
-    expect(result.reason).toContain("one retry");
+    const land = async (): Promise<string> => {
+      const h = openWork(state);
+      const item = get(h, id);
+      h.close();
+      return (await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, maxRetries: 2, ask: async () => "request changes - still no test" })).outcome;
+    };
+    expect(await land()).toBe("changes-requested");
+    // A "restart" happened. The count did not.
+    expect(await land()).toBe("changes-requested");
+    // And the cap still ends it, across that same restart boundary.
+    expect(await land()).toBe("rejected");
   });
 
+  test("when the retries run out the reason says how many chances it had", async () => {
+    // An item in the blocked queue reading only "rejected" has told the
+    // operator nothing about why it is there or how hard it tried.
+    const dir = repo();
+    const state = stateDir();
+    const { id } = seeded(state);
+    branchWith(dir, `cod/${id}`, "notes/a.md", "v1\n");
+    const h = openWork(state);
+    const item = get(h, id);
+    h.close();
+    const first = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, maxRetries: 1, ask: async () => "request changes - no test" });
+    const h2 = openWork(state);
+    const second = get(h2, id);
+    h2.close();
+    const result = await landWork(dir, second!, { ...opts, repo: dir, stateDir: state, maxRetries: 1, ask: async () => "request changes - still no test" });
+    expect(result.outcome).toBe("rejected");
+    expect(result.reason).toContain("retr");
+    expect(result.reason).toContain("no test");
+  });
   test("a branch that changed nothing is skipped, not merged", async () => {
     const dir = repo();
     const state = stateDir();
