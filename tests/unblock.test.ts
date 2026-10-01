@@ -5,15 +5,16 @@ import { join } from "node:path";
 import { openWork, propose, blockedWork, latestReview, recordReview, clearReview } from "../src/work";
 
 /**
- * A rejection a human cannot clear is not a queue, it is a wall.
+ * `cod work unblock` must not destroy the verdict it was called to act on.
  *
- * `cod work blocked` showed the reason and offered no way forward except
- * re-dispatching by hand - and re-dispatching did nothing, because the tick
- * skips anything judged terminally. So the item was stuck: visible, explained,
- * and impossible to act on.
+ * The review table exists because "a verdict nobody recorded is a verdict
+ * nobody keeps" - and clearReview used to DELETE the row. That made an
+ * unblocked item indistinguishable from a brand new one: after
+ * `cod work unblock <id>` there was no way left to answer "was this ever
+ * rejected?", which is the one question an audit trail exists for.
  *
- * Deliberately MANUAL. An automatic clear would let a rejected item re-enter the
- * queue on its own, which is the company arguing with itself.
+ * Clearing now ARCHIVES: the row survives as `cleared`, carrying the rejection
+ * it was cleared from.
  */
 
 const dirs: string[] = [];
@@ -23,40 +24,53 @@ function scratch(): string {
   return dir;
 }
 
-describe("clearReview", () => {
-  test("a rejected item leaves the queue when a person clears it", () => {
-    const dir = scratch();
-    const handle = openWork(dir);
-    const made = propose(handle, { from: "engineering", to: "engineering", kind: "task", payload: "a", goal: "a" });
-    if (!made.ok || made.item === undefined) throw new Error("seed");
-    recordReview(handle, { workId: made.item.id, outcome: "rejected", reason: "no test", branch: `cod/${made.item.id}`, landedSha: "" });
-    expect(blockedWork(handle)).toHaveLength(1);
+function seed(outcome: "rejected" | "landed" | "changes-requested" | "cleared" = "rejected") {
+  const dir = scratch();
+  const handle = openWork(dir);
+  const made = propose(handle, { from: "engineering", to: "engineering", kind: "task", payload: "a", goal: "a" });
+  if (!made.ok || made.item === undefined) throw new Error("seed");
+  recordReview(handle, { workId: made.item.id, outcome, reason: "no test was added", branch: `cod/${made.item.id}`, landedSha: outcome === "landed" ? "abc123" : "" });
+  return { dir, handle, id: made.item.id };
+}
 
-    const cleared = clearReview(handle, made.item.id, "operator says the test exists now");
-    expect(cleared.ok).toBe(true);
-    expect(latestReview(handle, made.item.id)).toBeNull();
+describe("clearing a rejection", () => {
+  test("a rejected item leaves the queue", () => {
+    const { handle, id } = seed();
+    expect(blockedWork(handle)).toHaveLength(1);
+    expect(clearReview(handle, id, "operator: the test exists now").ok).toBe(true);
     expect(blockedWork(handle)).toHaveLength(0);
     handle.close();
   });
 
-  test("clearing records WHO cleared it and WHY, in the reason", () => {
-    // The ledger must not simply forget. An item that was refused and then
-    // un-refused needs to say so, or the next rejection looks like the first.
-    const dir = scratch();
-    const handle = openWork(dir);
-    const made = propose(handle, { from: "engineering", to: "engineering", kind: "task", payload: "a", goal: "a" });
-    if (!made.ok || made.item === undefined) throw new Error("seed");
-    recordReview(handle, { workId: made.item.id, outcome: "rejected", reason: "no test", branch: "", landedSha: "" });
-    clearReview(handle, made.item.id, "operator: the test exists now");
-    handle.db.query("UPDATE work SET reason = ? WHERE id = ?").run("cleared by operator: the test exists now", made.item.id);
-    const row = handle.db.query("SELECT reason FROM work WHERE id = ?").get(made.item.id) as { reason: string };
+  test("THE VERDICT IS KEPT - you can still ask whether it was ever rejected", () => {
+    // The defect: DELETE made this unanswerable.
+    const { handle, id } = seed();
+    clearReview(handle, id, "operator: the test exists now");
+    const row = latestReview(handle, id);
+    expect(row).not.toBeNull();
+    expect(row?.outcome).toBe("cleared");
+    expect(row?.reason).toContain("no test was added");
+    expect(row?.reason).toContain("cleared by operator");
     handle.close();
-    expect(row.reason).toContain("cleared by operator");
   });
 
-  test("clearing an item that was never reviewed is a NAMED failure", () => {
-    // Not a silent success: "nothing to clear" and "cleared" are different
-    // answers and the operator needs to know which they got.
+  test("the review's own outcome is recorded in the archive, not inferred", () => {
+    const { handle, id } = seed();
+    clearReview(handle, id, "operator looks again");
+    expect(latestReview(handle, id)?.reason).toContain("was rejected");
+    handle.close();
+  });
+
+  test("clearing writes the operator's reason onto the item", () => {
+    const { handle, id } = seed();
+    clearReview(handle, id, "the test exists now");
+    const row = handle.db.query("SELECT reason FROM work WHERE id = ?").get(id) as { reason: string };
+    handle.close();
+    expect(row.reason).toContain("cleared by operator");
+    expect(row.reason).toContain("the test exists now");
+  });
+
+  test("an item never reviewed cannot be cleared, and says so", () => {
     const dir = scratch();
     const handle = openWork(dir);
     const made = propose(handle, { from: "engineering", to: "engineering", kind: "task", payload: "a", goal: "a" });
@@ -67,25 +81,29 @@ describe("clearReview", () => {
     handle.close();
   });
 
-  test("clearing a LANDED item is refused - that work is in master", () => {
-    // The most important refusal here. Un-blocking something already merged
-    // would put it back in the queue and re-land it on top of itself.
-    const dir = scratch();
-    const handle = openWork(dir);
-    const made = propose(handle, { from: "engineering", to: "engineering", kind: "task", payload: "a", goal: "a" });
-    if (!made.ok || made.item === undefined) throw new Error("seed");
-    recordReview(handle, { workId: made.item.id, outcome: "landed", reason: "merged", branch: "", landedSha: "abc123" });
-    const result = clearReview(handle, made.item.id, "let me have another go");
+  test("a LANDED item is refused - that work is already in master", () => {
+    const { handle, id } = seed("landed");
+    const result = clearReview(handle, id, "let me have another go");
     expect(result.ok).toBe(false);
-    // Case-insensitively, and asserted on the CONSEQUENCE not just the word: the
-    // reason has to say what would go wrong, or the operator cannot tell this
-    // refusal from a typo.
     expect((result.reason ?? "").toLowerCase()).toContain("landed");
-    expect(result.reason).toContain("merge it twice");
+    // AND the verdict survives the refusal.
+    expect(latestReview(handle, id)?.outcome).toBe("landed");
     handle.close();
   });
 
-  test("clearing an unknown id is a named failure", () => {
+  test("clearing TWICE is refused the second time, and history accumulates", () => {
+    // The second unblock must not silently discard the first one.
+    const { handle, id } = seed();
+    expect(clearReview(handle, id, "first look").ok).toBe(true);
+    const second = clearReview(handle, id, "second look");
+    expect(second.ok).toBe(false);
+    const row = latestReview(handle, id);
+    expect(row?.reason).toContain("first look");
+    expect(row?.reason).not.toContain("second look");
+    handle.close();
+  });
+
+  test("an unknown id is a named failure", () => {
     const dir = scratch();
     const handle = openWork(dir);
     expect(clearReview(handle, "w-nope", "x").ok).toBe(false);

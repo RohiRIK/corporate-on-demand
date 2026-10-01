@@ -398,7 +398,15 @@ export function claim(handle: WorkDb, owner: string, toAgent?: string): WorkItem
 /** One review verdict, as recorded. The durable answer to "was this looked at". */
 export interface ReviewRecord {
   readonly workId: string;
-  readonly outcome: "landed" | "changes-requested" | "rejected" | "skipped";
+  /**
+   * `cleared` is an ARCHIVED verdict, not a live one.
+   *
+   * A person unblocked the item; the row survives so the rejection can still be
+   * read back. It is not a terminal state - landWork and the governance filter
+   * both pass it through - but it is history, and `blockedWork` excludes it so a
+   * cleared item leaves the queue.
+   */
+  readonly outcome: "landed" | "changes-requested" | "rejected" | "skipped" | "cleared";
   readonly reason: string;
   readonly branch: string;
   readonly landedSha: string;
@@ -496,10 +504,25 @@ export function clearReview(handle: WorkDb, id: string, note: string): { ok: boo
   if (previous.outcome === "landed") {
     return { ok: false, reason: `${id} was already LANDED (${previous.landedSha || "no sha"}); clearing it would merge it twice` };
   }
-  handle.db.query("DELETE FROM review WHERE work_id = ?").run(id);
-  if (note.trim() !== "") {
-    handle.db.query("UPDATE work SET reason = ? WHERE id = ?").run(`cleared by operator: ${note.trim()}`, id);
+  // Refused rather than allowed: clearing something already cleared would
+  // archive the operator's OWN note instead of the verdict, and the second note
+  // would be lost with the error message nobody reads.
+  if (previous.outcome === "cleared") {
+    return { ok: false, reason: `${id} was already cleared: ${previous.reason}` };
   }
+
+  // ARCHIVE, not delete.
+  //
+  // This used to be `DELETE FROM review`, which made an unblocked item
+  // indistinguishable from a brand new one - after `cod work unblock` there was
+  // no way left to ask whether the item had ever been rejected, which is the
+  // single question an audit trail exists to answer. The row survives, carrying
+  // both the verdict it was cleared from and the operator's reason.
+  const operatorNote = note.trim() === "" ? "cleared by operator" : `cleared by operator: ${note.trim()}`;
+  handle.db
+    .query("UPDATE review SET outcome = 'cleared', reason = ? WHERE work_id = ?")
+    .run(`cleared by operator: ${note.trim() || "no reason given"} | was ${previous.outcome}: ${previous.reason}`, id);
+  handle.db.query("UPDATE work SET reason = ? WHERE id = ?").run(operatorNote, id);
   return { ok: true };
 }
 
