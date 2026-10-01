@@ -633,3 +633,16 @@ code is worth nothing.
   container sets a global identity and the runner does not. Real, not a test
   artefact.
 - 560 tests, `verify.sh` PASS with no global git identity.
+
+## Unreleased - a rejection is a demand for a fix, and the fix gets worked on
+
+- **A retried item is now BRIEFED with the reviewer's objection.** It never was:
+  `landWork` wrote the words onto `work.reason` and nothing read it, so a retry
+  re-ran the identical prompt.
+- **`maxRetries` above 1 was inert** - `alreadyRetried` was a boolean. Now a
+  durable integer, default 3, configurable via `governance.maxReviewRetries`.
+- **Objections accumulate** across attempts instead of overwriting.
+- **A mechanical finding is terminal at any cap**, before the model is asked.
+- **`cod work unblock` archives rather than deletes** the verdict, so an
+  unblocked item is no longer indistinguishable from a new one.
+- 583 tests. Every new guard mutation-verified; two gaps found and closed.

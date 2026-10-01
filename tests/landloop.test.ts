@@ -65,13 +65,19 @@ function stateDir(): string {
 }
 
 /** Land the same item repeatedly, as the governance tick would. */
-function lander(dir: string, state: string, id: string, maxRetries: number, answer: (why: string) => string) {
+function lander(dir: string, state: string, id: string, maxRetries: number | undefined, answer: (why: string) => string) {
   return async (why: string) => {
     const h = openWork(state);
     const item = get(h, id);
     h.close();
     if (item === null) throw new Error(`item ${id} vanished`);
-    return landWork(dir, item, { repo: dir, stateDir: state, maxRetries, ask: async () => answer(why) });
+    // `maxRetries` is spread in only when supplied, so a test can exercise the
+    // DEFAULT rather than always pinning the value.
+    const options =
+      maxRetries === undefined
+        ? { repo: dir, stateDir: state, ask: async () => answer(why) }
+        : { repo: dir, stateDir: state, maxRetries, ask: async () => answer(why) };
+    return landWork(dir, item, options);
   };
 }
 
@@ -156,6 +162,43 @@ describe("the review loop", () => {
     branchWith(dir, `cod/${id}`, "notes/a.md", "v1" + NL);
     const land = lander(dir, state, id, 0, () => "request changes - no test");
     expect((await land("only chance")).outcome).toBe("rejected");
+  });
+
+  test("the DEFAULT cap is three when the caller states none", async () => {
+    // Mutation found this: every other test passes maxRetries explicitly, so
+    // the fallback was never exercised and could be changed to 1 undetected.
+    // An operator who configures nothing must still get the real policy.
+    const dir = repo();
+    const state = stateDir();
+    const id = seeded(state);
+    branchWith(dir, `cod/${id}`, "notes/a.md", "v1" + NL);
+    const land = lander(dir, state, id, undefined as unknown as number, () => "request changes - no");
+
+    expect((await land("a")).outcome).toBe("changes-requested");
+    expect((await land("b")).outcome).toBe("changes-requested");
+    expect((await land("c")).outcome).toBe("changes-requested");
+    expect((await land("d")).outcome).toBe("rejected");
+  });
+
+  test("a mechanical refusal does not even ASK the model", async () => {
+    // Mutation found this too: judgeReview happened to reject mechanical
+    // findings anyway, so deleting the early return changed nothing. The thing
+    // that actually matters is that no model is consulted about a rule - that
+    // is the whole promise of "no model may override a mechanical check", and
+    // it must not depend on the reviewer's prompt handling the same rule.
+    const dir = repo();
+    const state = stateDir();
+    const id = seeded(state);
+    branchWith(dir, `cod/${id}`, "package.json", "{}" + NL);
+    let asked = 0;
+    const land = lander(dir, state, id, 5, () => {
+      asked += 1;
+      return "approve - fine by me";
+    });
+
+    const result = await land("only chance");
+    expect(result.outcome).toBe("rejected");
+    expect(asked).toBe(0);
   });
 
   test("the loop converges: an approved retry still lands", async () => {

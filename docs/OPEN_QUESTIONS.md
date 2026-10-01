@@ -470,3 +470,33 @@ The pattern is a text replacement whose anchor silently does not match. The fix
 is not to trust the return value of an edit - it is to assert on the result.
 `tests/docs.test.ts` now checks that OPEN_QUESTIONS.md contains no heading
 starting with "Open:" while every implementation it claims has a test.
+
+## Closed: a rejection stopped the work instead of fixing it (2026-10-01)
+
+Reported as "only one retry". It was worse than the count, and the count was
+the smaller half.
+
+**The retry was never briefed.** `landWork` wrote the reviewer's words onto
+`work.reason` and nothing read it - the brief came from `textOfItem`, which
+reads `payload` only. Premise checked before the fix:
+`grep -c 'item.reason'` returned `0` in `runwork.ts`, `supervisor.ts` and
+`run-work-cli.ts`. So attempt two received the identical prompt and could not
+know what it had done wrong.
+
+**`maxRetries` above 1 was inert.** `alreadyRetried` was a boolean and a boolean
+cannot count, so every value except 1 was decoration. It is now a durable
+integer on the review row, which is also what stops a restart resetting the cap
+into an infinite loop.
+
+Now: `briefFor` puts every accumulated objection in the brief; the cap defaults
+to 3 and is `governance.maxReviewRetries` (0-10); objections accumulate; and a
+mechanical finding is terminal at any cap, before the model is asked.
+
+Two mutations were NOT detected at first and both were real gaps, not bad
+mutants: the fallback cap was never exercised because every test pinned it
+explicitly, and the mechanical early-return in `land.ts` was dead code -
+`judgeReview` already short-circuits. The duplicate was deleted rather than
+given a test, and deleting the real one inside `judgeReview` now fails three.
+
+An existing test asserted the OLD policy and failed correctly. It was rewritten,
+not deleted: the invariant that matters is that the count is DURABLE.

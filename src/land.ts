@@ -6,9 +6,19 @@
  * which no model may override, and once by the radius.
  *
  * **The retry lives here and only here.** A `request-changes` verdict puts the
- * item back to `ready` with the reviewer's words as its brief, once. After that
- * it is left alone: a company that argues with a reviewer forever is a company
- * that never converges, and one retry is the whole policy.
+ * item back to `ready` with the reviewer's words as its brief, up to
+ * DEFAULT_MAX_RETRIES times; every objection accumulates so a later attempt sees
+ * the earlier ones too. The count is durable, so a restart cannot reset the cap
+ * into an endless loop.
+ *
+ * The earlier version of this comment claimed the retry was "briefed by the
+ * reviewer's words". It was not - nothing read `work.reason`, and the brief came
+ * from the payload alone, so a retry re-ran the identical prompt. The comment
+ * was true for about one commit. `briefFor` in src/runwork.ts is what makes it
+ * true.
+ *
+ * A MECHANICAL finding is never retried at any cap: judgeReview returns before
+ * it asks the model, because a global path is a rule rather than an opinion.
  *
  * A merge is not idempotent by accident, so `landedBranches` remembers what has
  * already gone in for the life of the process.
@@ -109,20 +119,15 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
 
   const mechanical = mechanicalChecks(diff);
 
-  // Terminal BEFORE the model is asked, whatever the retry cap is.
+  // A mechanical finding is terminal BEFORE the model is asked, whatever the
+  // retry cap is - a global path is a rule, not an opinion, and looping it
+  // invites the worker to argue with a deterministic check.
   //
-  // A global path, a secret shape or a forbidden action is a RULE, not an
-  // opinion. Sending it back would invite the worker to argue with a
-  // deterministic check and spend a free model call doing it. And it is not
-  // recorded as review feedback, because briefFor would then present a rule
-  // violation as something the worker can negotiate.
-  if (!mechanical.ok) {
-    return note(options, item, {
-      outcome: "rejected",
-      reason: `refused before review: ${mechanical.findings.join("; ")}`,
-    });
-  }
-
+  // That guarantee lives in judgeReview, which returns `reject` without ever
+  // calling `ask`. It was duplicated here first, and mutation testing is what
+  // proved the copy was dead: deleting this early return changed no test, while
+  // deleting the one inside judgeReview broke three. One implementation of a
+  // rule, in the place that owns it.
   const verdict = await judgeReview({ diff, task: item.payload, mechanical, ask: options.ask });
 
   const radius = item.blast_radius ?? 0;
