@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
 
 /**
  * A merge that depends on an AMBIENT git identity works on my machine and fails
@@ -18,7 +19,13 @@ import { execFileSync, spawnSync } from "node:child_process";
  * have hidden exactly the thing that broke.
  */
 
-const REPO = "/home/rohi/homelab/projects/corporate-on-demand";
+// Resolved from this file, not hardcoded.
+//
+// The first version hardcoded my local bun path, and it passed on my machine
+// and returned EMPTY on CI - which failed for the fourth time in a row on a
+// test whose whole purpose was to work somewhere else. `process.execPath` is
+// the bun running these tests, so it is correct on every machine.
+const REPO = resolve(import.meta.dir, "..");
 
 function land(): string {
   // GIT_CONFIG_GLOBAL=/dev/null removes every global setting.
@@ -28,7 +35,7 @@ function land(): string {
   // only and asserted against a version banner, which passed nothing and failed
   // for the wrong reason.
   const r = spawnSync(
-    "/home/rohi/.local/bin/bun",
+    process.execPath,
     ["test", "./tests/land.test.ts", "-t", "an approved change is merged into master"],
     {
       encoding: "utf8",
