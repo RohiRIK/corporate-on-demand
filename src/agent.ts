@@ -60,15 +60,28 @@ export type CommandRunner = (
 /**
  * The real runner: spawn `opencode` here, in this container.
  *
- * `sh -lc` rather than execFile-with-args so the prompt can be a single
- * JSON-quoted word, which is how buildArgs emits it. The exit code comes from
- * the shell, so a non-zero opencode exit is visible rather than swallowed.
+ * NO SHELL. An argv array, so an argument is an argument.
  *
+ * The exit code comes from `proc.exited`, so a non-zero model exit is visible
+ * without a shell in the path.
  * No `cd`: the supervisor's working directory is already the work volume, and
  * hardcoding one would silently run agents somewhere they did not ask to work.
  */
 export const localRunner: CommandRunner = async (args, timeoutMs, cwd) => {
-  const proc = Bun.spawn(["sh", "-lc", args.join(" ")], {
+  // NO SHELL. The argv array goes to execve as-is.
+  //
+  // This used to be `Bun.spawn(["sh", "-lc", args.join(" ")])`, on the stated
+  // grounds that "the prompt can be a single JSON-quoted word". That reasoning
+  // was wrong: JSON.stringify escapes `"` and not `$` or a backtick, so
+  // joining the arguments handed a shell a string in which model-authored text
+  // was live shell source.
+  //
+  // `sh -lc` is also slower (an extra process per agent run) and loses the
+  // ability to pass an argument containing a space as one argument.
+  //
+  // The exit code the old comment worried about losing is `proc.exited`, read
+  // directly below - tests/shellinject.test.ts pins it.
+  const proc = Bun.spawn([...args], {
     stdout: "pipe",
     stderr: "pipe",
     // Closed, not inherited. An inherited stdin is an open pipe the model

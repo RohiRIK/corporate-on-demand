@@ -171,10 +171,17 @@ describe("localRunner", () => {
   // absent - are asserted in the live test above, through `docker exec`,
   // because this suite also runs on the host in CI where both are reversed.
   test("reports a non-zero exit rather than swallowing it", async () => {
-    // The runner's contract: args are COMMAND TOKENS joined with spaces and run
-    // through `sh -lc`. So a shell metacharacter test passes one command string,
-    // not a nested `sh -lc`.
-    const probe = await localRunner(["echo out; echo err 1>&2; exit 3"], 20_000);
+    // The runner takes an argv array and spawns it DIRECTLY - no `sh -lc`.
+    //
+    // The old version of this test passed one joined string with `;` and `>&2`
+    // in it, which only worked because a shell was interpreting it. That shell
+    // was the vulnerability: `args.join(" ")` handed a shell a string in which
+    // the prompt was live shell source.
+    //
+    // The exit code the shell was supposedly there to preserve comes from
+    // `proc.exited`, and this test pins that so nobody reinstates a shell to
+    // get the property back.
+    const probe = await localRunner(["sh", "-c", "echo out; echo err 1>&2; exit 3"], 20_000);
     expect(probe.code).toBe(3);
     expect(probe.stdout).toContain("out");
     expect(probe.stderr).toContain("err");
@@ -191,7 +198,12 @@ describe("localRunner", () => {
     // The nested-exec regression, asserted where it can hold anywhere: the
     // runner must not reach for a docker binary, because the sandbox has none
     // and the supervisor runs inside it.
-    const probe = await localRunner(["echo no-docker-used"], 20_000);
+    // `printf`, not `echo`: with the shell gone there are no builtins, and
+    // `echo` was never a binary on disk. That is a real consequence of the fix
+    // and it is harmless here because the runner only ever spawns real binaries
+    // (kilo, opencode, git) - but it is exactly why several of these tests had
+    // to change rather than simply pass.
+    const probe = await localRunner(["printf", "%s", "no-docker-used"], 20_000);
     expect(probe.stdout.trim()).toBe("no-docker-used");
   });
 });

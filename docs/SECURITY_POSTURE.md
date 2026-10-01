@@ -163,3 +163,45 @@ The published `kilo` bin is a Node shim. This image ships no Node, so the shim
 is replaced with one that runs on bun. No network surface or capability is added
 by this: the engine is a child process of the supervisor, confined to its
 worktree by its working directory, exactly as `opencode` was.
+
+## Command injection through the prompt: found and fixed (2026-10-01)
+
+`agent.ts` spawned `sh -lc args.join(" ")` while `backend.ts` wrapped the prompt
+in `JSON.stringify`. JSON escaping and shell escaping are not the same thing:
+JSON escapes the double quote and leaves `$` and the backtick completely
+intact. The prompt therefore reached a shell as live shell source.
+
+Verified before fixing:
+
+    $ sh -lc 'echo "the value `echo EVALUATED` was wrong"'
+    the value EVALUATED was wrong
+
+Reachable with no operator-controlled configuration. On a review retry the
+prompt is the REVIEWER'S OWN MODEL-AUTHORED REJECTION TEXT:
+`land.ts` -> `work.reason` -> `briefFor` -> `cron.task` -> `buildPrompt`. A
+model writing a rejection reason containing a backtick obtained command
+execution inside the container. SEC-01/SEC-02 in `.security-review/`.
+
+Fixed by removing the shell entirely: the prompt is passed RAW as one argv
+element and `Bun.spawn` receives the array. There is no shell to escape for,
+so the whole class of bug is gone rather than mitigated.
+
+Three existing tests had to change rather than simply pass, and one of them is
+worth naming:
+
+- `the prompt is JSON-quoted, so a task with quotes cannot break the shell`
+  asserted the exact false belief the bug depended on. JSON escaping looks like
+  shell escaping and is not. Rewritten to assert the real property.
+- Two runner tests relied on `sh -lc` providing shell builtins and `;`. With no
+  shell, `echo` is no longer a binary and must be `printf`. Harmless - the
+  runner only ever spawns real binaries - but it is why they changed.
+- The non-zero exit code the shell was allegedly there to preserve comes from
+  `proc.exited`. Pinned by test so nobody reinstates a shell to get it back.
+
+Also: `rm -rf`, inline `node -e`/`python3 -c`, `bash -c` and `$(...)` all trip
+the security scanner during delegated runs and block the agent mid-task. Four
+dispatches hit this during one review round. Agents must be briefed with these
+constraints up front rather than discovering them.
+
+Live re-verified after the change: a real credential-free model call through
+the new argv path, exit 0, cost 0.

@@ -11,7 +11,7 @@ describe("the two engines", () => {
     // nobody notices, because the failure looks like a provider outage.
     expect(buildFor("opencode", "opencode/space-bunny-free", "hi", "cod-author")).toEqual([
       "opencode", "run", "--pure", "--auto", "--format", "json",
-      "-m", "opencode/space-bunny-free", "--title", "cod-author", '"hi"',
+      "-m", "opencode/space-bunny-free", "--title", "cod-author", "hi",
     ]);
   });
 
@@ -34,9 +34,31 @@ describe("the two engines", () => {
     }
   });
 
-  test("the prompt is JSON-quoted, so a task with quotes cannot break the shell", () => {
-    const args = buildFor("kilo", "kilo/kilo-auto/free", 'say "hi" now', "cod-x");
-    expect(args[args.length - 1]).toBe(JSON.stringify('say "hi" now'));
+  test("the prompt is passed RAW, because there is no shell to escape for", () => {
+    // This test used to assert the opposite: that the prompt was JSON-quoted
+    // "so a task with quotes cannot break the shell".
+    //
+    // That was the exact bug, and the test was its cover story. JSON.stringify
+    // escapes the double quote and NOTHING ELSE - `$`, the backtick and `\` all
+    // pass through untouched - so a JSON-quoted prompt inside `sh -lc` is
+    // still shell source. Proven:
+    //
+    //   $ sh -lc 'echo "the value `echo EVALUATED` was wrong"'
+    //   the value EVALUATED was wrong
+    //
+    // The prompt on a review retry is the reviewer's own model-authored
+    // rejection text, so this was reachable with no operator configuration at
+    // all. See tests/shellinject.test.ts.
+    const prompt = 'say "hi" now';
+    const args = buildFor("kilo", "kilo/kilo-auto/free", prompt, "cod-x");
+    expect(args[args.length - 1]).toBe(prompt);
+  });
+
+  test("a prompt full of shell metacharacters survives untouched", () => {
+    // The property the old test thought it was checking, actually checked.
+    const prompt = "use `id`, $(whoami), $HOME, a\\b and \"quotes\"";
+    const args = buildFor("kilo", "kilo/kilo-auto/free", prompt, "cod-x");
+    expect(args[args.length - 1]).toBe(prompt);
   });
 
   test("BOTH engines grant tool use", () => {

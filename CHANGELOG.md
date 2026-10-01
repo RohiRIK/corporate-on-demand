@@ -655,3 +655,12 @@ code is worth nothing.
 - **`--override` records an `OPERATOR OVERRIDE`**, never a resolution, so the
   record cannot imply the reviewer changed their mind.
 - 587 tests.
+
+## Unreleased - the prompt is data, not shell source
+
+- **SEC-01/SEC-02 fixed.** `sh -lc args.join(" ")` with a `JSON.stringify`-quoted
+  prompt meant model-authored text reached a shell as executable source. The
+  prompt on a review retry is the reviewer's own rejection text, so this was
+  reachable with no operator configuration. The shell is gone; the prompt is
+  one argv element.
+- 595 tests.

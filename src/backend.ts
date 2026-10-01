@@ -146,5 +146,17 @@ export function buildFor(backendId: string, model: string, prompt: string, title
   // in afterwards would produce a command that parses and then misbehaves,
   // which is worse than one that fails loudly.
   const args = [backend.bin, "run", "--pure", ...backend.extra, "--format", "json", "-m", model, "--title", title];
-  return [...args, JSON.stringify(prompt)];
+  // RAW, not JSON.stringify(prompt).
+  //
+  // This argument used to be JSON-quoted because the runner joined everything
+  // into `sh -lc`. JSON escaping and shell escaping are not the same thing:
+  // JSON escapes the double quote and leaves `$` and the backtick completely
+  // intact. The prompt therefore reached a shell as shell SOURCE, and the
+  // prompt on a review retry is the REVIEWER'S OWN MODEL-AUTHORED REJECTION
+  // TEXT. A model writing a reason containing a backtick got command execution
+  // inside the container, with no operator-controlled configuration involved.
+  //
+  // There is no shell now, so the raw string is passed as one argv element and
+  // cannot be reinterpreted. Proven in tests/shellinject.test.ts.
+  return [...args, prompt];
 }
