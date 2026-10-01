@@ -109,7 +109,7 @@ describe("the review record", () => {
     const dir = repo();
     const state = stateDir();
     const { id } = seeded(state);
-    branchWith(dir, `cod/${id}`, "notes/a.md", 'key = "sk-live-abc123def456"\n');
+    branchWith(dir, `cod/${id}`, "notes/a.md", 'key = "REDACTED-fixture-secret"\n');
     const handle = openWork(state);
     const item = get(handle, id);
     handle.close();
@@ -276,7 +276,7 @@ describe("a rejected item is reviewed ONCE", () => {
     const dir = repo();
     const state = stateDir();
     const { id } = seeded(state);
-    branchWith(dir, `cod/${id}`, "notes/a.md", 'key = "sk-live-abc123def456"\n');
+    branchWith(dir, `cod/${id}`, "notes/a.md", 'key = "REDACTED-fixture-secret"\n');
     const handle = openWork(state);
     const item = get(handle, id);
     handle.close();

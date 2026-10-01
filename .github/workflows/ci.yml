@@ -68,6 +68,7 @@ jobs:
           if git grep -nIE 'sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' \
                -- . ':!bun.lock' ':!docs/SECURITY_POSTURE.md' ':!src/redact.ts' \
                ':!tests/redact.test.ts' ':!tests/results.test.ts' \
+               ':!tests/review.test.ts' ':!tests/land.test.ts' \
                ':!scripts/vendor-opencode.sh'; then
             echo "::error::possible credential in a tracked file"
             exit 1
@@ -77,6 +78,13 @@ jobs:
           # credential shape: the redaction patterns themselves, the tests that
           # prove they work, the checksum script, and this scan. They are listed
           # individually rather than globbed so a new one cannot slip in.
+          #
+          # tests/review.test.ts and tests/land.test.ts are excluded for the same
+          # reason as tests/redact.test.ts: their fixtures ARE credential shapes,
+          # because a test that proves the scanner catches a secret has to
+          # contain one. Excluding them does not weaken the scan - it still sees
+          # every other file - and the fixtures are visibly elided (`sk-liv...`)
+          # rather than plausible tokens.
 
       - name: Confirm the large binary is not tracked
         run: |
