@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openWork, propose, listWork, get, commit } from "../src/work";
+import { openWork, propose, listWork, get, commit, recordReview } from "../src/work";
 import { runGovernance, governanceIntervalFor } from "../src/governance";
 import type { Workspace } from "../src/workspace";
 
@@ -138,6 +138,69 @@ describe("runGovernance", () => {
     // count GROWS. It is that no ITEM is ever dispatched twice. An unattended
     // loop that re-runs finished work is a company that never gets anywhere.
     expect(new Set(ran).size).toBe(ran.length);
+  });
+
+  test("the tick does not re-offer work it has already reviewed", async () => {
+    const dir = scratch();
+    const reviewed: string[] = [];
+    // The lander RECORDS, exactly as src/land.ts does. A fake that only
+    // returns a verdict tests a fiction: the tick filters on the record, so a
+    // lander that writes nothing leaves the item offered for ever, which is the
+    // bug rather than the fix.
+    const land = async (id: string) => {
+      reviewed.push(id);
+      const handle = openWork(dir);
+      try {
+        recordReview(handle, { workId: id, outcome: "rejected", reason: "not good enough", branch: `cod/${id}`, landedSha: "" });
+      } finally {
+        handle.close();
+      }
+      return { outcome: "rejected" as const, reason: "not good enough" };
+    };
+    // The dispatcher COMMITS, or nothing is ever `done` and the tick has nothing
+    // to land - which made this test pass with nothing to assert.
+    const dispatch = async (id: string) => {
+      const handle = openWork(dir);
+      try {
+        const item = get(handle, id);
+        if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
+      } finally {
+        handle.close();
+      }
+      return { ok: true, output: "done" };
+    };
+    const run = () => runGovernance(workspace, dir, { ...opts, dispatch, land });
+    await run(); await run(); await run();
+    expect(reviewed.length).toBeGreaterThan(0);   // not vacuous
+    // The lander is idempotent by contract, but the tick should not be LEANING
+    // on that: three ticks, and the same rejected branch is not offered again.
+    expect(new Set(reviewed).size).toBe(reviewed.length);
+  });
+
+  test("a rejected item appears in the tick's report, not silently", async () => {
+    const dir = scratch();
+    const land = async (id: string) => {
+      const handle = openWork(dir);
+      try {
+        recordReview(handle, { workId: id, outcome: "rejected", reason: "no test", branch: `cod/${id}`, landedSha: "" });
+      } finally {
+        handle.close();
+      }
+      return { outcome: "rejected" as const, reason: "no test" };
+    };
+    const dispatch = async (id: string) => {
+      const handle = openWork(dir);
+      try {
+        const item = get(handle, id);
+        if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
+      } finally {
+        handle.close();
+      }
+      return { ok: true, output: "done" };
+    };
+    await runGovernance(workspace, dir, { ...opts, dispatch, land });
+    const report = await runGovernance(workspace, dir, { ...opts, dispatch, land });
+    expect(report.landed.some((l) => l.outcome === "rejected")).toBe(true);
   });
 
   test("a MEETING does not manufacture work every time it runs", async () => {

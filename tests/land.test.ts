@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { openWork, propose, get } from "../src/work";
+import { openWork, propose, get, latestReview } from "../src/work";
 import { landWork } from "../src/land";
 
 /**
@@ -154,9 +154,12 @@ describe("landWork", () => {
     const item = get(handle, id);
     handle.close();
     await landWork(dir, item!, { ...opts, repo: dir, stateDir: dir });
+    // The reason now names the REVIEW verdict rather than a Set that no longer
+    // exists, and it says the branch as well as the verdict.
     const again = await landWork(dir, item!, { ...opts, repo: dir, stateDir: dir });
     expect(again.outcome).toBe("skipped");
-    expect(again.reason).toContain("already landed");
+    expect(again.reason).toContain("already reviewed");
+    expect(again.reason).toContain("landed");
   });
 
   test("an unreachable reviewer does NOT merge", async () => {
@@ -175,3 +178,125 @@ describe("landWork", () => {
 });
 
 for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+
+
+describe("the review record", () => {
+  test("a landed review is recorded and reads back", async () => {
+    const dir = repo();
+    const state = stateDir();
+    const { id } = seeded(state);
+    branchWith(dir, `cod/${id}`, "notes/a.md", "done\n");
+    const handle = openWork(state);
+    const item = get(handle, id);
+    handle.close();
+    await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
+
+    const after = openWork(state);
+    const record = latestReview(after, id);
+    after.close();
+    expect(record?.outcome).toBe("landed");
+    expect(record?.branch).toBe(`cod/${id}`);
+    expect(record?.reviewedAt ?? 0).toBeGreaterThan(0);
+  });
+
+  test("a REJECTED review is recorded too - this is the whole point", async () => {
+    const dir = repo();
+    const state = stateDir();
+    const { id } = seeded(state);
+    branchWith(dir, `cod/${id}`, "notes/a.md", 'key = "sk-live-abc123def456"\n');
+    const handle = openWork(state);
+    const item = get(handle, id);
+    handle.close();
+    const outcome = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
+
+    const after = openWork(state);
+    const record = latestReview(after, id);
+    after.close();
+    expect(outcome.outcome).toBe("rejected");
+    expect(record?.outcome).toBe("rejected");
+    expect(record?.reason).toContain("secret");
+  });
+
+  test("a skipped review is recorded as skipped, not as nothing", async () => {
+    const dir = repo();
+    const state = stateDir();
+    const { id } = seeded(state);
+    const handle = openWork(state);
+    const item = get(handle, id);
+    handle.close();
+    await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
+    const after = openWork(state);
+    expect(latestReview(after, id)?.outcome).toBe("skipped");
+    after.close();
+  });
+
+  test("a SECOND review overwrites the first, so the latest is authoritative", async () => {
+    const dir = repo();
+    const state = stateDir();
+    const { id } = seeded(state);
+    branchWith(dir, `cod/${id}`, "notes/a.md", "v1\n");
+    const handle = openWork(state);
+    const item = get(handle, id);
+    handle.close();
+    await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, ask: async () => "request changes - no test" });
+    await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, ask: async () => "approve - fine now" });
+    const after = openWork(state);
+    expect(latestReview(after, id)?.outcome).toBe("landed");
+    after.close();
+  });
+
+  test("latestReview is null for an item never reviewed", () => {
+    const state = stateDir();
+    const handle = openWork(state);
+    expect(latestReview(handle, "w-nope")).toBeNull();
+    handle.close();
+  });
+});
+
+
+describe("a rejected item is reviewed ONCE", () => {
+  test("a second land on a rejected item does not re-review it", async () => {
+    // The defect this exists for. landWork returned `rejected` without writing
+    // anything, so the item stayed `done` and the tick offered it again on every
+    // tick, burning a model call each time, for ever.
+    const dir = repo();
+    const state = stateDir();
+    const { id } = seeded(state);
+    branchWith(dir, `cod/${id}`, "notes/a.md", 'key = "sk-live-abc123def456"\n');
+    const handle = openWork(state);
+    const item = get(handle, id);
+    handle.close();
+
+    let asked = 0;
+    const ask = async (): Promise<string> => { asked += 1; return "approve, fine"; };
+    const first = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, ask });
+    expect(first.outcome).toBe("rejected");
+
+    const handle2 = openWork(state);
+    const again = get(handle2, id);
+    handle2.close();
+    const second = await landWork(dir, again!, { ...opts, repo: dir, stateDir: state, ask });
+    expect(second.outcome).toBe("skipped");
+    expect(second.reason).toContain("already reviewed");
+    expect(asked).toBe(0);
+  });
+
+  test("the guard survives a RESTART, because it is in the database", async () => {
+    // The process-scoped Sets emptied on every supervisor restart. This is the
+    // regression that proves they were the wrong home for it.
+    const dir = repo();
+    const state = stateDir();
+    const { id } = seeded(state);
+    branchWith(dir, `cod/${id}`, "notes/a.md", "done\n");
+    const handle = openWork(state);
+    const item = get(handle, id);
+    handle.close();
+    await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
+
+    const fresh = openWork(state);          // a "restart": nothing in memory
+    const reread = get(fresh, id);
+    fresh.close();
+    const second = await landWork(dir, reread!, { ...opts, repo: dir, stateDir: state });
+    expect(second.outcome).toBe("skipped");
+  });
+});

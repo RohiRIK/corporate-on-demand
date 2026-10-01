@@ -84,6 +84,25 @@ CREATE TABLE IF NOT EXISTS work (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_work_novelty ON work(novelty_key);
 CREATE INDEX IF NOT EXISTS ix_work_claim ON work(state, created_seq);
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+
+-- One row per work item: the LATEST review verdict.
+--
+-- This table exists because the verdict used to live in two module-level Sets
+-- in src/land.ts, which are empty after every supervisor restart. The
+-- consequence was that a REJECTED item - whose ledger row was never written -
+-- stayed done, was offered by the tick on every tick, and was re-reviewed by
+-- a model for ever. A verdict nobody recorded is a verdict nobody keeps.
+--
+-- IF NOT EXISTS because an existing database gains this on its next open, with
+-- no migration and no data movement.
+CREATE TABLE IF NOT EXISTS review (
+  work_id     TEXT PRIMARY KEY,
+  outcome     TEXT NOT NULL,
+  reason      TEXT NOT NULL,
+  branch      TEXT NOT NULL DEFAULT '',
+  landed_sha  TEXT NOT NULL DEFAULT '',
+  reviewed_at INTEGER NOT NULL
+);
 `;
 
 /**
@@ -376,6 +395,88 @@ export function claim(handle: WorkDb, owner: string, toAgent?: string): WorkItem
  * which is how a design decision turns into decoration: nothing tested it,
  * because nothing could observe it.
  */
+/** One review verdict, as recorded. The durable answer to "was this looked at". */
+export interface ReviewRecord {
+  readonly workId: string;
+  readonly outcome: "landed" | "changes-requested" | "rejected" | "skipped";
+  readonly reason: string;
+  readonly branch: string;
+  readonly landedSha: string;
+  readonly reviewedAt: number;
+}
+
+/**
+ * Record a review verdict, replacing any earlier one for the same item.
+ *
+ * An upsert rather than an append. The question being answered is "what is the
+ * CURRENT state of this item", and the branch plus its commits are a strictly
+ * better history than a second table would be.
+ */
+export function recordReview(
+  handle: WorkDb,
+  record: Omit<ReviewRecord, "reviewedAt"> & { readonly reviewedAt?: number },
+): void {
+  handle.db
+    .query(
+      `INSERT INTO review (work_id, outcome, reason, branch, landed_sha, reviewed_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(work_id) DO UPDATE SET
+         outcome = excluded.outcome,
+         reason = excluded.reason,
+         branch = excluded.branch,
+         landed_sha = excluded.landed_sha,
+         reviewed_at = excluded.reviewed_at`,
+    )
+    .run(
+      record.workId,
+      record.outcome,
+      record.reason,
+      record.branch,
+      record.landedSha,
+      record.reviewedAt ?? Date.now(),
+    );
+}
+
+/** The latest verdict for one item, or null if it has never been reviewed. */
+export function latestReview(handle: WorkDb, workId: string): ReviewRecord | null {
+  const row = handle.db
+    .query(
+      `SELECT work_id, outcome, reason, branch, landed_sha, reviewed_at
+         FROM review WHERE work_id = ?`,
+    )
+    .get(workId) as
+    | { work_id: string; outcome: string; reason: string; branch: string; landed_sha: string; reviewed_at: number }
+    | null;
+  if (row === null) return null;
+  return {
+    workId: row.work_id,
+    outcome: row.outcome as ReviewRecord["outcome"],
+    reason: row.reason,
+    branch: row.branch,
+    landedSha: row.landed_sha,
+    reviewedAt: row.reviewed_at,
+  };
+}
+
+/**
+ * Items whose latest review needs a PERSON.
+ *
+ * The queue that did not exist. An autonomous company still has to be able to
+ * say "I am stopping here, and this is why" - otherwise a rejection is
+ * indistinguishable from nothing happening at all.
+ */
+export function blockedWork(handle: WorkDb): { readonly item: WorkItem; readonly review: ReviewRecord }[] {
+  const rows = handle.db
+    .query(
+      `SELECT w.* FROM work w
+         JOIN review r ON r.work_id = w.id
+        WHERE r.outcome = 'rejected'
+        ORDER BY r.reviewed_at ASC`,
+    )
+    .all() as WorkItem[];
+  return rows.map((item) => ({ item, review: latestReview(handle, item.id) as ReviewRecord }));
+}
+
 export function reject(handle: WorkDb, id: string, reason: string): CommitOutcome {
   const result = handle.db
     .query("UPDATE work SET state = 'rejected', reason = ?, lease_owner = NULL WHERE id = ? RETURNING *")

@@ -306,6 +306,21 @@ const commands: Record<
     // blocks in `tail -f` and stays "up" after the supervisor dies, so a single
     // "running" line would let a dead schedule read as a healthy one.
     const liveness = supervisorLiveness(config.stateDir);
+    // Ledger state is a DIFFERENT claim from container state. A status line
+    // that only says "up" cannot tell an operator that three items have stopped
+    // and are waiting on them.
+    let blocked = 0;
+    try {
+      const { openWork, blockedWork } = await import("./work");
+      const handle = openWork(config.stateDir);
+      try {
+        blocked = blockedWork(handle).length;
+      } finally {
+        handle.close();
+      }
+    } catch {
+      blocked = 0;
+    }
     print(
       config,
       {
@@ -317,6 +332,7 @@ const commands: Record<
         timezone: workspace.timezone,
         workers: allWorkers(workspace).map((w) => w.name),
         crons: workspace.crons.map((c) => c.name),
+        blocked,
       },
       () =>
         [
@@ -327,6 +343,10 @@ const commands: Record<
           `  timezone ${describeTimezone(workspace.timezone)}`,
           `  workers  ${allWorkers(workspace).map((w) => w.name).join(", ") || "none"}`,
           `  crons    ${workspace.crons.map((c) => c.name).join(", ") || "none"}`,
+          // Ledger state is a different claim from container state. A status
+          // line that only says "up" cannot tell an operator that items have
+          // stopped and are waiting on them.
+          `  blocked  ${blocked === 0 ? "nothing is waiting on you" : `${blocked} item(s) waiting - see \`cod work blocked\``}`,
         ].join("\n"),
     );
     // A dead supervisor is a runtime failure, not a status line to scroll past.

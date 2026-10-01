@@ -24,7 +24,7 @@ import { holdMeeting, type Meeting } from "./meeting";
 // Re-exported through one seam so the tick and the dispatch path cannot drift
 // apart on how a radius is derived.
 import { radiusForWork, targetPathsOfItem } from "./runwork";
-import { openWork, listWork, type WorkItem } from "./work";
+import { openWork, listWork, latestReview, type WorkItem } from "./work";
 import type { Workspace } from "./workspace";
 
 /** What happened to a piece of finished work. */
@@ -176,7 +176,20 @@ export async function runGovernance(
     try {
       const handle = openWork(stateDir);
       try {
-        finished = listWork(handle).filter((item) => item.state === "done" && !landedIds.has(item.id));
+        finished = listWork(handle).filter((item) => {
+          if (item.state !== "done") return false;
+          if (landedIds.has(item.id)) return false;
+          // Skip anything already JUDGED terminally - landed OR rejected - read
+          // from the record rather than from this tick's memory.
+          //
+          // This is the defect the record was added for. `landWork` returned
+          // `rejected` without writing anything, so the item stayed `done`,
+          // this filter kept offering it, and every tick paid for a model
+          // review of work that was never going to land. A Set is empty after a
+          // restart, which is how it came back on every boot as well.
+          const seen = latestReview(handle, item.id)?.outcome;
+          return seen !== "landed" && seen !== "rejected";
+        });
       } finally {
         handle.close();
       }

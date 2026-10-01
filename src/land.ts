@@ -16,7 +16,7 @@
 
 import { execFileSync } from "node:child_process";
 import { judgeReview, mechanicalChecks, canMerge, REVIEW_SKILL } from "./review";
-import { openWork, type WorkItem } from "./work";
+import { openWork, recordReview, latestReview, type WorkItem } from "./work";
 import type { LandOutcome } from "./governance";
 
 export interface LandOptions {
@@ -39,32 +39,45 @@ function git(repo: string, args: readonly string[]): string | null {
   }
 }
 
-/** Branches already merged in this process. A merge is not idempotent. */
-const landedBranches = new Set<string>();
-
-/**
- * Branches already given their one review retry.
+/*
+ * Everything that used to be a module-level Set - "already landed", "already
+ * given its retry" - is now ONE ROW in the review table.
  *
- * Process-scoped, and keyed on the branch rather than on the item's `attempts`
- * counter. That counter counts DISPATCHES, not review rounds: it is 0 until a
- * job runs, so guarding on it meant a review request was granted a fresh retry
- * every time - a company arguing with a reviewer for ever, which is the exact
- * failure the one-retry policy exists to prevent. Caught by the test that
- * re-reviews the same branch twice.
+ * They were Sets because they were convenient, and that was exactly the bug:
+ * a Set is empty after every supervisor restart, so a rejected item lost its
+ * protection on the next boot and was re-reviewed from scratch. A verdict
+ * nothing recorded is a verdict nobody keeps.
  */
-const retriedBranches = new Set<string>();
+
+
 
 export async function landWork(repo: string, item: WorkItem, options: LandOptions): Promise<LandOutcome> {
   const branch = `cod/${item.id}`;
-  if (landedBranches.has(branch)) return { outcome: "skipped", reason: `${branch} was already landed` };
+
+  // The durable guard. A landed or rejected item is not looked at again: the
+  // old guard was a Set, and a Set is empty after a restart, which is how a
+  // rejected item came back to life on every boot.
+  const ledger = openWork(options.stateDir);
+  const previous = latestReview(ledger, item.id);
+  ledger.close();
+  if (previous !== null && (previous.outcome === "landed" || previous.outcome === "rejected")) {
+    return note(options, item, {
+      outcome: "skipped",
+      reason: `${branch} was already reviewed as ${previous.outcome}: ${previous.reason}`,
+    });
+  }
+
+  // A retry is counted from the RECORD, not from `attempts`, which counts
+  // dispatches and would grant a fresh retry every time.
+  const alreadyRetried = previous?.outcome === "changes-requested";
 
   const diff = git(repo, ["diff", `master...${branch}`]);
   if (diff === null) {
-    return { outcome: "skipped", reason: `no diff for ${branch}` };
+    return note(options, item, { outcome: "skipped", reason: `no diff for ${branch}` });
   }
   if (diff === "") {
     // No changes is not a failure to review; it is nothing to land.
-    return { outcome: "skipped", reason: `${branch} changed nothing` };
+    return note(options, item, { outcome: "skipped", reason: `${branch} changed nothing` });
   }
 
   const verdict = await judgeReview({
@@ -77,7 +90,6 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
   const radius = item.blast_radius ?? 0;
   if (!canMerge(verdict, radius)) {
     const changes = verdict.outcome === "request-changes";
-    const alreadyRetried = retriedBranches.has(branch);
     if (changes && !alreadyRetried && (options.maxRetries ?? 1) > 0) {
       // THE ONE RETRY, with the review as the brief. Recorded on the item, so
       // the next attempt carries the reviewer's words rather than starting over.
@@ -96,13 +108,12 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
       } finally {
         handle.close();
       }
-      retriedBranches.add(branch);
-      return { outcome: "changes-requested", reason: verdict.reason };
+      return note(options, item, { outcome: "changes-requested", reason: verdict.reason });
     }
-    return {
+    return note(options, item, {
       outcome: "rejected",
       reason: changes ? `still not right after the one retry: ${verdict.reason}` : verdict.reason,
-    };
+    });
   }
 
   // The merge itself. `-c` flags mean the repo's own config cannot redirect
@@ -113,10 +124,33 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
     "merge", "--no-ff", "-m", `cod: land ${branch}`, branch,
   ]);
   if (merged === null) {
-    return { outcome: "rejected", reason: `git merge failed for ${branch}` };
+    return note(options, item, { outcome: "rejected", reason: `git merge failed for ${branch}` });
   }
-  landedBranches.add(branch);
-  return { outcome: "landed", branch, reason: `merged ${branch} into master` };
+  const sha = git(repo, ["rev-parse", "HEAD"]);
+  return note(options, item, { outcome: "landed", branch, reason: `merged ${branch} into master` }, sha ?? "");
+}
+
+/**
+ * Record a verdict before returning it.
+ *
+ * Every return path goes through here, which is the point: the bug was a path
+ * that returned without recording, and a rejected item nobody records is an
+ * item nobody skips.
+ */
+function note(options: LandOptions, item: WorkItem, outcome: LandOutcome, landedSha = ""): LandOutcome {
+  const handle = openWork(options.stateDir);
+  try {
+    recordReview(handle, {
+      workId: item.id,
+      outcome: outcome.outcome,
+      reason: outcome.reason,
+      branch: `cod/${item.id}`,
+      landedSha,
+    });
+  } finally {
+    handle.close();
+  }
+  return outcome;
 }
 
 export { REVIEW_SKILL };
