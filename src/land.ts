@@ -27,6 +27,7 @@
 import { execFileSync } from "node:child_process";
 import { judgeReview, mechanicalChecks, canMerge, REVIEW_SKILL } from "./review";
 import { openWork, recordReview, latestReview, type WorkItem } from "./work";
+import { isGlobalPath } from "./boundary";
 import type { LandOutcome } from "./governance";
 
 export interface LandOptions {
@@ -116,6 +117,38 @@ export function resolveBase(repo: string): string {
   return "HEAD";
 }
 
+/**
+ * Every path a branch touched, from GIT rather than from diff text.
+ *
+ * A deletion emits `--- a/verify.sh` and `+++ /dev/null`; a rename emits no
+ * `+++` line at all. Any check that reads the diff TEXT therefore cannot see
+ * either - which is how `git rm verify.sh` landed and removed a global file from
+ * master.
+ *
+ * `--name-status` names every path regardless of what happened to it, and a
+ * rename's status carries BOTH sides. A path that fails to parse is INCLUDED, so
+ * a malformed entry refuses rather than passes: an unreadable change is not an
+ * approved change.
+ */
+export function changedPaths(repo: string, branch: string, base?: string): string[] {
+  const from = base ?? resolveBase(repo);
+  const raw = git(repo, ["diff", "--name-status", "--find-renames", `${from}...${branch}`]);
+  if (raw === null || raw === "") return [];
+  const paths: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.trim() === "") continue;
+    const parts = line.split("\t");
+    // Everything after the status column is a path. For `R100 old new` that is
+    // BOTH sides, which is exactly what a rename-away from a global path needs:
+    // the old path no longer exists, so the new one alone would say nothing.
+    for (const p of parts.slice(1)) {
+      const path = (p ?? "").trim();
+      if (path !== "") paths.push(path);
+    }
+  }
+  return paths;
+}
+
 export async function landWork(repo: string, item: WorkItem, options: LandOptions): Promise<LandOutcome> {
   const branch = `cod/${item.id}`;
   const base = resolveBase(repo);
@@ -152,7 +185,15 @@ export async function landWork(repo: string, item: WorkItem, options: LandOption
     return note(options, item, { outcome: "skipped", reason: `${branch} changed nothing` });
   }
 
-  const mechanical = mechanicalChecks(diff);
+  // The PATHS come from git; the text scan still covers secrets and forbidden
+  // actions, which have no path equivalent.
+  const touched = changedPaths(repo, branch, base);
+  const globalTouched = touched.filter(isGlobalPath);
+  const mechanical = {
+    ...mechanicalChecks(diff),
+    findings: [...mechanicalChecks(diff).findings, ...globalTouched.map((p) => `global: ${p} is a global path; only the CEO lands changes there`)],
+    ok: mechanicalChecks(diff).ok && globalTouched.length === 0,
+  };
 
   // A mechanical finding is terminal BEFORE the model is asked, whatever the
   // retry cap is - a global path is a rule, not an opinion, and looping it
