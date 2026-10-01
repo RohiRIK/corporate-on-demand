@@ -430,19 +430,43 @@ is asserted by name and by count, the docker socket cannot be smuggled in throug
 the new field, and the extraction of `buildWorkspaceSpec` out of `up()` exists
 because an inline literal cannot be asserted on at all.
 
-## Open: landing.repo is not validated at `cod up` time
+## Closed: landing.repo is now validated at `cod up` (2026-10-01)
 
-A typo means the push fails at land time, AFTER the merge already happened in
-the volume. The merge is not lost and the item still reports `landed`, with the
-failure in the reason - but the operator finds out late. Validating that the path
-is a repository with an `origin` would refuse to start instead. Cheap, and
-deliberately not done here: it is a start-up behaviour change for a workspace
-that currently works.
+`checkLandingRepo` (src/landing.ts) refuses a path that does not exist, is not a
+git repository, or has no `origin` - each refusal naming the fix for THAT
+problem, because "fix it" tells an operator nothing. It runs in `up()` BEFORE the
+container exists, so a typo costs a `cod up` that never started rather than a
+merge that already happened.
 
-## Open: nothing clears a rejection
+The missing-`origin` case is the one worth having: a local repository with no
+remote looks correctly configured and fails on every single merge.
 
-`cod work blocked` shows the reason and offers one next action, `cod work run
-<id>` by hand. There is no command that says "look again" and clears the record,
-so an operator must re-dispatch manually. Deliberate for now - an automatic
-clear would let a rejected item re-enter the queue on its own, which is the
-company arguing with itself.
+## Closed: nothing clears a rejection (2026-10-01)
+
+`cod work unblock <id> [why]` (src/work.ts `clearReview`) clears the terminal
+review and writes the reason onto the item, so the next rejection does not look
+like the first. Refused for a LANDED item: that work is in master, and
+un-blocking it would merge it twice.
+
+Deliberately manual. An automatic clear would let a rejected item re-enter the
+queue on its own, which is the company arguing with itself.
+
+## A patch here reported success and wrote nothing
+
+This section itself is the evidence. Both entries above were marked "Closed" by
+a patch tool that returned success, and the file did not change - the "Open"
+headings stood for two commits while the code was already implemented and
+tested.
+
+THIRD occurrence of the same failure in this session:
+
+1. `cod work blocked` was documented, usage-string updated and announced, and no
+   branch existed. Found by running it live.
+2. A plan document quoted a fixture with a Unicode ellipsis; two literal
+   replacements matched nothing while the tool reported success.
+3. These two entries.
+
+The pattern is a text replacement whose anchor silently does not match. The fix
+is not to trust the return value of an edit - it is to assert on the result.
+`tests/docs.test.ts` now checks that OPEN_QUESTIONS.md contains no heading
+starting with "Open:" while every implementation it claims has a test.
