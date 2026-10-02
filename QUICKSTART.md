@@ -58,7 +58,20 @@ one does not come up, rather than reporting success for a broken container.
 
 The container restarts itself if the supervisor dies. Note that `docker kill`
 deliberately does *not* trigger a restart — if you killed it, you meant to stop
-it.
+it. `cod up` brings back a stopped container, and replaces a running one that no
+longer matches `cod.json` or the image - so after editing `cod.json`, run
+`cod up` again.
+
+**Run `cod` as the user that owns the state directory.** The container runs as
+uid 1000 and writes the state directory, so it must be able to. A root `cod`
+creates a new state directory for uid 1000 itself; if the container still cannot
+write it, `cod up` fails with the reason and the exact `chown` to run.
+
+**Agents are sandboxed.** Every agent runs inside Landlock: it cannot touch the
+ledger, the main checkout, `.git`'s config or hooks, or another agent's
+worktree. `cod status` shows `sandbox on (landlock abi N)`. On a kernel without
+Landlock, agents are refused, not run unconfined; `"agentSandbox": "off"` in
+`cod.json` accepts that risk explicitly.
 
 **The timezone matters.** Docker defaults a container to UTC and `Bun.cron`
 fires on local time, so a workspace with no `timezone` set would run every job
@@ -93,12 +106,9 @@ cannot fill the disk through its own logging.
 
 ## Run a scheduled job
 
-```sh
-./src/index.ts supervise
-```
-
-The supervisor registers every enabled cron in `cod.json` on `Bun.cron` and
-reports what it registered. Add a job to `cod.json`:
+The supervisor registers every enabled cron in `cod.json` on `Bun.cron` when the
+container starts. `cod supervise` shows what it registered; it is read-only.
+Add a job to `cod.json`, then `cod up` to pick it up:
 
 ```json
 {
@@ -129,8 +139,8 @@ acme — container up
   supervisor: live, 1 job(s): heartbeat (seen 4s ago)
 ```
 
-If the supervisor dies while the container stays up — which is what happens,
-since the container blocks deliberately — the heartbeat goes stale and the
+If the schedule stops while the container stays up - a wedged tick, or the
+moments between a crash and the restart - the heartbeat goes stale and the
 command **exits 1**:
 
 ```
@@ -140,6 +150,28 @@ command **exits 1**:
 
 A container that is `up` is not evidence that anything is scheduled. Stale
 after 90 seconds without a heartbeat.
+
+## The company, on its own
+
+With governance on (the default), the supervisor runs the company every
+`governance.cycleEveryMinutes` (30 by default): departments plan, the meeting
+decides, workers do the work in their own worktrees, a reviewer checks it, and
+approved work is merged into the base branch in the work volume. To see it:
+
+```sh
+./src/index.ts work list          # everything, with its state
+./src/index.ts work blocked       # what stopped and needs you
+./src/index.ts logs --last 20     # the governance line says what each tick did
+```
+
+Landed work stays in the volume until you export it. Name a repository in
+`cod.json` (`"landing": { "repo": "/path/to/repo" }`), then:
+
+```sh
+./src/index.ts land               # fetch it into that repo as cod-landed
+```
+
+`cod status` says when there is landed work you have not exported.
 
 ## Tear down
 
@@ -158,7 +190,7 @@ To remove the work and every commit in it:
 ## Verify the whole thing
 
 ```sh
-bun test ./tests                              # 310 tests
+bun test ./tests                              # 785 tests
 sh scripts/cleanroom.sh /tmp/cod-cr           # empty dir -> working agent
 ```
 
@@ -170,7 +202,8 @@ step.
 
 - `0` — success
 - `1` — retryable runtime failure
-- `2` — deterministic usage or configuration error
+- `2` — usage failure or refusal (a fenced commit, a duplicate proposal): the
+  same command will fail again
 
 ## Security
 

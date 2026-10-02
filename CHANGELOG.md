@@ -664,3 +664,264 @@ code is worth nothing.
   reachable with no operator configuration. The shell is gone; the prompt is
   one argv element.
 - 595 tests.
+
+## Unreleased - the company runs unattended: confined, iterating, and honest about what it did
+
+A pass over every open finding: the security review in `.security-review/`
+(SEC-01 to SEC-07, now indexed in `.security-review/STATUS.md`), the items the
+merge-path plan deferred - SEC-03 among them, the gate on running unattended -
+the known limitations above, the README's "not yet done", and a fresh review of
+the code. Planned in `.hermes/plans/2026-10-02_060000-close-the-open-findings.md`.
+Every defect below was reproduced before it was fixed, and every new guard was
+mutation-checked: each mutation fails at least one test. Then the whole thing
+was run - a clean room against a built image, and a dogfood company with a live
+supervisor - which found seven more that the suite had passed: a root-owned
+state directory that killed the supervisor, a Docker build that worked only by
+accident of its base image, a company that stalled after its first generation,
+idle departments planning every tick for ever, `cod up` ignoring an edited
+`cod.json`, `cod up` calling a replaced container live on its predecessor's
+heartbeat, and a test that ran an unconfined agent in a live workspace.
+
+608 → 785 tests, clean typecheck.
+
+### Agents are confined by the kernel (SEC-03, closed)
+
+- **Every agent runs inside Landlock**: cron jobs, dispatched ledger items,
+  `cod work run`, the reviewer and the meeting's voices all go through
+  `cod-sandbox`, a static launcher compiled into the image
+  (`docker/sandbox.c`), with a policy from `src/sandbox.ts`. Landlock is
+  unprivileged, so it works under exactly the flags the container already has
+  (`--cap-drop ALL`, no-new-privileges) - the host chown and uid split the gate
+  was deferred for were never needed. ABI 7 on the test host.
+- An agent **cannot read or write `/cod`** (the ledger, results, logs,
+  `cod.json`); cannot write the main checkout, `.git/config`, `.git/hooks`,
+  `.git/info` or any ref outside `refs/heads/cod/`; may write only its own
+  worktree; and on ABI 6+ cannot signal the supervisor. A plan writes nothing
+  of the repository; a read-only role gets only a scratch directory.
+- **Fails closed.** `agentSandbox` defaults to `required`: no launcher, or no
+  Landlock in the running kernel, refuses the agent instead of running it
+  unconfined. `"off"` in `cod.json` is the explicit, recorded way to accept
+  the risk. The supervisor probes at start; `cod status` shows the result.
+- Verified three ways: `tests/sandbox.test.ts` compiles the real launcher and
+  runs real git through it; the clean room probes a live container; and the
+  dogfood ran a hostile worker that tried every one of the above from inside -
+  read `/cod/cod.json`, write the ledger and the heartbeat, write
+  `.git/config`, plant a hook, write `.git/info/exclude`, write the main
+  checkout, move `master`, signal PID 1 - and was denied each time (EACCES,
+  EPERM, git refused), while writing its own worktree.
+- **Not closed, and said so:** read access to the repository and other
+  worktrees; `/tmp` and `$HOME` are shared; any `cod/` ref is writable, not
+  only the agent's own; egress is open by design.
+- Also in the image: the skill bundle is finally in it (every skill used to
+  resolve to nothing in the container while `cod skills` on the host reported
+  full coverage); the generated `AGENTS.md` is excluded from commits; no more
+  image-wide `safe.directory '*'`.
+
+### Landed work leaves as a verified bundle (SEC-04 B)
+
+- **The push sent the wrong thing.** Landing pushed the landing repository's
+  OWN `HEAD`, not the work that had just merged, and needed host credentials a
+  credential-free container does not have. And the read-write `/landing` mount
+  let an agent plant a hook or an fsmonitor for the operator's own git to run.
+- Now nothing on the host is writable from the container except the state
+  directory, which agents cannot reach. After each landing the supervisor
+  writes the base branch as a git bundle into `<state>/export/`; **`cod land`**,
+  on the host, fetches it into `landing.repo` as `refs/heads/cod-landed` -
+  fast-forward only, `--force` to replace - after `git fsck --strict` in a
+  throwaway repository. (`transfer.fsckObjects` is the obvious tool, and git
+  2.43 ignores it for bundles - measured.) Publishing `cod-landed` is the
+  operator's own step. `cod status` says when landed work is not exported yet.
+
+### The company iterates
+
+- **It did one round of work in its lifetime.** A department's proposal never
+  changed, so the novelty key refused every later one; the planner's answer
+  went into a column nothing read; the CEO re-decided closed proposals every
+  tick.
+- Now a department proposes a numbered **plan** when nothing of its own is in
+  motion; the plan runs read-only and answers `GOAL / PATHS / CHECK`
+  (`src/plan.ts`); the answer becomes a task scoped to the paths it named;
+  review, land, plan again. **Three strikes** - three tasks in a row that ended
+  badly - stop a department until a person looks. Ticks never overlap.
+- **Found by the dogfood:** the CEO's dispatch took its novelty key from the
+  planning prompt, which is the same every generation by design - so every plan
+  after the first was refused as a duplicate. The live company landed one round
+  of work and then proposed two plans a tick, for ever, that never ran.
+  `tests/company.test.ts` passed throughout, because it counted the
+  departments' proposals, which differ per generation, instead of plans that
+  ran. The dispatch is keyed on the decision now, and the test asserts two
+  generations ran and both of their tasks landed.
+- **A department that finds nothing new rests.** A plan that answers
+  `GOAL: none`, proposes a task that already exists, or cannot be read even on
+  its last retry, used to be followed by another plan on the very next tick,
+  for ever: model calls to hear "nothing", and ledger rows nothing prunes. It now rests two cycles, doubling with each
+  further empty plan, up to a day; the first plan that finds something resets
+  it. The governance line in the log names who is resting, and why.
+- **The worker is told the paths its task named.** The reviewer judges scope
+  against exactly those paths, and the worker's brief used to carry only the
+  goal - it was held to a list it had never been shown.
+
+### The review loop decides on facts
+
+- **Every job "changed nothing."** `resolveBase` read `HEAD`, which in a job
+  worktree is the job's own branch, so every job reported zero commits - and
+  since "changed nothing is not success", every mutating cron job was recorded
+  failed. The base is read from the main checkout through the common git dir.
+- **A conflict jammed the company**: it left `/work` mid-merge and every later
+  merge failed on it. Conflicts are found with `git merge-tree` first and sent
+  back as a request for changes; a merge that still fails is aborted.
+- **The guard overwrote the verdict it guarded**, so a rejected item was
+  re-reviewed. Looking records nothing now.
+- **Objections did not accumulate in production** (they lived on a column the
+  worker's commit overwrites). They live on the review row.
+- **A provider blip was a rejection.** An unavailable reviewer is `deferred`.
+- An empty branch and a conflict are requests for changes inside the retry
+  cap; a symlink, a submodule and a binary are mechanical refusals; verdict
+  parsing tolerates markdown and stays fail-closed; the reviewer gets a
+  redacted task and diff, with the declared and touched paths side by side,
+  and runs in a scratch directory, never in `/work`.
+- Every supervisor git command goes through `src/git.ts`: no global or system
+  config, no hooks, no fsmonitor, no pager. `--no-textconv` joins
+  `--no-ext-diff`, and `tests/diffguard.test.ts` now configures REAL drivers
+  and proves an unguarded diff runs them (the old fixture named a driver that
+  was never configured).
+
+### The ledger: only running work finishes
+
+- **A proposal could be committed** at epoch 0 - past the CEO, the claim and
+  the run. `commit` requires `running`.
+- **A run claimed the wrong item** - the oldest ready one for the department,
+  not the one it was asked to run. `claimById`.
+- **A failed agent was recorded done.** It is a failed run now, retried a
+  bounded number of times (`run failed (n/3)`), on the next pass, never the
+  one that failed it; after three it stops and appears in `cod work blocked`.
+- Ids follow the worktree's rule; paths, names and kinds are validated;
+  payloads and reasons are capped and redacted - the ledger was the one sink
+  that skipped redaction (SEC-05, SEC-06, SEC-07).
+
+### The operator surface
+
+- **A refusal exits 2.** A refused commit, proposal or unblock printed
+  "REFUSED" and exited 0, so a script was told a fenced commit had landed.
+  `work run` maps the in-container refusal to 2 and a failure to 1. A flag the
+  CLI does not know exits 2, not 1.
+- **`--override` reached no command**, so `work unblock --override` was refused
+  for lacking the flag it had been given.
+- `--status`, `--level` and `--last` are validated; `init` refuses to overwrite
+  an existing workspace without `--force`.
+- **One state directory, one workspace.** Two workspaces on the default state
+  directory shared one ledger, heartbeat and log; `init` and `up` refuse a
+  second.
+- **`cod up` brings back its own stopped container** (it failed on the name,
+  so neither it nor the systemd unit could restart a workspace after a reboot),
+  and - found by the dogfood - **replaces a running one that no longer matches**:
+  an edited `cod.json` or a rebuilt image used to change nothing, and since
+  `cod.json` is a file bind mount, an editor that saves by rename left the
+  container reading the old file until it was recreated. A container from
+  before the label existed is adopted, never guessed at.
+- **"Live" means live in this container.** Right after a replacement, `cod up`
+  reported "live (seen 15s ago)": the previous supervisor's heartbeat, still
+  fresh in the state directory, read before the new one had written anything.
+  A heartbeat now counts only if its supervisor started after the container did.
+- **A host user other than uid 1000 gets a working container, or the exact
+  reason.** Found by the clean room run as root: `cod init` made a root-owned
+  state directory, the supervisor (uid 1000) died on its first mkdir, and
+  `cod up` said only "not live". A root `cod` now gives a directory it creates
+  to the container's uid (never one that existed), created `0750`; the
+  entrypoint checks writability as the uid that matters and stops with a FATAL
+  line; `cod up` quotes it, with the `chown` for the host path.
+- **The Docker-socket guard** compared two exact strings. It resolves the path
+  and follows symlinks, and refuses `/`, any socket, a runtime's own
+  directory, any runtime socket by name, and a directory that holds one
+  (SEC-04 A).
+- **`cod supervise` exec'd a second supervisor** that outlived the command, so
+  every cron fired twice. It is read-only, and the supervisor refuses to run
+  as anything but PID 1.
+- An abandoned job is reported once, then archived. In-flight markers redact
+  their task. The dead `--inside` dispatch is gone. The systemd unit creates
+  the state directory owned by uid 1000 and sets the variable the CLI reads.
+  The help text says what the commands do.
+- **The secret scan** knows `src/redact.ts`'s seven credential shapes, not
+  three, and can scan every line a range of commits added - a secret committed
+  and deleted is still in the history a push publishes
+  (`scripts/secret-scan.sh`, run by `verify.sh`). The workflow half could not
+  be pushed without the `workflow` token scope:
+  `.security-review/ci-range-scan.patch`.
+
+### The end-to-end check
+
+- `scripts/cleanroom.sh` found its CLI at a path on one developer's machine; it
+  is derived from the script's location. Its "no host binds" check read a field
+  `--mount` never fills, so it passed whatever was mounted; it asserts the
+  exact mount list. Its agent check grepped for a word the prompt contained; it
+  asks an arithmetic question through the sandbox and parses the answer. New:
+  PID 1, the read-only `supervise`, Landlock, the sandbox's denials. It cleans
+  up on every exit, and `COD_CLEANROOM_IMAGE` runs it against a prebuilt image,
+  reporting the build as NOT checked.
+- `tests/agent.test.ts` ran an unconfined agent in `/work` of whatever cod
+  container was up - found when the engine was a stub that obeyed and committed
+  onto a running company's base branch. It runs in a scratch directory,
+  through the sandbox, on an arithmetic question.
+- The suite owns one temp directory and removes it: a run used to leave ~120
+  directories and 49 MB in `/tmp`.
+- The Dockerfile's build directory is explicit: inherited from the base image,
+  it put this project's `package.json` above bun's global directory in a
+  variant, and `bun add --global` installed kilo into the wrong tree. The agent
+  tools are also run once as uid 1000.
+
+### Docs
+
+- **`cod-system` 1.2.0**: a new `references/sandbox.md` (what an agent may
+  touch, how it is enforced, how to change the policy without opening a hole),
+  routed from `SKILL.md`; `architecture`, `container`, `scheduling`,
+  `recovery`, `onboarding` and `invariants` brought up to what the code does -
+  the governance tick, the real driver, PID 1, the export, five rules instead
+  of three. It said a job ran the echo driver and the reconciler had one tick.
+- **`cod-operations`**: the runbook named commands that do not exist
+  (`cod build`, `cod boot install`, `cod logs --tail`), told the operator to run
+  an unconfined agent in `/work` to check the providers, and described the
+  landing mount. It now covers the FATAL lines `cod up` quotes, `unblock` and
+  `--override`, held and resting departments, `cod land`, and the systemd steps.
+- `README.md`, `QUICKSTART.md`, `docs/SECURITY_POSTURE.md`, `docs/ROADMAP.md`,
+  `docs/OPEN_QUESTIONS.md` and `ops/README.md` updated; the README's worked
+  example is regenerated real output. `.security-review/STATUS.md` indexes every
+  finding and what became of it.
+- **The README's mutation table, re-measured**: removing the epoch predicate
+  fails 3 tests, not 18 - `commit()` now also requires `running`, which refuses
+  most zombies by itself, and a new test pins the case left for the epoch (a
+  zombie that wakes while a newer run holds the item); proposals born `ready`
+  fail 15, not 12. The first attempt at the second mutation edited a field the
+  INSERT never reads, and "passed" - the same lesson as the test it measures.
+
+### What was run, and what was not
+
+- **Clean room**, against the built image, as root: every phase passes except
+  the live model call.
+- **Dogfood**: a company with a live supervisor ticking every minute, stub
+  engines in place of the model providers. It planned, dispatched, worked in
+  worktrees, was reviewed (a request for changes, a retry with the objection
+  in its brief, an approval), landed, exported with `cod land` (fast-forward,
+  then "already exported"), planned a second generation, and rested when its
+  plans found nothing new. A hostile worker was denied every action above.
+- **Not run here:** a live model call - the host's egress policy blocks
+  `opencode.ai`, `models.dev`, `api.kilo.ai`, `kilocode.ai`,
+  `api.kilocode.ai` and `openrouter.ai`, and the same call fails the same way
+  outside the sandbox; and the stock image build - the apt mirrors
+  (`deb.debian.org`, `security.debian.org`) are blocked, so the image was
+  built from the same Dockerfile on the same Debian release with only the apt
+  layer replaced. Both are one `sh scripts/cleanroom.sh` away on an
+  unrestricted host.
+
+### Known limitations, revised
+
+Closed by this pass, from the list in the first Unreleased section: `work list
+--state` (it is `--status`, validated); the `rejected` state (written by
+`reject()`, for work that never ran); the echo driver (real agents run on every
+path); "no reviewer, no merge" (both run unattended); write isolation between
+agents (the sandbox - read isolation is still absent).
+
+Still true: read access between agents; open egress; no budget ceiling, by
+design; the novelty key catches identical repeats only, so a reworded plan is
+new work (the rest backs off a department that finds nothing, not one that
+rephrases); ledger growth is bounded by the rest, not capped; a host reboot
+needs `ops/cod-workspace@.service`.

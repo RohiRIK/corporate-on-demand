@@ -73,8 +73,10 @@ tick did anything, so running it twice must equal running it once.
 The whole call is wrapped in a `try`. A reconcile failure must not take the
 supervisor down, or one bad ledger stops every cron in the workspace.
 
-Four jobs per pass: promote or reject proposals; reclaim work past its **per-item**
-budget; recover work whose acknowledgement was lost; report. The budget is per
+Five jobs per pass: promote or reject proposals; reclaim work past its
+**per-item** budget; recover work whose acknowledgement was lost; put failed runs
+back on the queue, a bounded number of times and never in the pass that failed
+them; report. The budget is per
 item and never global — a single global threshold either kills legitimate slow
 work or tolerates a hung job, and usually does both.
 
@@ -84,15 +86,25 @@ double-bill a job that already finished.
 
 ## What runs
 
-`echoDriver` in `src/dispatch.ts`. A cron job fires, runs through the
-dispatcher, and returns a result - but the driver echoes the task string. The
-schedule is real and verified end to end; the *work* is not.
+A real agent. A cron job fires, runs through the dispatcher with the agent
+driver (`src/drivers.ts` → `runAgent`), and the worker's own model does the job
+in its own worktree, inside `cod-sandbox` - read-only if the cron says
+`expectTools: false`, writing its worktree otherwise. The run is judged by its
+event stream (`src/assert.ts`): a terminal `step_finish`, a completed tool when
+one is expected, no error event. What the job changed is read from git, not from
+the agent's account of it, and checked against its blast radius.
 
-**The driver is the only seam.** Replacing `echoDriver` is how a job starts
-doing real work, and nothing above `dispatch` changes - `TaskResult` is still
-the result contract. An echo was chosen because it cannot fail for interesting
-reasons: if a scheduled job breaks, the cause is the scheduling rather than
-the work.
+`echoDriver` remains in `src/dispatch.ts` as the deterministic reference
+implementation of the driver contract, for tests. It is not on the live path: a
+cron naming a worker that does not exist runs the free default model, and says
+so in its first step.
+
+## The governance tick
+
+Separate from the crons: `governance.cycleEveryMinutes` (default 30) registers
+one more `Bun.cron` entry that runs the company - cycle, meeting, dispatch,
+land - never two at once. It is on by default; `"governance": {"enabled":
+false}` turns it off.
 
 ## Results
 

@@ -1,7 +1,8 @@
 # Security Posture — `cod` sandbox
 
-Branch: `feat/infra-scratch`. Scope: the one-container-per-workspace runner that executes
-credential-free `opencode` agents.
+Scope: the one-container-per-workspace runner that executes credential-free
+`opencode` and `kilo` agents, each inside a Landlock sandbox. Findings from the security
+review, and what became of each, are indexed in `.security-review/STATUS.md`.
 
 ## Threat model
 
@@ -17,11 +18,11 @@ Secondary adversary: a buggy or runaway agent process (fork bomb, disk fill, hun
 one PID namespace, one network namespace, and one user. Therefore:
 
 - Read isolation between agents is **not enforced**. Any agent can read every other agent's
-  `/work/<other>` and any repo file. This is a *convention*, not a control.
-- Write isolation is **not enforced** by the container. "Writes only to your own directory" is an
-  instruction in a prompt to a non-adversarial-looking LLM. A prompt injection that convinces
-  the model otherwise rewrites another agent's work. The only real consequence of a violation is
-  **corrupted output**, not containment.
+  worktree and any repo file. This is a *convention*, not a control.
+- Write isolation **is enforced, by the agent sandbox** (below), for what matters: an agent cannot
+  write the ledger or anything else in the state directory, the main checkout, `.git/config`,
+  `.git/hooks`, `.git/info`, the base branch, or another agent's worktree. It is **not enforced**
+  for `/tmp`, `$HOME` and the `cod/` branch refs, which every agent shares.
 - Resource contention is shared: one agent's fork bomb or `npm install` exhausts the
   `--pids-limit 512` budget for every peer in the workspace, and they all die together.
 - Egress is shared: any agent's outbound call is indistinguishable in origin from the host's.
@@ -41,14 +42,17 @@ agent process, not just a cooperative one.
 | `--pids-limit 512` | cgroup-enforced fork limit. Stops fork bombs. |
 | **No Docker socket mount, ever** | This is the single most important control. Without it, no agent can create a sibling container with `--privileged`, bind the host filesystem, or escape via the daemon. Any code path that can `docker run` converts every other control into decoration. |
 | No credentials exist to leak | There is no API key, no `.env`, no cloud role, no `~/.aws`. `opencode` is unauthenticated. The blast radius of a full agent compromise is "reads your source code and makes HTTP requests" — nothing more. |
+| **Landlock agent sandbox** | Every agent runs under `cod-sandbox` (`docker/sandbox.c`). Kernel-enforced allow rules: no `/cod`, no writes to the main checkout, `.git/config`, `.git/hooks`, `.git/info`, refs outside `refs/heads/cod/` or other worktrees; scoped signals on ABI 6+. Fails closed. Holds against a fully compromised agent process: it is the kernel, not the prompt. |
+| **No writable host path an agent can reach** | The only host bind that is writable is the state directory, and agents are denied it. Landed work leaves as a bundle that the host verifies before importing (`src/export.ts`); there is no landing mount. |
+| **Runtime-socket guard** | `assertMountAllowed` resolves every bind source and follows symlinks, and refuses `/`, any socket, a container runtime's directory, any runtime socket by name, and a directory holding one. |
 
 ## Security theatre
 
 Stated as controls anywhere they appear, and named as such here:
 
-- **"Agents write only to their own `/work/<agent>`"** — theatre. Prompt instruction, not a
-  mount or a `chown` boundary. Enforcement requires one container per agent, or per-agent UID
-  plus distinct bind mounts. Neither is in scope.
+- **"Agents write only to their own `/work/<agent>`"** — still theatre for those per-worker
+  directories, which nothing uses as a boundary. What IS enforced is the job's own worktree:
+  the sandbox grants an agent that, and denies every other worktree (see the table above).
 - **Token budget as a security control** — theatre. It governs spend. A prompt injection that
   steals a key gains nothing from it, and an attacker is unbudgeted. Never describe it as
   containment.
@@ -85,6 +89,11 @@ the code fails the build rather than ageing quietly in a document.
 | Pinned base image | `oven/bun@sha256:8956c766…` | a test rejects the mutable tag form |
 | Pinned opencode | 1.18.31 vendored and copied in | `opencode --version` → `1.18.31` |
 | Cron cannot run unversioned | entrypoint and supervisor exit 2 without `Bun.cron` | `docker run oven/bun:1.3.9-debian` → exit 2 |
+| Exactly three mounts | `buildWorkspaceSpec`, `--mount` only | `.Mounts` is `/cod/cod.json` (ro), `/cod`, `/work` (named volume) - nothing else |
+| Landlock available | the kernel; probed by the supervisor at start | `cod-sandbox --probe` → `landlock abi 7`; `cod status` → `sandbox on` |
+| Agents cannot reach the state dir | `cod-sandbox` policy | a sandboxed `cat /cod/cod.json` → `Permission denied` |
+| Agents cannot write the main checkout | `cod-sandbox` policy | a sandboxed write to `/work` → `Permission denied` |
+| One supervisor | it refuses to start unless it is PID 1 | `/proc/1/cmdline` is the supervisor |
 
 That last row is the easiest to get wrong and the most important. Below Bun
 1.3.12 `Bun.cron` does not exist, so a scheduler that does not check would
@@ -93,11 +102,15 @@ The container refuses to pretend instead.
 
 ## What is deliberately not enforced
 
-- **Agent-to-agent isolation.** One container, one filesystem, one uid. Any
-  agent can read and overwrite any other agent's files. Treat every agent as
-  fully trusted and fully capable of sabotaging the others.
-- **Write restriction.** Nothing stops an agent editing its own instructions.
-  A prompt is a request, not a boundary.
+- **Read isolation between agents.** One container, one filesystem, one uid.
+  Any agent can read the repository and every other agent's worktree.
+- **Shared scratch.** `/tmp` and `$HOME` are writable by every agent, so agents
+  can interfere there - a poisoned tool cache in `$HOME` is the realistic case.
+- **Branch refs.** Any agent can write any `cod/` ref, not only its own: refs
+  are files in one directory, and Landlock grants directories. The reviewer and
+  the merge judge whatever the branch holds when they look.
+- **Its own instructions.** Nothing stops an agent editing the `AGENTS.md` in
+  its own worktree. A prompt is a request, not a boundary.
 - **Spend ceilings inside the container.** There is no accounting boundary
   here; the only real control is the model provider's own quota.
 - **Egress filtering.** Outbound access is required, because agents must be
@@ -129,8 +142,12 @@ The container refuses to pretend instead.
 2. **Egress = exfiltration channel.** Any source file readable in the container can be POSTed
    out. Mitigation would be `--network none` plus a package proxy/allowlist — explicitly out of
    scope. Accepted.
-3. **Cross-agent write corruption** from a compromised or confused agent. Detected by review,
-   not prevented.
+3. **Cross-agent interference** through the shared `/tmp`, `$HOME` and `cod/` refs, from a
+   compromised or confused agent. Detected by review, not prevented. Worktrees, the ledger,
+   the main checkout and git's configuration are no longer in this list: the sandbox denies them.
+3a. **The git object store is writable** by every writing agent, because commits need it, so an
+   agent can damage objects. The host-side export runs `git fsck --strict` on every bundle in a
+   throwaway repository before anything reaches the landing repository.
 4. **Supply chain** on the unfiltered egress path: agents install packages by design.
 5. **Host kernel** is the trust boundary. A container escape (kernel bug, or the socket, if ever
    added) is game over. Everything above assumes the host is not itself compromised.
@@ -161,8 +178,10 @@ and a $0 system should not be one careless edit away from a bill.
 
 The published `kilo` bin is a Node shim. This image ships no Node, so the shim
 is replaced with one that runs on bun. No network surface or capability is added
-by this: the engine is a child process of the supervisor, confined to its
-worktree by its working directory, exactly as `opencode` was.
+by this: the engine is a child process of the supervisor and runs inside the same
+Landlock sandbox as `opencode`. (This section once said the engine was confined
+by its working directory. A working directory is placement, not confinement - an
+agent with a shell can `cd`. SEC-03 was that sentence being taken at its word.)
 
 ## Command injection through the prompt: found and fixed (2026-10-01)
 
@@ -205,3 +224,51 @@ constraints up front rather than discovering them.
 
 Live re-verified after the change: a real credential-free model call through
 the new argv path, exit 0, cost 0.
+
+## The agent sandbox (2026-10-02)
+
+SEC-03 found that an agent with a shell defeated the worktree "boundary" - a
+working directory - and could rewrite the ledger, commit to the base branch past
+the reviewer, write the main repository's `.git/config` and hooks (which the
+supervisor's own git then read), rewrite other agents' worktrees, and kill the
+supervisor. It was deferred with a gate: do not run unattended until it is done.
+
+It is done with **Landlock**, not with uids or namespaces: a process restricts
+itself, unprivileged, and every child inherits the restriction. That works under
+`--cap-drop ALL` and no-new-privileges, which is precisely why the uid split the
+gate was waiting for was never needed. `docker/sandbox.c` is the launcher - small,
+static, every line of it security-relevant - and `src/sandbox.ts` decides the
+policy, as pure code a test can read.
+
+What it enforces, by kind of agent:
+
+| Agent | Reads | Writes |
+|---|---|---|
+| a task (writes code) | the system, the repository | its own worktree; the object store, `cod/` refs and reflogs, its own worktree metadata; `/tmp`, `$HOME`, `/dev` |
+| a plan (reads only) | the system, the repository | `/tmp`, `$HOME`, `/dev` |
+| the reviewer, a meeting voice | the system | its scratch directory, `/tmp`, `$HOME`, `/dev` |
+
+`/cod` is in no rule, so it is denied outright. On ABI 6+ signals and abstract
+unix sockets are scoped, so an agent cannot signal the supervisor or talk to a
+socket outside its sandbox.
+
+**It fails closed.** `agentSandbox` is `"required"` by default: with no launcher,
+or a kernel without Landlock, the launcher exits 78 and the run is a failure with
+the reason - never an unconfined agent. `"off"` is an explicit line in `cod.json`,
+and the supervisor logs it at `warn` on every start.
+
+**Verified** by `tests/sandbox.test.ts` (the real launcher, real git, on this
+kernel), by the clean room on a live container, and by a hostile worker in the
+dogfood run that tried each denied action from inside and was refused every time,
+while it wrote its own worktree.
+
+## Landing without a writable mount (2026-10-02)
+
+SEC-04 B: `landing.repo` was bind-mounted read-write at `/landing`, so an agent
+could write a hook or a `core.fsmonitor` into the operator's repository, and the
+operator's next `git status` there would run it, as the operator. Now no host
+path an agent can reach is writable: the supervisor writes landed work as a git
+bundle into the state directory, and `cod land`, run on the host, verifies every
+object in a throwaway repository and only then fetches it - fast-forward only -
+into `landing.repo` as `cod-landed`. A bundle is data: fetching it runs nothing
+from it.

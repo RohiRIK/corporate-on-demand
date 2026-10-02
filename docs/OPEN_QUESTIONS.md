@@ -524,3 +524,88 @@ bypassing a LIVE loop, not for reaching the queue.
 
 Both guards mutation-verified: removing the refusal fails two tests, removing
 the OVERRIDE wording fails one.
+
+## Closed: agents are confined by the kernel - SEC-03, the gate on running unattended (2026-10-02)
+
+The merge-path plan deferred SEC-03 with a gate: do not run `cod up` unattended
+until it is done, on the reasoning that confining an agent needed a host chown
+and a container uid split. It needed neither. **Landlock** is an unprivileged
+Linux LSM - a process restricts itself and every child inherits it - and it
+works under exactly the flags the container already has (`--cap-drop ALL`,
+no-new-privileges), which rule out the uid split and user namespaces but are
+what Landlock asks for. Measured: ABI 7 inside the hardened container, with
+Docker's default seccomp profile.
+
+Every agent runs through `cod-sandbox` (`docker/sandbox.c`) with a policy from
+`src/sandbox.ts`: no `/cod`, no writes to the main checkout, `.git/config`,
+`.git/hooks`, `.git/info` or refs outside `refs/heads/cod/`, its own worktree
+only, and on ABI 6+ no signals to the supervisor. It fails closed, and
+`"agentSandbox": "off"` is the one recorded way out.
+
+Decided, and stated where it is enforced rather than implied away: **read
+isolation is not provided** (an agent reads the repository and other
+worktrees), `/tmp` and `$HOME` are shared, any `cod/` ref is writable because
+refs share a directory, and egress stays open. `tests/sandbox.test.ts` runs the
+real launcher; the dogfood ran a hostile worker against it and every attempt
+was denied.
+
+## Closed: landed work leaves as a verified bundle, and nothing on the host is writable (2026-10-02)
+
+Landing was the one writable host path, and it never worked: it pushed the
+landing repository's own `HEAD` rather than the merged work, with credentials
+the container does not have - and the read-write `/landing` mount let an agent
+plant a hook for the operator's own git to run (SEC-04 B).
+
+Decided: **the container exports, the operator imports.** After each landing
+the supervisor writes the base branch as a bundle into the state directory, and
+`cod land`, on the host, fetches it into `landing.repo` as `cod-landed` -
+fast-forward only, after `git fsck --strict` in a throwaway repository (git 2.43
+ignores `transfer.fsckObjects` for a bundle; measured). Pushing it onward is the
+operator's own step, with the operator's own credentials.
+
+## Closed: the second generation of plans never ran (2026-10-02)
+
+Found by running the company, not by its tests. The CEO's dispatch took its
+novelty key from the planning prompt, which is the same in every generation by
+design, so every plan after the first was refused as a duplicate of the first.
+The live company landed one round of work and then proposed two plans a tick,
+for ever, that never ran.
+
+`tests/company.test.ts` passed the whole time, because it counted the
+departments' proposals - numbered by generation, so always distinct - instead
+of plans that ran. The same shape as the verification that once passed against
+a job that had done nothing. The dispatch is keyed on the decision now (one
+dispatch per decided proposal), and the test asserts two generations ran and
+both tasks landed; reverting the fix fails it.
+
+## Closed: an idle department planned every tick, for ever (2026-10-02)
+
+A plan that finds nothing - `GOAL: none`, a task that already exists, or an
+answer that cannot be read even on its last retry - was followed by another plan
+on the next tick: model calls to hear "nothing", and ledger rows that nothing
+prunes.
+
+Decided: **a department that finds nothing rests**, two cycles after one empty
+plan, doubling with each further one, capped at a day; the first plan that finds
+something resets it. Derived from the ledger, so it survives a restart. Not a
+cap on the ledger - rows still accumulate while a department works - but the
+idle case no longer grows it.
+
+## Closed: a refusal looked like success, and `cod up` could not keep up (2026-10-02)
+
+Decided, for scripts: **a refusal exits 2**, the code for "the same command will
+fail again". A fenced commit, a duplicate proposal and an unblock that would
+skip a live objection all used to exit 0.
+
+Decided, for `cod up`: it **owns its container's lifecycle**. A stopped container
+of its own is replaced (it used to fail on the name, so a reboot needed a manual
+`cod down`), and so is a running one that no longer matches - an edited
+`cod.json`, or a rebuilt image - because a file bind mount pins the inode and an
+editor that saves by rename left the container on the old file. A container
+from before the label is adopted, never guessed at: replacing a container stops
+the work in it.
+
+Decided, for the host: **one state directory, one workspace**, and it belongs to
+the container's uid. A root `cod` hands a directory it creates to uid 1000,
+`0750`; the entrypoint checks writability as that uid and says exactly what to
+`chown` when it cannot.
