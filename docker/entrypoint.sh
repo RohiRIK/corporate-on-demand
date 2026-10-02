@@ -79,6 +79,17 @@ if [ -f "$WORKSPACE_FILE" ]; then
   # Idempotent, and keyed on the COMMIT rather than on .git existing: a volume
   # that has a repository but no commits is exactly the broken state above, and
   # checking only for the directory would skip the repair.
+  # The per-job AGENTS.md is generated into every worktree. It is the agent's
+  # instructions, not the agent's work, and an agent told to "commit your work"
+  # with `git add -A` committed it - so every landed branch carried an
+  # instruction file into the base. Excluded in the shared info/exclude, which
+  # every worktree reads. Idempotent: added once.
+  if ! grep -qx 'AGENTS.md' /work/.git/info/exclude 2>/dev/null; then
+    mkdir -p /work/.git/info
+    printf 'AGENTS.md\n' >> /work/.git/info/exclude
+    log "excluded the generated AGENTS.md from commits"
+  fi
+
   if ! git -C /work rev-parse --verify HEAD >/dev/null 2>&1; then
     # An empty first commit, so there is something to branch from. `.cod-repo`
     # is the marker that says "this volume is a cod work volume", not content.

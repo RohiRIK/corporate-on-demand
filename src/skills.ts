@@ -27,8 +27,21 @@ import { fileURLToPath } from "node:url";
  */
 export const SKILLS_DIR = "skills/agent";
 
-/** Absolute path to the bundle, so an audit works from any working directory. */
+/**
+ * Absolute path to the bundle, from any working directory - and from inside the
+ * image.
+ *
+ * Every dispatch used to pass the RELATIVE `skills/agent`, which resolves
+ * against the supervisor's working directory - `/work` in the container, where
+ * no such directory exists - and the image did not ship the bundle at all. So
+ * in the container every skill silently resolved to nothing and every agent
+ * ran without its rules, while `cod skills` on the host reported the workspace
+ * as fully covered. The image now copies the bundle and names it in
+ * COD_SKILLS_DIR; on a checkout it is found next to the source.
+ */
 export function resolveSkillsRoot(): string {
+  const configured = process.env["COD_SKILLS_DIR"];
+  if (configured !== undefined && configured !== "") return configured;
   return resolve(dirname(fileURLToPath(import.meta.url)), "..", SKILLS_DIR);
 }
 
@@ -126,6 +139,9 @@ export function buildInstructions(
   skillsRoot: string,
 ): string {
   const skills = resolveSkills(skillsRoot, worker.skills);
+  // A named skill that is not in the bundle is SAID, not skipped: an agent that
+  // silently lacks a rule looks exactly like one following it.
+  const missing = worker.skills.filter((name) => !skills.includes(name));
   const lines = [
     `# ${department.name.toUpperCase()} — ${worker.name}`,
     "",
@@ -152,8 +168,11 @@ export function buildInstructions(
     "## Skills",
     "",
   ];
-  if (skills.length === 0) {
+  if (skills.length === 0 && missing.length === 0) {
     lines.push("(none assigned to this worker.)", "");
+  }
+  for (const name of missing) {
+    lines.push(`## ${name}`, "", "**THIS SKILL IS MISSING from the bundle.** Ask for it rather than improvising.", "");
   }
   for (const name of skills) {
     lines.push(renderSkill(skillsRoot, name), "");

@@ -278,10 +278,10 @@ describe("workspace schema", () => {
       crons: [],
       maxConcurrent: 2,
       timezone: "UTC",
-
       governance: { enabled: true },
       resultRetention: 500,
-      };
+      agentSandbox: "required",
+    };
     expect(allWorkers(workspace).map((w) => w.name)).toEqual(["w1", "w2"]);
     expect(findWorker(workspace, "w2")?.name).toBe("w2");
     expect(findWorker(workspace, "nobody")).toBeUndefined();

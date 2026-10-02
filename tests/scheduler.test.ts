@@ -24,6 +24,7 @@ function workspaceWith(crons: Workspace["crons"]): Workspace {
     timezone: "UTC",
     resultRetention: 500,
     governance: { enabled: true },
+    agentSandbox: "required",
   };
 }
 

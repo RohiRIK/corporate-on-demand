@@ -158,10 +158,13 @@ const commands: Record<
       // the operator having to know the field exists.
       timezone: hostTimezone(),
       resultRetention: 500,
-      governance: { enabled: true },
       // ON by default, and saying so in the file rather than leaving it absent:
       // a new workspace should govern itself without the operator reading this
       // comment. An operator who wants it manual sets `enabled: false`.
+      governance: { enabled: true },
+      // Written out for the same reason: the sandbox is the boundary, and an
+      // operator reading cod.json should see that it is on.
+      agentSandbox: "required",
     };
 
     const parsed = Workspace.safeParse(workspace);

@@ -21,11 +21,11 @@
 import { parseEventStream, describeRun, type ParsedStream } from "./events";
 import { judgeRun } from "./assert";
 import { backendForModel, buildFor } from "./backend";
+import { sandboxedArgv, type SandboxChoice, type SandboxPolicy } from "./sandbox";
 import type { Cron, Worker } from "./workspace";
 import type { StepKind } from "./dispatch";
 
 export const OPENCODE_BIN = "opencode";
-export const CONTAINER = "cod-sandbox-cod";
 export const WORKDIR = "/work";
 
 /**
@@ -141,8 +141,8 @@ export const localRunner: CommandRunner = async (args, timeoutMs, cwd) => {
  *
  * Deliberately short and bounded. An agent given the whole workspace and no
  * boundary will wander; one given a single job and a place to answer will
- * finish. No autonomy model has been chosen, so this does the least defensible
- * thing: it asks for text, and grants no tool use at all.
+ * finish. The rules live in the AGENTS.md beside it, where the agent can re-read
+ * them; the boundary that is actually enforced is the sandbox.
  */
 export function buildPrompt(cron: Cron, company: { name: string; purpose: string } | null): string {
   const who = company === null
@@ -162,24 +162,13 @@ export function buildPrompt(cron: Cron, company: { name: string; purpose: string
 }
 
 /**
- * Build the command.
+ * The command for one run, on whichever engine the model belongs to.
  *
  * `--pure` keeps third-party plugins out, which matters because this image is
- * meant to contain no code but the pinned binary. The model comes from the
- * worker, because per-worker routing is a settled decision.
- *
- * `--auto` grants tool use. That is the decision: agents act automatically and
- * the CEO manages them, with no human gate anywhere. What replaces the old
- * "you cannot change files" prompt is a BOUNDARY - the job's own worktree via
- * `--dir`, and a per-job AGENTS.md that names the blast radius and says plainly
- * that no agent may push or merge. An agent with tools and no boundary is an
- * unbounded actor; an agent with tools and a boundary is a worker.
- *
- * The prompt is JSON-quoted so a task containing quotes or newlines cannot
- * break the shell command.
- */
-/**
- * The command for one run, on whichever engine the model belongs to.
+ * meant to contain no code but the pinned binary. `--auto` grants tool use:
+ * agents act automatically and the CEO manages them. An agent with tools and no
+ * boundary is an unbounded actor; the boundary is the Landlock sandbox the
+ * supervisor wraps this command in (src/sandbox.ts), not the prompt.
  *
  * `workdir` is accepted and ignored, deliberately: confinement is the spawn's
  * cwd, because `opencode run --dir <git worktree>` was measured to fail with an
@@ -201,8 +190,17 @@ export interface RunAgentOptions {
    * picks its engine by naming a `kilo/...` model and needs no new field.
    */
   readonly backend?: string;
-  /** The job's own worktree. The agent is confined to it by --dir. */
+  /**
+   * The job's own worktree: the agent STARTS there. Placement, not confinement -
+   * confinement is the sandbox below.
+   */
   readonly workdir?: string;
+  /**
+   * The agent sandbox (src/sandbox.ts). `on` wraps the engine in the Landlock
+   * launcher with this policy; `missing` refuses to run at all rather than run
+   * unconfined; `off` - an explicit choice in cod.json - runs it as it is.
+   */
+  readonly sandbox?: { readonly choice: SandboxChoice; readonly policy: SandboxPolicy };
 }
 
 /**
@@ -237,13 +235,18 @@ export async function runAgent(
 
   await step("plan", `${model}: preparing ${cron.name}`);
 
+  // Required and absent is a refusal, never a quiet downgrade to unconfined.
+  if (options.sandbox?.choice.kind === "missing") {
+    return `${FAILURE_PREFIX} ${options.sandbox.choice.reason}`;
+  }
+  const engine = buildFor(backendId, model, prompt, `cod-${cron.name}`);
+  const argv = options.sandbox?.choice.kind === "on"
+    ? sandboxedArgv(options.sandbox.choice.bin, options.sandbox.policy, engine)
+    : engine;
+
   let result: CommandResult;
   try {
-    result = await runner(
-      buildFor(backendId, model, prompt, `cod-${cron.name}`),
-      timeoutMs,
-      options.workdir,
-    );
+    result = await runner(argv, timeoutMs, options.workdir);
   } catch (error) {
     // The runner is injectable, so a caller could supply one that throws.
     // Reported, not propagated: the job still has to settle and record.

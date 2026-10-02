@@ -6,9 +6,12 @@
  * register anything when Bun.cron is unavailable — see scheduler.ts.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { homedir } from "node:os";
 import { Registry } from "./registry";
 import { join } from "node:path";
+import { chooseSandbox, describeSandbox, jobPolicy, rolePolicy, type SandboxChoice, type SandboxPolicy } from "./sandbox";
 import { Workspace, findWorker } from "./workspace";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
@@ -63,6 +66,30 @@ const REVIEW_MODEL = "kilo/kilo-auto/free";
 const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
 
 /**
+ * Whether agents run in the Landlock sandbox, decided once at startup from the
+ * workspace's `agentSandbox` and the launcher the image installed.
+ */
+let sandboxChoice: SandboxChoice = { kind: "missing", reason: "the supervisor has not started" };
+let sandboxLine = "unknown";
+
+/** The sandbox for one agent run, with the policy its kind of work gets. */
+function sandboxFor(policy: SandboxPolicy): { readonly choice: SandboxChoice; readonly policy: SandboxPolicy } {
+  return { choice: sandboxChoice, policy };
+}
+
+/** A job's policy: its own worktree, read-only if it only inspects. */
+function jobSandbox(worktreePath: string, job: string, mode: "write" | "read") {
+  // The reflog directory for `cod/` branches must exist before the sandbox
+  // opens it; git would otherwise create it, which the agent may not.
+  try {
+    mkdirSync(join(WORK_REPO, ".git", "logs", "refs", "heads", "cod"), { recursive: true });
+  } catch {
+    // A repository without reflogs is fine; the rule for a missing path is skipped.
+  }
+  return sandboxFor(jobPolicy({ repo: WORK_REPO, worktree: worktreePath, job, home: homedir(), mode }));
+}
+
+/**
  * Dispatch one ledger item through the real agent driver.
  *
  * Shared by the cron path and the governance tick, deliberately: a job run from
@@ -76,7 +103,7 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   const { resolveTarget } = await import("./assign");
   const { driverFor } = await import("./drivers");
   const { acquireWorktree, releaseWorktree } = await import("./worktree");
-  const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
+  const { buildInstructions, writeInstructions, resolveSkillsRoot } = await import("./skills");
 
   const handle = openWork(STATE_DIR);
   let item;
@@ -107,12 +134,21 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, item.id);
   try {
     if (department === undefined) return { ok: false, reason: `${worker.name} has no department` };
-    writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: goal }, 0, SKILLS_DIR));
+    const { radiusForWork, targetPathsOfItem } = await import("./runwork");
+    const radius = radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius);
+    writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: goal }, radius, resolveSkillsRoot()));
     const result = await runWorkItem({
       stateDir: STATE_DIR,
       workId,
       cron,
-      driver: driverFor(worker, workspace.company, { workdir: worktree.path }, REGISTRY),
+      driver: driverFor(
+        worker,
+        workspace.company,
+        // A PLAN may read the repository and write nothing of it; a task may
+        // write its own worktree and commit on its own branch.
+        { workdir: worktree.path, sandbox: jobSandbox(worktree.path, item.id, item.kind === "plan" ? "read" : "write") },
+        REGISTRY,
+      ),
     });
     return { ok: result.ok, reason: result.reason };
   } finally {
@@ -125,7 +161,9 @@ async function askRoleInScratch(role: "reviewer" | "meeting", name: string, prom
   const { askRole } = await import("./roles");
   const { runAgent } = await import("./agent");
   return askRole(role, name, prompt, (cron, workdir) =>
-    runAgent(cron, null, async () => {}, { model: REVIEW_MODEL, workdir }),
+    // The role's scratch directory is the only place it may write, and it
+    // gets no repository at all: everything it judges is in its prompt.
+    runAgent(cron, null, async () => {}, { model: REVIEW_MODEL, workdir, sandbox: sandboxFor(rolePolicy(workdir, homedir())) }),
   );
 }
 
@@ -218,9 +256,14 @@ function beat(jobs: readonly string[]): void {
     seenAt: Date.now(),
     jobs,
     maxConcurrent: parsedMaxConcurrent,
+    sandbox: sandboxLine,
   };
   try {
-    writeFileSync(heartbeatPath(STATE_DIR), `${JSON.stringify(heartbeat, null, 2)}\n`, "utf8");
+    // tmp + rename, so `cod status` never reads half a heartbeat - which it
+    // treats as absent, and reports a live supervisor as NOT RUNNING.
+    const path = heartbeatPath(STATE_DIR);
+    writeFileSync(`${path}.tmp`, `${JSON.stringify(heartbeat, null, 2)}\n`, "utf8");
+    renameSync(`${path}.tmp`, path);
   } catch (error) {
     log(`could not write the heartbeat: ${(error as Error).message}`, "warn");
   }
@@ -277,6 +320,18 @@ function main(): void {
     process.exit(1);
   }
 
+  // The agent sandbox, decided once and SAID out loud: an operator reading the
+  // log or `cod status` must be able to tell confined agents from unconfined.
+  sandboxChoice = chooseSandbox(parsed.data.agentSandbox, process.env["COD_SANDBOX"], existsSync);
+  let probe: string | null = null;
+  if (sandboxChoice.kind === "on") {
+    const ran = spawnSync(sandboxChoice.bin, ["--probe"], { encoding: "utf8", timeout: 10_000 });
+    probe = `${ran.stdout ?? ""}`.trim() || `${ran.stderr ?? ""}`.trim() || `exit ${ran.status ?? "?"}`;
+  }
+  sandboxLine = describeSandbox(sandboxChoice, probe);
+  const sandboxHealthy = sandboxChoice.kind === "on" && (probe ?? "").startsWith("landlock abi");
+  log(`agent sandbox: ${sandboxLine}`, sandboxHealthy ? "info" : sandboxChoice.kind === "off" ? "warn" : "error");
+
   parsedMaxConcurrent = parsed.data.maxConcurrent;
   const resultRetention = parsed.data.resultRetention;
   const jobNames = parsed.data.crons.filter((c) => c.enabled).map((c) => c.name);
@@ -323,7 +378,7 @@ function main(): void {
         const { dispatch } = await import("./dispatch");
         const { driverFor } = await import("./drivers");
         const { acquireWorktree, releaseWorktree } = await import("./worktree");
-        const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
+        const { buildInstructions, writeInstructions, resolveSkillsRoot } = await import("./skills");
 
         // Each job gets its own git worktree, so concurrent jobs cannot collide
         // and a half-finished job keeps its work. The worktree is ALSO the
@@ -341,13 +396,14 @@ function main(): void {
           // opposite and stays safe until that radius is derived server-side.
           writeInstructions(
             worktree.path,
-            buildInstructions(department, worker, { name: cron.name, task: cron.task }, 0, SKILLS_DIR),
+            buildInstructions(department, worker, { name: cron.name, task: cron.task }, 0, resolveSkillsRoot()),
           );
         }
         log(`job "${cron.name}" worktree ${worktree.branch} at ${worktree.path}`);
 
         try {
-        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company, { workdir: worktree.path }, REGISTRY), {
+        const sandbox = jobSandbox(worktree.path, cron.name, cron.expectTools === false ? "read" : "write");
+        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company, { workdir: worktree.path, sandbox }, REGISTRY), {
           onStep: (step): void => {
             log(`step ${step.no}/${step.kind}: ${step.label} (${step.ms}ms)`);
           },

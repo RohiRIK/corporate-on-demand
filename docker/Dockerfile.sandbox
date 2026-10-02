@@ -102,6 +102,24 @@ RUN BUN_INSTALL=/usr/local bun add --global @kilocode/cli@7.8.1 \
     && chmod -R a+rX /usr/local/install/global \
     && kilo --version
 
+# The agent skill bundle, injected into each job's AGENTS.md by the worker's
+# `skills` list. It was never copied into the image, and the supervisor looked
+# for it relative to its own working directory - so in the container every skill
+# silently resolved to nothing. COD_SKILLS_DIR names it; src/skills.ts reads it.
+COPY skills/agent /usr/local/lib/cod/skills/agent
+ENV COD_SKILLS_DIR=/usr/local/lib/cod/skills/agent
+
+# The agent sandbox: a static Landlock launcher every agent runs through
+# (docker/sandbox.c, src/sandbox.ts). Static, so it depends on nothing at run
+# time. Built here because build-essential already is; probed at supervisor
+# start rather than at build time, because the kernel that matters is the one
+# the container RUNS on, not the one that built it.
+COPY docker/sandbox.c /tmp/cod-sandbox.c
+RUN gcc -static -O2 -Wall -Wextra -Werror -o /usr/local/bin/cod-sandbox /tmp/cod-sandbox.c \
+    && rm -f /tmp/cod-sandbox.c \
+    && chmod 755 /usr/local/bin/cod-sandbox
+ENV COD_SANDBOX=/usr/local/bin/cod-sandbox
+
 # Readable by the unprivileged user the container runs as: a root-owned file
 # behind a root-owned directory is unreadable to `bun`.
 RUN chmod -R 755 /usr/local/lib/cod
@@ -127,9 +145,11 @@ RUN { \
 USER bun
 WORKDIR /work
 
-# `git config --system` as a non-root user fails; the safe.directory setting is
-# what lets an agent read a bind-mounted repository owned by another uid.
-RUN git config --global --add safe.directory '*' || true
+# NO `safe.directory '*'`. It existed so an agent could operate on a
+# bind-mounted repository owned by another uid - the landing repo, which is no
+# longer mounted (src/export.ts). /work is owned by the uid everything runs as,
+# so git's ownership check passes on its own, and a wildcard that switches the
+# check off everywhere is a setting nothing here needs.
 
 # Git identity, image-wide.
 #

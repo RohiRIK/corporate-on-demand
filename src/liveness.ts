@@ -28,6 +28,8 @@ export interface Heartbeat {
   readonly seenAt: number;
   readonly jobs: readonly string[];
   readonly maxConcurrent: number;
+  /** Whether agents run sandboxed, as the supervisor found it at startup. */
+  readonly sandbox?: string;
 }
 
 export type Liveness =
