@@ -34,6 +34,19 @@ export class RuntimeFailure extends CodError {
 }
 
 /**
+ * The ledger said no: a fenced commit, a duplicate proposal, an unblock that
+ * would skip a live objection.
+ *
+ * Exit 2, because the same command will be refused again. These used to exit
+ * 0 - "commit REFUSED" on stdout and success on the exit code - so a script
+ * that checked `$?` was told a fenced commit had landed. Not a UsageError: the
+ * invocation was fine, and "run cod --help" is the wrong advice for a refusal.
+ */
+export class RefusedError extends CodError {
+  override readonly exitCode = 2;
+}
+
+/**
  * `Bun.cron` does not exist below Bun 1.3.12.
  *
  * This is its own class because the failure it prevents is the worst kind: a

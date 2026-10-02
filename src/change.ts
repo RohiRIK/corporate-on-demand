@@ -10,7 +10,7 @@
  * fact rather than an error.
  */
 
-import { execFileSync } from "node:child_process";
+import { gitOut, resolveBase, SAFE_DIFF_FLAGS as DIFF_FLAGS, SAFE_DIFF_OPTIONS } from "./git";
 
 export interface JobChange {
   readonly changed: readonly string[];
@@ -20,17 +20,21 @@ export interface JobChange {
 
 const EMPTY: JobChange = { changed: [], commits: 0, head: null };
 
-function git(workdir: string, args: readonly string[]): string | null {
-  try {
-    return execFileSync("git", ["-C", workdir, ...args], {
-      encoding: "utf8",
-      timeout: 30_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
+/**
+ * Flags that stop git EXECUTING anything while reading a branch.
+ *
+ * Kept as exports for the callers that already use them; the definitions live
+ * in src/git.ts with the rest of the supervisor's git hardening.
+ */
+export const SAFE_DIFF_FLAGS = DIFF_FLAGS;
+
+/**
+ * Diff options, which go AFTER the subcommand.
+ *
+ * Passing them before `diff` makes git fail outright - which is how the first
+ * version of this broke twenty-five tests with a bare `skipped`.
+ */
+export const NO_EXT_DIFF = SAFE_DIFF_OPTIONS;
 
 /**
  * What changed on this branch, relative to where it started.
@@ -38,42 +42,20 @@ function git(workdir: string, args: readonly string[]): string | null {
  * Measured against the branch's merge base rather than against the current
  * HEAD of the main line, so it reports THIS job's work and not whatever landed
  * on the line while it ran.
- */
-import { resolveBase } from "./land";
-
-/**
- * Flags that stop git EXECUTING anything while reading a branch.
  *
- * `core.hooksPath` was already set on the merge, but only the merge. A
- * `.gitattributes` on the branch under review names a diff/filter driver, and
- * `git diff` will run it - as the uid of whoever ran git. So a branch could
- * execute code at DIFF time, which is before any review decision exists.
- *
- * `--no-ext-diff` disables external diff drivers; `core.attributesFile` points
- * git's global attributes at /dev/null so the repo's own file is the only one in
- * play and it cannot introduce one.
+ * The default base is the REPOSITORY's base branch. It used to be resolved from
+ * the worktree's own HEAD - which, in a job worktree, IS the job branch - so the
+ * merge base was HEAD itself, every job reported zero commits and no changed
+ * files, every mutating cron job was recorded as "changed nothing", and the
+ * global-path check never saw a single path. src/git.ts resolveBase now reads
+ * the main checkout's HEAD and never answers with a `cod/` branch.
  */
-export const SAFE_DIFF_FLAGS = ["-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null"] as const;
-
-/**
- * `--no-ext-diff` goes AFTER the subcommand.
- *
- * It is a `git diff` option, not a git-level one, so passing it before `diff`
- * makes git fail outright - which is how the first version of this broke
- * twenty-five tests with a bare `skipped`. Kept separate for exactly that
- * reason.
- */
-export const NO_EXT_DIFF = ["--no-ext-diff"] as const;
-
 export function readJobChange(workdir: string, baseRef?: string): JobChange {
-  // baseRef is a caller-supplied override; the DEFAULT is resolved from the
-  // repository rather than being the literal "master", which made every call on
-  // a main-based repository merge-base against a branch that does not exist.
-  const base = git(workdir, [...SAFE_DIFF_FLAGS, "merge-base", "HEAD", baseRef ?? resolveBase(workdir)]);
+  const base = gitOut(workdir, ["merge-base", "HEAD", baseRef ?? resolveBase(workdir)]);
   if (base === null || base === "") return EMPTY;
-  const changed = git(workdir, [...SAFE_DIFF_FLAGS, "diff", ...NO_EXT_DIFF, "--name-only", `${base}..HEAD`]);
-  const commits = git(workdir, ["rev-list", "--count", `${base}..HEAD`]);
-  const head = git(workdir, ["rev-parse", "--short", "HEAD"]);
+  const changed = gitOut(workdir, [...DIFF_FLAGS, "diff", ...SAFE_DIFF_OPTIONS, "--name-only", `${base}..HEAD`]);
+  const commits = gitOut(workdir, ["rev-list", "--count", `${base}..HEAD`]);
+  const head = gitOut(workdir, ["rev-parse", "--short", "HEAD"]);
   return {
     changed: changed === null || changed === "" ? [] : changed.split("\n").filter((line) => line.trim() !== ""),
     commits: commits === null || commits === "" ? 0 : Number(commits) || 0,

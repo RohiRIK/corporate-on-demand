@@ -1,20 +1,27 @@
 /**
  * The in-container supervisor: reads the mounted workspace and schedules it.
  *
- * Run with `docker exec`, so a crashed supervisor shows up as a failed exec
- * rather than a container that silently restarts in a loop. It must not
- * register anything when Bun.cron is unavailable — see scheduler.ts.
+ * The container's PID 1: the entrypoint `exec`s it, so the container lives
+ * exactly as long as the schedule, and Docker's restart policy brings both back
+ * together. It refuses to run as anything else - a second one `docker exec`'d
+ * in beside it doubled every cron. It must not register anything when Bun.cron
+ * is unavailable — see scheduler.ts.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { homedir } from "node:os";
 import { Registry } from "./registry";
 import { join } from "node:path";
+import { chooseSandbox, describeSandbox, jobPolicy, rolePolicy, type SandboxChoice, type SandboxPolicy } from "./sandbox";
 import { Workspace, findWorker } from "./workspace";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
-import { beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
+import { archiveAbandoned, beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
 import { heartbeatPath, type Heartbeat } from "./liveness";
 import { assertCronSupport, scheduleGovernance, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
+import { singleFlight } from "./governance";
+import { describeTimezone } from "./timezone";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
 const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
@@ -62,6 +69,30 @@ const REVIEW_MODEL = "kilo/kilo-auto/free";
 const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
 
 /**
+ * Whether agents run in the Landlock sandbox, decided once at startup from the
+ * workspace's `agentSandbox` and the launcher the image installed.
+ */
+let sandboxChoice: SandboxChoice = { kind: "missing", reason: "the supervisor has not started" };
+let sandboxLine = "unknown";
+
+/** The sandbox for one agent run, with the policy its kind of work gets. */
+function sandboxFor(policy: SandboxPolicy): { readonly choice: SandboxChoice; readonly policy: SandboxPolicy } {
+  return { choice: sandboxChoice, policy };
+}
+
+/** A job's policy: its own worktree, read-only if it only inspects. */
+function jobSandbox(worktreePath: string, job: string, mode: "write" | "read") {
+  // The reflog directory for `cod/` branches must exist before the sandbox
+  // opens it; git would otherwise create it, which the agent may not.
+  try {
+    mkdirSync(join(WORK_REPO, ".git", "logs", "refs", "heads", "cod"), { recursive: true });
+  } catch {
+    // A repository without reflogs is fine; the rule for a missing path is skipped.
+  }
+  return sandboxFor(jobPolicy({ repo: WORK_REPO, worktree: worktreePath, job, home: homedir(), mode }));
+}
+
+/**
  * Dispatch one ledger item through the real agent driver.
  *
  * Shared by the cron path and the governance tick, deliberately: a job run from
@@ -70,17 +101,19 @@ const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
  * real behaviour.
  */
 async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{ ok: boolean; reason?: string }> {
-  const { openWork, get } = await import("./work");
+  const { openWork, get, latestReview } = await import("./work");
   const { runWorkItem, briefFor } = await import("./runwork");
   const { resolveTarget } = await import("./assign");
   const { driverFor } = await import("./drivers");
   const { acquireWorktree, releaseWorktree } = await import("./worktree");
-  const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
+  const { buildInstructions, writeInstructions, resolveSkillsRoot } = await import("./skills");
 
   const handle = openWork(STATE_DIR);
   let item;
+  let review;
   try {
     item = get(handle, workId);
+    review = latestReview(handle, workId);
   } finally {
     handle.close();
   }
@@ -96,18 +129,29 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   if (target.note !== undefined) log(target.note);
   const worker = target.worker;
   const department = target.department;
-  const goal = briefFor(item);
-  const cron = { name: item.id, agent: worker.name, task: goal, schedule: "0 0 1 1 *", enabled: true, expectTools: true };
+  // Every objection a reviewer has made so far, from the review row.
+  const goal = briefFor(item, review);
+  // A PLAN only reads, so no tool call is demanded of it; a task must act.
+  const cron = { name: item.id, agent: worker.name, task: goal, schedule: "0 0 1 1 *", enabled: true, expectTools: item.kind !== "plan" };
 
   const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, item.id);
   try {
     if (department === undefined) return { ok: false, reason: `${worker.name} has no department` };
-    writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: goal }, 0, SKILLS_DIR));
+    const { radiusForWork, targetPathsOfItem } = await import("./runwork");
+    const radius = radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius);
+    writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: goal }, radius, resolveSkillsRoot()));
     const result = await runWorkItem({
       stateDir: STATE_DIR,
       workId,
       cron,
-      driver: driverFor(worker, workspace.company, { workdir: worktree.path }, REGISTRY),
+      driver: driverFor(
+        worker,
+        workspace.company,
+        // A PLAN may read the repository and write nothing of it; a task may
+        // write its own worktree and commit on its own branch.
+        { workdir: worktree.path, sandbox: jobSandbox(worktree.path, item.id, item.kind === "plan" ? "read" : "write") },
+        REGISTRY,
+      ),
     });
     return { ok: result.ok, reason: result.reason };
   } finally {
@@ -115,23 +159,45 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   }
 }
 
-/** One unattended company tick: propose, meet, dispatch. */
+/** A read-only role call, in a scratch directory - see src/roles.ts. */
+async function askRoleInScratch(role: "reviewer" | "meeting", name: string, prompt: string): Promise<string> {
+  const { askRole } = await import("./roles");
+  const { runAgent } = await import("./agent");
+  return askRole(role, name, prompt, (cron, workdir) =>
+    // The role's scratch directory is the only place it may write, and it
+    // gets no repository at all: everything it judges is in its prompt.
+    runAgent(cron, null, async () => {}, { model: REVIEW_MODEL, workdir, sandbox: sandboxFor(rolePolicy(workdir, homedir())) }),
+  );
+}
+
+/**
+ * One unattended company tick: propose, meet, dispatch, review - never two at
+ * once. The startup tick and the first cron tick, or any tick that outlives its
+ * interval, would otherwise review the same item twice. See singleFlight.
+ */
+let tickWorkspace: Workspace | null = null;
+const guardedTick = singleFlight(
+  async (): Promise<void> => {
+    if (tickWorkspace !== null) await governanceTickOnce(tickWorkspace);
+  },
+  (): void => log("[governance] the previous tick is still running; skipping this one"),
+);
+
 async function governanceTick(workspace: Workspace): Promise<void> {
+  tickWorkspace = workspace;
+  await guardedTick();
+}
+
+async function governanceTickOnce(workspace: Workspace): Promise<void> {
   const { runGovernance } = await import("./governance");
   const report = await runGovernance(workspace, STATE_DIR, {
     dispatch: (id) => dispatchWorkItem(workspace, id),
     // The meeting gets a VOICE in the live loop. Without it the positions are
     // computed from the ledger - honest arithmetic, but arithmetic - and the
     // output says so. This is the step that makes the meeting a discussion.
-    askRole: async (prompt) => {
-      const { runAgent } = await import("./agent");
-      return runAgent(
-        { name: "meeting", agent: "cto", task: prompt, schedule: "0 0 1 1 *", enabled: true, expectTools: false },
-        null,
-        async () => {},
-        { model: REVIEW_MODEL, workdir: WORK_REPO },
-      );
-    },
+    // A read-only role, in a directory of its own - never /work, where merges
+    // happen. See src/roles.ts.
+    askRole: async (prompt) => askRoleInScratch("meeting", "meeting", prompt),
     land: async (id) => {
       // The one place that merges. The reviewer is a MODEL call, unlike the
       // mechanical checks beside it, because judging scope and whether a test
@@ -139,7 +205,7 @@ async function governanceTick(workspace: Workspace): Promise<void> {
       // refusal cannot be talked past, and the radius decides who lands.
       const { openWork, get } = await import("./work");
       const { landWork } = await import("./land");
-      const { runAgent } = await import("./agent");
+      const { writeLandedBundle } = await import("./export");
       const handle = openWork(STATE_DIR);
       let item;
       try {
@@ -151,17 +217,14 @@ async function governanceTick(workspace: Workspace): Promise<void> {
       return landWork(WORK_REPO, item, {
         repo: WORK_REPO,
         stateDir: STATE_DIR,
-        landingRepo: workspace.landing === undefined ? undefined : "/landing",
         maxRetries: workspace.governance.maxReviewRetries,
-        ask: async (prompt) => {
-          const out = await runAgent(
-            { name: `review-${id}`, agent: "reviewer", task: prompt, schedule: "0 0 1 1 *", enabled: true, expectTools: false },
-            null,
-            async () => {},
-            { model: REVIEW_MODEL, workdir: WORK_REPO },
-          );
-          return out;
+        // Landed work leaves the volume as a bundle in the state directory;
+        // `cod land` on the host fetches it. See src/export.ts.
+        afterLanding: (base) => {
+          const failure = writeLandedBundle(WORK_REPO, base, STATE_DIR);
+          if (failure !== null) log(`could not export landed work: ${failure}`, "warn");
         },
+        ask: async (prompt) => askRoleInScratch("reviewer", `review-${id}`, prompt),
       });
     },
     // The bound is the company's own concurrency ceiling, not a second number:
@@ -191,10 +254,10 @@ let runSeq = 0;
 /**
  * Write proof of life.
  *
- * The container blocks in `tail -f`, so it stays "up" long after the supervisor
- * dies. This file is the only thing that distinguishes a running schedule from
- * a dead one, and `cod status` reads it to refuse to call a dead supervisor
- * healthy. Written on start and on every tick.
+ * The supervisor is PID 1, so the container dies with it - but a container can
+ * still be up while the schedule is wedged, and between restarts it is up with
+ * nothing scheduled. This file is what `cod status` reads to refuse to call a
+ * dead schedule healthy. Written on start and on every tick.
  */
 function beat(jobs: readonly string[]): void {
   const heartbeat: Heartbeat = {
@@ -203,9 +266,14 @@ function beat(jobs: readonly string[]): void {
     seenAt: Date.now(),
     jobs,
     maxConcurrent: parsedMaxConcurrent,
+    sandbox: sandboxLine,
   };
   try {
-    writeFileSync(heartbeatPath(STATE_DIR), `${JSON.stringify(heartbeat, null, 2)}\n`, "utf8");
+    // tmp + rename, so `cod status` never reads half a heartbeat - which it
+    // treats as absent, and reports a live supervisor as NOT RUNNING.
+    const path = heartbeatPath(STATE_DIR);
+    writeFileSync(`${path}.tmp`, `${JSON.stringify(heartbeat, null, 2)}\n`, "utf8");
+    renameSync(`${path}.tmp`, path);
   } catch (error) {
     log(`could not write the heartbeat: ${(error as Error).message}`, "warn");
   }
@@ -243,6 +311,19 @@ function log(line: string, level: Level = "info"): void {
 }
 
 function main(): void {
+  // ONE supervisor per container: the one the entrypoint `exec`s as PID 1.
+  // `cod supervise` used to start a second one with `docker exec`, and an exec'd
+  // process outlives its client - so it stayed, and every cron fired twice and
+  // two governance loops reviewed the same work. Refused outright now; the
+  // variable exists for running it outside a container on purpose.
+  if (process.pid !== 1 && process.env["COD_SUPERVISOR_NOT_PID1"] !== "1") {
+    process.stderr.write(
+      "[supervisor] refusing to start: the supervisor is the container's main process (PID 1), " +
+        "started by `cod up`. Set COD_SUPERVISOR_NOT_PID1=1 to run one deliberately elsewhere.\n",
+    );
+    process.exit(2);
+  }
+
   // Throws UnsupportedRuntimeError, which exits 2, when Bun.cron is missing.
   // That is the whole point: fail here rather than sit idle for ever.
   assertCronSupport();
@@ -262,18 +343,35 @@ function main(): void {
     process.exit(1);
   }
 
+  // The agent sandbox, decided once and SAID out loud: an operator reading the
+  // log or `cod status` must be able to tell confined agents from unconfined.
+  sandboxChoice = chooseSandbox(parsed.data.agentSandbox, process.env["COD_SANDBOX"], existsSync);
+  let probe: string | null = null;
+  if (sandboxChoice.kind === "on") {
+    const ran = spawnSync(sandboxChoice.bin, ["--probe"], { encoding: "utf8", timeout: 10_000 });
+    probe = `${ran.stdout ?? ""}`.trim() || `${ran.stderr ?? ""}`.trim() || `exit ${ran.status ?? "?"}`;
+  }
+  sandboxLine = describeSandbox(sandboxChoice, probe);
+  const sandboxHealthy = sandboxChoice.kind === "on" && (probe ?? "").startsWith("landlock abi");
+  log(`agent sandbox: ${sandboxLine}`, sandboxHealthy ? "info" : sandboxChoice.kind === "off" ? "warn" : "error");
+
   parsedMaxConcurrent = parsed.data.maxConcurrent;
   const resultRetention = parsed.data.resultRetention;
   const jobNames = parsed.data.crons.filter((c) => c.enabled).map((c) => c.name);
   beat(jobNames);
   log(`heartbeat written for ${jobNames.length} job(s), run ${RUN_ID}`);
-  log(`timezone ${parsed.data.timezone} (${new Date().toString().slice(-25)})`);
+  // The workspace's zone, and the one this process's clock actually reads - the
+  // two must agree for a cron to fire at the hour it says. (This printed the
+  // last 25 characters of Date.toString(), which cut the zone's name mid-word:
+  // "(ordinated Universal Time))".)
+  log(`timezone ${describeTimezone(parsed.data.timezone)}; the process clock reads ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
 
   // Anything still announced in flight was killed by the last crash. Named on
   // startup, because "where did it stop" is the question a crashed supervisor
   // cannot answer from its own log - the log died with it.
   for (const stuck of findAbandoned(STATE_DIR)) {
     log(`ABANDONED: ${formatAbandoned(stuck)}`, "error");
+    archiveAbandoned(STATE_DIR, stuck);
   }
 
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {
@@ -308,31 +406,31 @@ function main(): void {
         const { dispatch } = await import("./dispatch");
         const { driverFor } = await import("./drivers");
         const { acquireWorktree, releaseWorktree } = await import("./worktree");
-        const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
+        const { buildInstructions, writeInstructions, resolveSkillsRoot } = await import("./skills");
 
         // Each job gets its own git worktree, so concurrent jobs cannot collide
-        // and a half-finished job keeps its work. The worktree is ALSO the
-        // boundary: `--dir` confines the agent to it, which is what makes the
-        // blast-radius check mean anything.
+        // and a half-finished job keeps its work. The worktree is where the
+        // agent STARTS; what confines it there is the sandbox (jobSandbox
+        // below), not its working directory.
         const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, cron.name);
         const worker = findWorker(parsed.data, cron.agent);
         const department = worker === undefined
           ? undefined
           : parsed.data.departments.find((d) => d.workers.some((w) => w.name === worker.name));
         if (worker !== undefined && department !== undefined) {
-          // Radius 0 - the NARROWEST boundary - because an agent now has tools.
-          // The ledger currently lets a proposer assert its own radius, which is
-          // a trust boundary trusting its subject; defaulting closed is the
-          // opposite and stays safe until that radius is derived server-side.
+          // The radius the change is JUDGED at, below. AGENTS.md used to say 0
+          // whatever the job's name granted, so a job named for cross-department
+          // work was told it had none of that authority, and then held to it.
           writeInstructions(
             worktree.path,
-            buildInstructions(department, worker, { name: cron.name, task: cron.task }, 0, SKILLS_DIR),
+            buildInstructions(department, worker, { name: cron.name, task: cron.task }, blastRadiusFor(cron), resolveSkillsRoot()),
           );
         }
         log(`job "${cron.name}" worktree ${worktree.branch} at ${worktree.path}`);
 
         try {
-        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company, { workdir: worktree.path }, REGISTRY), {
+        const sandbox = jobSandbox(worktree.path, cron.name, cron.expectTools === false ? "read" : "write");
+        const result = await dispatch(cron, driverFor(worker ?? null, parsed.data.company, { workdir: worktree.path, sandbox }, REGISTRY), {
           onStep: (step): void => {
             log(`step ${step.no}/${step.kind}: ${step.label} (${step.ms}ms)`);
           },

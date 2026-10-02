@@ -17,6 +17,12 @@ What the container enforces, what it does not, and how to change either safely.
   `node_modules` for, and it died on the first import.
 - The image runs as the base image's existing `bun` user at **UID 1000**.
   `useradd --uid 1000` fails: the uid is already taken.
+- **`cod-sandbox`** (`docker/sandbox.c`) is compiled statically into the image
+  with `-Werror`; `COD_SANDBOX` names it. The skill bundle is copied in and
+  `COD_SKILLS_DIR` names it.
+- The build directory is an explicit `WORKDIR`. Inherited from the base, it
+  once put this project's `package.json` in an ancestor of bun's global
+  directory, and `bun add --global` installed kilo into the wrong tree.
 
 ## Enforced controls
 
@@ -31,18 +37,20 @@ claim that drifts from the code fails the build.
 | PID ceiling | `--pids-limit 512` |
 | Memory ceiling | `--memory 2g` |
 | No credentials | opencode runs unauthenticated; the clean-room fails if an `auth.json` appears |
-| No Docker socket | never passed as a mount; the clean-room fails if any bind names it |
+| No runtime socket | `assertMountAllowed` resolves every bind and refuses sockets, runtime directories and directories holding a runtime socket; the clean-room asserts the exact mount list |
 | Read-only workspace | `cod.json` mounted `ro` |
+| Agent sandbox | every agent runs under `cod-sandbox` (Landlock); see `sandbox.md`. The clean-room checks a sandboxed process is denied `/cod` and `/work` |
+| One supervisor | it refuses to start unless it is PID 1 |
 | Bounded output | 4 MB per stream per command, tail kept |
 | Self-restart | `--restart`, capped - see `recovery.md` |
 
 ## Not enforced - do not rely on these
 
-- **Agent-to-agent isolation.** One container, one filesystem, one uid. Any
-  agent can read and overwrite any other agent's files. This is the accepted
-  cost of "one container, many agents". Worktrees are the planned fix
-  (one branch per worktree).
-- **Write restriction.** Nothing stops an agent editing its own instructions.
+- **Read isolation between agents.** One container, one filesystem, one uid:
+  any agent can read the repository and every worktree. Writes are confined by
+  the sandbox (`sandbox.md`); reads are not.
+- **Shared `/tmp`, `$HOME` and `cod/` refs.** Every agent may write them.
+- **Its own instructions.** Nothing stops an agent editing its own `AGENTS.md`.
 - **Spend ceilings.** No accounting boundary inside the container.
 - **Egress filtering.** Outbound is required - agents must install what a
   project needs - and that is also the exfiltration path.
@@ -66,8 +74,11 @@ Two constraints that are Docker's, not ours:
 
 ```sh
 cod up
-docker inspect cod-sandbox-cod --format '{{json .HostConfig}}' | jq '{
+name=$(cod container-name --json | jq -r .container)
+docker inspect "$name" --format '{{json .HostConfig}}' | jq '{
   CapDrop, SecurityOpt, PidsLimit, Memory, RestartPolicy }'
-docker exec cod-sandbox-cod id -u          # 1000
-sh scripts/cleanroom.sh /tmp/cod-verify   # all 19 checks
+docker inspect "$name" --format '{{json .Mounts}}' | jq '[.[].Destination]'
+docker exec "$name" id -u                 # 1000
+docker exec "$name" cod-sandbox --probe   # landlock abi N
+sh scripts/cleanroom.sh /tmp/cod-verify
 ```

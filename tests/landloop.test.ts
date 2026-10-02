@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { openWork, propose, get } from "../src/work";
+import { openWork, propose, get, latestReview, claimById, commit } from "../src/work";
 import { landWork } from "../src/land";
 import { briefFor } from "../src/runwork";
 
@@ -58,6 +58,22 @@ function seeded(state: string): string {
   return made.item.id;
 }
 
+/**
+ * Finish an item the way the real worker does - claimed by id, committed done -
+ * because only finished work is reviewed. Called again after a request for
+ * changes to stand in for the worker's next attempt.
+ */
+function finished(state: string, id: string): void {
+  const handle = openWork(state);
+  try {
+    handle.db.query("UPDATE work SET state = 'ready' WHERE id = ? AND state = 'proposed'").run(id);
+    const claimed = claimById(handle, id, "test-worker");
+    if (claimed !== null) commit(handle, id, claimed.lease_epoch, "done", "worker finished");
+  } finally {
+    handle.close();
+  }
+}
+
 function stateDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "cod-loop-state-"));
   dirs.push(dir);
@@ -67,6 +83,7 @@ function stateDir(): string {
 /** Land the same item repeatedly, as the governance tick would. */
 function lander(dir: string, state: string, id: string, maxRetries: number | undefined, answer: (why: string) => string) {
   return async (why: string) => {
+    finished(state, id); // the worker's attempt this review is of
     const h = openWork(state);
     const item = get(h, id);
     h.close();
@@ -108,16 +125,21 @@ describe("the review loop", () => {
     await land("alpha");
     await land("beta");
 
+    // The worker runs in between, as it does in production - and its commit
+    // REPLACES work.reason. That is what lost every objection but the newest
+    // when they lived there; on the review row they survive the run.
+    finished(state, id);
     const h = openWork(state);
     const item = get(h, id);
+    const review = latestReview(h, id);
     h.close();
-    const reason = item?.reason ?? "";
+    const reason = review?.reason ?? "";
     // Attempt three that only sees attempt two's objection may fix that one and
     // regress the first, and the reviewer will say so for a fourth time.
     expect(reason).toContain("alpha");
     expect(reason).toContain("beta");
-    expect(briefFor(item!)).toContain("alpha");
-    expect(briefFor(item!)).toContain("beta");
+    expect(briefFor(item!, review)).toContain("alpha");
+    expect(briefFor(item!, review)).toContain("beta");
   });
 
   test("a MECHANICAL refusal never retries, at any cap", async () => {
@@ -148,10 +170,13 @@ describe("the review loop", () => {
     await land("only chance");
     const h = openWork(state);
     const item = get(h, id);
+    const review = latestReview(h, id);
     h.close();
-    const reason = item?.reason ?? "";
-    expect(reason.startsWith("review")).toBe(false);
-    expect(briefFor(item!)).toBe("write notes");
+    expect(review?.outcome).toBe("rejected");
+    // The brief is exactly what it was before any review: the task and the
+    // paths it named, and no objection to "fix".
+    expect(briefFor(item!, review)).toBe(briefFor(item!, null));
+    expect(briefFor(item!, review)).not.toContain("reviewed and returned");
   });
 
   test("a cap of zero refuses on the first objection", async () => {
@@ -219,4 +244,8 @@ describe("the review loop", () => {
   });
 });
 
-for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+// In afterAll, not at module top level: top-level code runs while bun is
+// COLLECTING the tests, before any directory exists, and so deleted nothing.
+afterAll(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});

@@ -6,8 +6,10 @@ For when `cod results` is not enough and you need to know what a field means.
 
 - `ok` / `FAIL` - the job's outcome, read from the dispatcher rather than from
   the agent's own account.
-- `r0` / `r1` / `r2` - the blast radius the job actually ran under. DERIVED
-  from the target paths, never from what the job claimed. `r2` is global.
+- `r0` / `r1` / `r2` - the blast radius the job ran under. For ledger work it
+  is DERIVED from the paths the task named, never from a number it claimed; for
+  a cron job it comes from the job's name (`-cross-`, `-global-`). `r2` is
+  global.
 - `[N files: a, b, c]` - the files it changed, read from git. This is the line
   that lets you judge a run without opening a diff.
 - `REFUSED: ...` - the boundary stopped it, with the offending paths named. A
@@ -19,9 +21,14 @@ For when `cod results` is not enough and you need to know what a field means.
 - `proposed` - someone proposed it. NOT runnable until the CEO reconciles.
 - `ready` - reconciled and runnable.
 - `running` - claimed, with a lease. Has an epoch; the commit is fenced by it.
-- `done` / `failed` - finished. `failed` covers both "did not work" and "was
-  refused", so check the reason.
-- `rejected` - the reconciler refused it as out of the proposer's authority.
+- `done` - the run finished. For a task that is not the end: it still has to
+  be reviewed - `cod work blocked` and the review outcome say what happened
+  next.
+- `failed` - the run did not work. `run failed (n/3): ...` is counted, and the
+  reconciler puts it back on the queue until the third; after that it waits in
+  `cod work blocked`. A failure recorded with `--failed` by a person is final.
+- `rejected` - refused before it ever ran: global work, or out of the
+  proposer's authority. It is never retried.
 
 ## `epoch` and why it is in the list
 

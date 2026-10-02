@@ -6,52 +6,52 @@
  * which no model may override, and once by the radius.
  *
  * **The retry lives here and only here.** A `request-changes` verdict puts the
- * item back to `ready` with the reviewer's words as its brief, up to
- * DEFAULT_MAX_RETRIES times; every objection accumulates so a later attempt sees
- * the earlier ones too. The count is durable, so a restart cannot reset the cap
- * into an endless loop.
+ * item back on the queue, up to DEFAULT_MAX_RETRIES times, and every objection
+ * so far is kept ON THE REVIEW ROW, where `briefFor` reads it for the next
+ * attempt. It used to be kept on `work.reason` - which the worker's own commit
+ * overwrites with its output - so in production a retry only ever saw the
+ * newest objection, and the "objections accumulate" property held only in tests
+ * that never ran a worker between two reviews.
  *
- * The earlier version of this comment claimed the retry was "briefed by the
- * reviewer's words". It was not - nothing read `work.reason`, and the brief came
- * from the payload alone, so a retry re-ran the identical prompt. The comment
- * was true for about one commit. `briefFor` in src/runwork.ts is what makes it
- * true.
- *
- * A MECHANICAL finding is never retried at any cap: judgeReview returns before
- * it asks the model, because a global path is a rule rather than an opinion.
- *
- * A merge is not idempotent by accident, so `landedBranches` remembers what has
- * already gone in for the life of the process.
+ * Three things are requests for changes WITHOUT asking a model, because they are
+ * facts rather than opinions, and they count toward the same cap:
+ *   - the branch committed nothing;
+ *   - the branch conflicts with the base;
+ * and a MECHANICAL finding (a secret, a forbidden action, a global path, a
+ * symlink, a submodule, a binary) is terminal at any cap: judgeReview returns
+ * before it asks the model, because a rule is not an opinion.
  */
 
-import { execFileSync } from "node:child_process";
-import { judgeReview, mechanicalChecks, canMerge, REVIEW_SKILL } from "./review";
-import { openWork, recordReview, latestReview, type WorkItem } from "./work";
+import { gitOut, runGit, resolveBase, SAFE_DIFF_FLAGS, SAFE_DIFF_OPTIONS } from "./git";
+import { judgeReview, mechanicalChecks, canMerge, REVIEW_SKILL, type MechanicalResult } from "./review";
+import { openWork, recordReview, latestReview, requeue, ledgerText, type ReviewRecord, type WorkItem } from "./work";
 import { isGlobalPath } from "./boundary";
-import { SAFE_DIFF_FLAGS, NO_EXT_DIFF } from "./change";
+import { radiusForWork, targetPathsOfItem, textOfItem } from "./runwork";
+import { assertSafeName } from "./worktree";
 import type { LandOutcome } from "./governance";
+
+export { resolveBase };
 
 export interface LandOptions {
   readonly repo: string;
   readonly stateDir: string;
-  /**
-   * The shared repository to push landed work into, if the workspace named one.
-   *
-   * Undefined is the default and the common case: the merge stays in the
-   * volume, exactly as it always has.
-   */
-  readonly landingRepo?: string;
   /** Asks the model. Injected so this is testable without a provider. */
   readonly ask: (prompt: string) => Promise<string>;
   readonly maxRetries?: number;
+  /**
+   * Called after a successful merge, with the base branch. The supervisor uses
+   * it to export landed work (see src/export.ts). Never allowed to undo or fail
+   * a merge that already happened.
+   */
+  readonly afterLanding?: (base: string) => void;
 }
 
 /**
  * Three, not one.
  *
  * One retry with an UNBRIEFED agent was a coin flip, so it was never worth more
- * than one. The brief is real now - the agent is handed the reviewer's actual
- * objection - so the retries are worth spending.
+ * than one. The brief is real now - the agent is handed every objection so far -
+ * so the retries are worth spending.
  *
  * Still bounded on purpose. An unbounded loop is a company that argues for ever
  * and never converges, and it spends a free model call on each pass. An operator
@@ -60,240 +60,284 @@ export interface LandOptions {
  */
 export const DEFAULT_MAX_RETRIES = 3;
 
-function git(repo: string, args: readonly string[]): string | null {
-  try {
-    return execFileSync("git", ["-C", repo, ...args], {
-      encoding: "utf8",
-      timeout: 60_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
+/** How many characters of accumulated objections a retry is briefed with. */
+export const MAX_OBJECTIONS = 3_000;
 
 /*
  * Everything that used to be a module-level Set - "already landed", "already
- * given its retry" - is now ONE ROW in the review table.
- *
- * They were Sets because they were convenient, and that was exactly the bug:
- * a Set is empty after every supervisor restart, so a rejected item lost its
- * protection on the next boot and was re-reviewed from scratch. A verdict
- * nothing recorded is a verdict nobody keeps.
+ * given its retry" - is ONE ROW in the review table. A Set is empty after every
+ * supervisor restart, so a rejected item lost its protection on the next boot.
  */
-
-
-
-/**
- * The branch work is merged INTO, discovered from the repository.
- *
- * This was the literal string "master", in two files. On a repository whose
- * initial branch is `main` - git's own default since 2.28 - `git diff
- * master...branch` fails with "ambiguous argument", `landWork` sees null, and
- * reports `skipped`. NOT a failure: a skip. So every item was silently skipped
- * for ever while the review loop looked perfectly healthy.
- *
- * That is the single most likely reason nothing has ever been merged, and every
- * fixture in this repository ran `git init -b master`, which made the
- * assumption invisible to the suite.
- *
- * Resolution order, most authoritative first:
- *   1. `refs/remotes/origin/HEAD` - what the remote actually calls default
- *   2. the branch HEAD points at right now
- *   3. `master`, then `main` - only if that ref genuinely exists
- *
- * Step 3 is last and verified, so a repo on `main` can never resolve to `master`.
- */
-export function resolveBase(repo: string): string {
-  const candidates: string[] = [];
-  const symbolic = git(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-  if (symbolic !== null && symbolic !== "") candidates.push(symbolic.replace(/^origin\//, ""));
-  const head = git(repo, ["symbolic-ref", "--short", "HEAD"]);
-  if (head !== null && head !== "") candidates.push(head);
-  candidates.push("master", "main");
-  for (const candidate of candidates) {
-    const exists = git(repo, ["rev-parse", "--verify", "--quiet", candidate]);
-    if (exists !== null && exists !== "") return candidate;
-  }
-  return "HEAD";
-}
 
 /**
  * Every path a branch touched, from GIT rather than from diff text.
  *
  * A deletion emits `--- a/verify.sh` and `+++ /dev/null`; a rename emits no
  * `+++` line at all. Any check that reads the diff TEXT therefore cannot see
- * either - which is how `git rm verify.sh` landed and removed a global file from
- * master.
+ * either - which is how `git rm verify.sh` landed and removed a global file.
  *
- * `--name-status` names every path regardless of what happened to it, and a
- * rename's status carries BOTH sides. A path that fails to parse is INCLUDED, so
- * a malformed entry refuses rather than passes: an unreadable change is not an
- * approved change.
+ * `--name-status -z` names every path regardless of what happened to it, and a
+ * rename's or copy's entry carries BOTH sides. NUL-separated, so a path with a
+ * tab or a newline in it is one path rather than three. A malformed tail is
+ * INCLUDED, so it refuses rather than passes.
  */
 export function changedPaths(repo: string, branch: string, base?: string): string[] {
   const from = base ?? resolveBase(repo);
-  const raw = git(repo, [...SAFE_DIFF_FLAGS, "diff", ...NO_EXT_DIFF, "--name-status", "--find-renames", `${from}...${branch}`]);
+  const raw = gitOut(repo, [...SAFE_DIFF_FLAGS, "diff", ...SAFE_DIFF_OPTIONS, "--name-status", "-z", "--find-renames", `${from}...${branch}`]);
   if (raw === null || raw === "") return [];
+  const tokens = raw.split("\u0000").filter((t) => t !== "");
   const paths: string[] = [];
-  for (const line of raw.split("\n")) {
-    if (line.trim() === "") continue;
-    const parts = line.split("\t");
-    // Everything after the status column is a path. For `R100 old new` that is
-    // BOTH sides, which is exactly what a rename-away from a global path needs:
-    // the old path no longer exists, so the new one alone would say nothing.
-    for (const p of parts.slice(1)) {
-      const path = (p ?? "").trim();
-      if (path !== "") paths.push(path);
+  for (let i = 0; i < tokens.length; ) {
+    const status = tokens[i] ?? "";
+    const sides = /^[RC]/.test(status) ? 2 : 1;
+    for (let k = 1; k <= sides; k += 1) {
+      const path = tokens[i + k];
+      if (path !== undefined && path !== "") paths.push(path);
     }
+    i += sides + 1;
   }
   return paths;
 }
 
-export async function landWork(repo: string, item: WorkItem, options: LandOptions): Promise<LandOutcome> {
-  const branch = `cod/${item.id}`;
-  const base = resolveBase(repo);
+/**
+ * Findings that need git to see: what the TEXT diff hides or cannot show.
+ *
+ * - A SYMLINK is one line of text naming a target, and the target can be
+ *   anywhere - `/cod`, another worktree, the host path of a bind mount. A reader
+ *   that follows it leaves the repository.
+ * - A SUBMODULE is a pointer to a commit in someone else's repository, which a
+ *   later checkout would fetch from a URL of the branch's choosing.
+ * - A BINARY file has no reviewable lines, so neither the scan nor the reviewer
+ *   ever saw its content. An unreviewable change is not an approved change.
+ */
+export function structuralFindings(repo: string, branch: string, base: string): string[] {
+  const findings: string[] = [];
+  const raw = gitOut(repo, [...SAFE_DIFF_FLAGS, "diff", ...SAFE_DIFF_OPTIONS, "--raw", "-z", "--no-renames", `${base}...${branch}`]) ?? "";
+  const tokens = raw.split("\u0000").filter((t) => t !== "");
+  for (let i = 0; i + 1 < tokens.length; i += 2) {
+    const meta = tokens[i] ?? "";
+    const path = tokens[i + 1] ?? "";
+    const newMode = meta.replace(/^:/, "").split(" ")[1] ?? "";
+    if (newMode === "120000") findings.push(`structure: ${path} is a symlink; a link can point anywhere, so it is not landed`);
+    if (newMode === "160000") findings.push(`structure: ${path} is a submodule; it would fetch code nobody reviewed`);
+  }
+  const numstat = gitOut(repo, [...SAFE_DIFF_FLAGS, "diff", ...SAFE_DIFF_OPTIONS, "--numstat", "-z", "--no-renames", `${base}...${branch}`]) ?? "";
+  for (const entry of numstat.split("\u0000")) {
+    const m = /^-\t-\t(.+)$/.exec(entry);
+    if (m?.[1] !== undefined) findings.push(`structure: ${m[1]} is a binary file and cannot be reviewed`);
+  }
+  return findings;
+}
 
-  // The durable guard. A landed or rejected item is not looked at again: the
-  // old guard was a Set, and a Set is empty after a restart, which is how a
-  // rejected item came back to life on every boot.
+/**
+ * The paths this branch would conflict on, or null when it merges cleanly.
+ *
+ * `git merge-tree --write-tree` computes the merge without touching the working
+ * tree, so a conflict is found BEFORE anything is merged. The merge used to be
+ * attempted directly, and a conflict left `/work` mid-merge - `UU` paths,
+ * `MERGE_HEAD` - after which every later merge failed too. Measured.
+ *
+ * Returns null as well when this git is too old to answer; the merge below
+ * still aborts cleanly if it fails.
+ */
+export function conflictsWith(repo: string, base: string, branch: string): string[] | null {
+  const result = runGit(repo, ["merge-tree", "--write-tree", "--name-only", "--no-messages", base, branch]);
+  if (result.ok || result.code !== 1) return null;
+  const lines = result.out.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  // The first line is the tree id; the conflicted paths follow.
+  const paths = [...new Set(lines.slice(1))];
+  return paths.length === 0 ? ["(unnamed)"] : paths;
+}
+
+/** Keep the newest objections within the bound, oldest dropped first. */
+function boundObjections(text: string): string {
+  if (text.length <= MAX_OBJECTIONS) return text;
+  const lines = text.split("\n");
+  while (lines.length > 1 && lines.join("\n").length > MAX_OBJECTIONS) lines.shift();
+  const kept = lines.join("\n");
+  return kept.length <= MAX_OBJECTIONS ? kept : kept.slice(kept.length - MAX_OBJECTIONS);
+}
+
+export async function landWork(repo: string, item: WorkItem, options: LandOptions): Promise<LandOutcome> {
+  // The id becomes a branch name in every git command below. Validated here,
+  // not trusted from the caller: this is exported, and it is the one
+  // irreversible operation in the system.
+  try {
+    assertSafeName(item.id, "work id");
+  } catch (error) {
+    return { outcome: "skipped", reason: (error as Error).message };
+  }
+  const branch = `cod/${item.id}`;
+
+  // The durable guard. A landed or rejected item is not looked at again - and
+  // looking is NOT recorded. This path used to write its "skipped" through the
+  // same upsert as a verdict, so a second call OVERWROTE `landed` or
+  // `rejected` with `skipped`; the next tick then saw a non-terminal row and
+  // reviewed the item again. A rejected item could land that way.
   const ledger = openWork(options.stateDir);
-  const previous = latestReview(ledger, item.id);
-  ledger.close();
+  let previous: ReviewRecord | null;
+  let current: WorkItem | null;
+  try {
+    previous = latestReview(ledger, item.id);
+    current = ledger.db.query("SELECT * FROM work WHERE id = ?").get(item.id) as WorkItem | null;
+  } finally {
+    ledger.close();
+  }
   if (previous !== null && (previous.outcome === "landed" || previous.outcome === "rejected")) {
-    return note(options, item, {
-      outcome: "skipped",
-      reason: `${branch} was already reviewed as ${previous.outcome}: ${previous.reason}`,
-    });
+    return { outcome: "skipped", reason: `${branch} was already reviewed as ${previous.outcome}: ${previous.reason}` };
+  }
+  // Only FINISHED work is reviewed. An item that went back on the queue and is
+  // running again has a branch that is half of an attempt.
+  if (current === null || current.state !== "done") {
+    return { outcome: "skipped", reason: `${item.id} is ${current?.state ?? "missing"}, not done; only finished work is reviewed` };
   }
 
   // A retry is counted from the RECORD, not from `attempts`, which counts
-  // dispatches and would grant a fresh retry every time.
-  // How many times this has already been sent back, from the RECORD.
-  //
-  // This was a boolean, and a boolean cannot count - so maxRetries above 1 was
-  // inert no matter what it was set to. Every value except 1 was decoration.
-  // Durable for the same reason the landed/rejected guard is: a module-level
-  // counter is zero after every restart.
+  // dispatches and would grant a fresh retry every time. Durable for the same
+  // reason the landed/rejected guard is: a module-level counter is zero after
+  // every restart.
   const attemptsSoFar = previous?.outcome === "changes-requested" ? (previous.attempts ?? 1) : 0;
+  const maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
+  const base = resolveBase(repo);
 
-  const diff = git(repo, [...SAFE_DIFF_FLAGS, "diff", ...NO_EXT_DIFF, `${base}...${branch}`]);
-  if (diff === null) {
-    return note(options, item, { outcome: "skipped", reason: `no diff for ${branch}` });
+  const branchExists = gitOut(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+  if (branchExists === null || branchExists === "") {
+    // Nothing to review for THIS run. Not a verdict, so the item is not offered
+    // again until it runs again.
+    return note(options, item, { outcome: "skipped", reason: `nothing to land: ${branch} does not exist` });
   }
+
+  const diff = gitOut(repo, [...SAFE_DIFF_FLAGS, "diff", ...SAFE_DIFF_OPTIONS, `${base}...${branch}`]);
+  if (diff === null) {
+    // git itself failed. Not the branch's fault, so not a verdict: try again.
+    return note(options, item, { outcome: "deferred", reason: `could not diff ${branch} against ${base}; will retry` });
+  }
+
+  /** A request for changes, inside the cap; past it, a rejection that says why. */
+  const askForChanges = (objection: string): LandOutcome => {
+    if (attemptsSoFar >= maxRetries) {
+      return note(options, item, {
+        outcome: "rejected",
+        // Says what it was told to fix and how many chances it had, because an
+        // item in the blocked queue reading only "rejected" has told the
+        // operator nothing.
+        reason: `still not right after ${attemptsSoFar} retr${attemptsSoFar === 1 ? "y" : "ies"}: ${objection}`,
+      });
+    }
+    const handle = openWork(options.stateDir);
+    try {
+      // `requeue` consumes the epoch, so no run still holding the old one can
+      // ever commit against the retry.
+      requeue(handle, item.id);
+    } finally {
+      handle.close();
+    }
+    const line = `review (attempt ${attemptsSoFar + 1}): ${objection}`;
+    const prior = previous?.outcome === "changes-requested" ? previous.reason : "";
+    const objections = boundObjections(prior === "" ? line : `${prior}\n${line}`);
+    note(options, item, { outcome: "changes-requested", reason: objections }, "", attemptsSoFar + 1);
+    return { outcome: "changes-requested", reason: objection };
+  };
+
   if (diff === "") {
-    // No changes is not a failure to review; it is nothing to land.
-    return note(options, item, { outcome: "skipped", reason: `${branch} changed nothing` });
+    // The most common real outcome of a free model: it talked and shipped
+    // nothing. That is not "nothing to review" - it is work that was not done,
+    // and it gets the same demand for a fix as any other objection.
+    return askForChanges(`${branch} committed nothing. Do the task and commit the result on your branch.`);
   }
 
   // The PATHS come from git; the text scan still covers secrets and forbidden
   // actions, which have no path equivalent.
   const touched = changedPaths(repo, branch, base);
+  const scanned = mechanicalChecks(diff);
   const globalTouched = touched.filter(isGlobalPath);
-  const mechanical = {
-    ...mechanicalChecks(diff),
-    findings: [...mechanicalChecks(diff).findings, ...globalTouched.map((p) => `global: ${p} is a global path; only the CEO lands changes there`)],
-    ok: mechanicalChecks(diff).ok && globalTouched.length === 0,
-  };
+  const findings = [
+    ...scanned.findings,
+    ...globalTouched
+      .filter((p) => !scanned.findings.some((f) => f.includes(`global: ${p} `)))
+      .map((p) => `global: ${p} is a global path; only the CEO lands changes there`),
+    ...structuralFindings(repo, branch, base),
+  ];
+  const mechanical: MechanicalResult = { ok: findings.length === 0, findings };
 
-  // A mechanical finding is terminal BEFORE the model is asked, whatever the
-  // retry cap is - a global path is a rule, not an opinion, and looping it
-  // invites the worker to argue with a deterministic check.
-  //
-  // That guarantee lives in judgeReview, which returns `reject` without ever
-  // calling `ask`. It was duplicated here first, and mutation testing is what
-  // proved the copy was dead: deleting this early return changed no test, while
-  // deleting the one inside judgeReview broke three. One implementation of a
-  // rule, in the place that owns it.
-  const verdict = await judgeReview({ diff, task: item.payload, mechanical, ask: options.ask });
-
-  const radius = item.blast_radius ?? 0;
-  if (!canMerge(verdict, radius)) {
-    const changes = verdict.outcome === "request-changes";
-    if (changes && attemptsSoFar < (options.maxRetries ?? DEFAULT_MAX_RETRIES)) {
-      // THE ONE RETRY, with the review as the brief. Recorded on the item, so
-      // the next attempt carries the reviewer's words rather than starting over.
-      const handle = openWork(options.stateDir);
-      try {
-        // `commit` only accepts done|failed - both terminal. A retry is not
-        // terminal, so it is released rather than committed: cleared lease, no
-        // epoch bump, and the reviewer's words kept as the reason so the next
-        // attempt is briefed by them.
-        // `release` clears the lease and bumps the epoch WITHOUT changing state,
-        // so the item stays `done`-shaped for the tick's filter while no stale
-        // run can ever commit against it again.
-        // EVERY objection so far, not only the newest. Attempt three that sees
-        // only attempt two's objection may fix that one and regress the first,
-        // and the reviewer will then say so for a fourth time.
-        const priorRow = handle.db.query("SELECT reason FROM work WHERE id = ?").get(item.id) as
-          | { reason: string | null }
-          | undefined;
-        const priorReview = (priorRow?.reason ?? "").startsWith("review") ? `${priorRow?.reason}${""}` + String.fromCharCode(10) : "";
-        handle.db.query("UPDATE work SET lease_owner = NULL, lease_epoch = lease_epoch + 1, reason = ? WHERE id = ?")
-          .run(`${priorReview}review (attempt ${attemptsSoFar + 1}): ${verdict.reason}`, item.id);
-        handle.db.query("UPDATE work SET state = 'ready' WHERE id = ?").run(item.id);
-      } finally {
-        handle.close();
-      }
-      return note(options, item, { outcome: "changes-requested", reason: verdict.reason }, "", attemptsSoFar + 1);
+  // A conflict is a fact about the branch and the base, not an opinion, and the
+  // worker can fix it: merge the base into its branch and resolve. Checked only
+  // once nothing mechanical is wrong, since a refusal outranks a rebase.
+  if (mechanical.ok) {
+    const conflicts = conflictsWith(repo, base, branch);
+    if (conflicts !== null) {
+      return askForChanges(
+        `${branch} conflicts with ${base} on: ${conflicts.join(", ")}. Merge ${base} into your branch, resolve the conflicts, and commit.`,
+      );
     }
+  }
+
+  const declared = targetPathsOfItem(item);
+  const verdict = await judgeReview({
+    diff,
+    task: textOfItem(item),
+    mechanical,
+    ask: options.ask,
+    declaredPaths: declared,
+    changedPaths: touched,
+  });
+
+  if (verdict.unavailable === true) {
+    // No reviewer judged it. Recording a rejection here put work in the blocked
+    // queue whenever the free provider had a bad minute.
+    return note(options, item, { outcome: "deferred", reason: verdict.reason });
+  }
+
+  // The radius is DERIVED from the paths, never read from the row the proposer
+  // filled in. (The global paths it actually touched are already refused above.)
+  const radius = radiusForWork(item.payload, declared, item.blast_radius);
+  if (!canMerge(verdict, radius)) {
+    if (verdict.outcome === "request-changes") return askForChanges(verdict.reason);
+    return note(options, item, { outcome: "rejected", reason: verdict.reason });
+  }
+
+  // The merge itself, into the base and nowhere else. If the main checkout is
+  // not on the base branch, merging there would land the work on whatever
+  // branch it happens to be on.
+  const head = gitOut(repo, ["symbolic-ref", "--short", "HEAD"]);
+  if (head !== base) {
     return note(options, item, {
-      outcome: "rejected",
-      // Says what it was told to fix and how many chances it had, because an
-      // item sitting in the blocked queue with "rejected" and nothing else has
-      // told the operator nothing.
-      reason: changes
-        ? `still not right after ${attemptsSoFar} retr${attemptsSoFar === 1 ? "y" : "ies"}: ${verdict.reason}`
-        : verdict.reason,
+      outcome: "deferred",
+      reason: `the work repository is on ${head ?? "a detached HEAD"}, not ${base}; refusing to merge anywhere else`,
     });
   }
-
-  // The merge itself. `-c` flags mean the repo's own config cannot redirect
-  // this: a branch that could add a pre-merge hook would be a way to run code
-  // in the CEO's hands.
-  // Identity passed EXPLICITLY, alongside the hooks guard.
-  //
-  // The merge relied on whatever identity happened to be configured. That works
-  // in the container, where the image sets one globally, and fails anywhere that
-  // does not - which is exactly where CI runs, and the four failures there were
-  // all `git merge failed` for this reason. Ambient identity is not a thing a
-  // merge should depend on.
-  const merged = git(repo, [
-    "-c", "core.hooksPath=/dev/null",
+  // Identity passed EXPLICITLY: src/git.ts runs with no global config, and a
+  // merge that relied on an ambient identity failed on CI. Hooks, fsmonitor and
+  // global config are off for every command there.
+  const merged = runGit(repo, [
     "-c", "user.name=cod",
     "-c", "user.email=cod@localhost",
-    "merge", "--no-ff", "-m", `cod: land ${branch}`, branch,
+    "merge", "--no-ff", "--no-edit", "-m", `cod: land ${branch}`, branch,
   ]);
-  if (merged === null) {
-    return note(options, item, { outcome: "rejected", reason: `git merge failed for ${branch}` });
+  if (!merged.ok) {
+    // Never leave the repository mid-merge: every later merge would fail on it.
+    runGit(repo, ["merge", "--abort"]);
+    return note(options, item, {
+      outcome: "deferred",
+      reason: `git merge failed for ${branch}: ${(merged.err || merged.out).split("\n")[0] ?? "no detail"}; the merge was aborted`,
+    });
   }
-  const sha = git(repo, ["rev-parse", "HEAD"]);
-
-  // Push it somewhere it can be seen from outside, if the operator named a
-  // place. A fixed ref rather than whatever HEAD points at, so a bad day in the
-  // volume cannot redirect the push onto a branch nobody chose.
-  if (options.landingRepo !== undefined) {
-    const pushed = git(options.landingRepo, ["push", "origin", "HEAD:refs/heads/cod-landed"]);
-    if (pushed === null) {
-      // The merge already happened locally, so this is NOT rolled back and NOT
-      // reported as a lost merge. The operator has to check the landing repo.
-      return note(options, item, {
-        outcome: "landed",
-        branch,
-        reason: `merged ${branch} into master, but could NOT push to ${options.landingRepo} - check that repository`,
-      }, sha ?? "");
-    }
+  const sha = gitOut(repo, ["rev-parse", "HEAD"]) ?? "";
+  try {
+    options.afterLanding?.(base);
+  } catch {
+    // An export that fails is reported by the exporter; it cannot unmerge.
   }
-
-  return note(options, item, { outcome: "landed", branch, reason: `merged ${branch} into master` }, sha ?? "");
+  return note(options, item, { outcome: "landed", branch, reason: `merged ${branch} into ${base}` }, sha);
 }
 
 /**
  * Record a verdict before returning it.
  *
- * Every return path goes through here, which is the point: the bug was a path
- * that returned without recording, and a rejected item nobody records is an
- * item nobody skips.
+ * Every return path that DECIDES something goes through here, which is the
+ * point: the bug was a path that returned without recording, and a rejected
+ * item nobody records is an item nobody skips. The guard path above is the one
+ * deliberate exception - it decides nothing, so it records nothing.
  */
 function note(
   options: LandOptions,
@@ -307,7 +351,7 @@ function note(
     recordReview(handle, {
       workId: item.id,
       outcome: outcome.outcome,
-      reason: outcome.reason,
+      reason: ledgerText(outcome.reason, MAX_OBJECTIONS + 200),
       branch: `cod/${item.id}`,
       landedSha,
       attempts,

@@ -65,20 +65,32 @@ fi
 
 step "the vendored opencode binary"
 if [ -x vendor/opencode/1.18.31/opencode ]; then
-  pass "vendored ($(vendor/opencode/1.18.31/opencode --version))"
+  # In a private TMPDIR: even `--version` leaves a $TMPDIR/opencode behind,
+  # and a check should not litter the machine it checks.
+  vtmp="$(mktemp -d)"
+  pass "vendored ($(TMPDIR="$vtmp" vendor/opencode/1.18.31/opencode --version))"
+  rm -rf "$vtmp"
 else
   fail "opencode is not vendored - run: sh scripts/vendor-opencode.sh"
 fi
 
 step "build inputs"
-for f in docker/Dockerfile.sandbox docker/entrypoint.sh scripts/cleanroom.sh ops/cod-workspace@.service; do
+for f in docker/Dockerfile.sandbox docker/entrypoint.sh docker/sandbox.c scripts/cleanroom.sh ops/cod-workspace@.service; do
   if [ -f "$f" ]; then pass "$f"; else fail "$f is missing"; fi
 done
 
 step "shell syntax"
-for s in scripts/cleanroom.sh scripts/vendor-opencode.sh docker/entrypoint.sh; do
+for s in scripts/cleanroom.sh scripts/vendor-opencode.sh scripts/secret-scan.sh docker/entrypoint.sh; do
   if sh -n "$s" 2>/dev/null; then pass "$s"; else fail "$s does not parse"; fi
 done
+
+step "secret scan"
+# The same scan CI runs before anything is published.
+if sh scripts/secret-scan.sh >/dev/null; then
+  pass "no credential shapes in tracked files"
+else
+  fail "a tracked file holds a credential shape - run: sh scripts/secret-scan.sh"
+fi
 
 printf '\n'
 if [ "$FAILED" -eq 0 ]; then

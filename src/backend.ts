@@ -127,11 +127,10 @@ export function isAdvertised(model: string): boolean {
  * The argv for one run.
  *
  * NO `--dir` on either engine: measured to fail on a git worktree with an
- * opaque "Unexpected server error". Confinement is the spawn's `cwd`, set by
- * `localRunner`.
+ * opaque "Unexpected server error". The agent starts in the spawn's `cwd`, set
+ * by `localRunner` - placement, not confinement; confinement is the sandbox.
  *
- * The prompt is JSON-quoted so a task containing quotes or newlines cannot
- * break out of the command.
+ * The prompt is ONE raw argv element. There is no shell anywhere on this path.
  */
 export function buildFor(backendId: string, model: string, prompt: string, title: string): string[] {
   const backend = backendById(backendId);

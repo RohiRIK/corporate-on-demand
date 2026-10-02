@@ -11,14 +11,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  STALE_AFTER_MS,
-  formatLiveness,
-  heartbeatPath,
-  readHeartbeat,
-  supervisorLiveness,
-  type Heartbeat,
-} from "../src/liveness";
+import { STALE_AFTER_MS, formatLiveness, heartbeatPath, readHeartbeat, supervisorLiveness, type Heartbeat, liveSince, type Liveness } from "../src/liveness";
 
 function scratch(): string {
   return mkdtempSync(join(tmpdir(), "cod-live-"));
@@ -135,7 +128,7 @@ describe("formatLiveness", () => {
   test("never reads as NOT RUNNING with the command to fix it", () => {
     const line = formatLiveness({ state: "never", heartbeat: null, ageMs: null });
     expect(line).toContain("NOT RUNNING");
-    expect(line).toContain("cod supervise");
+    expect(line).toContain("cod up");
     // The single most important property: no wording here could be read as
     // "everything is fine".
     expect(line).not.toMatch(/live/i);
@@ -160,5 +153,43 @@ describe("formatLiveness", () => {
     const line = formatLiveness({ state: "live", heartbeat: beat({ jobs: [] }), ageMs: 0 });
     expect(line).toContain("0 job(s)");
     expect(line).toContain("none");
+  });
+});
+
+describe("live means live IN THIS container", () => {
+  // Found by the dogfood run: `cod up` replaced a container and reported
+  // "live (seen 15s ago)" - the OLD supervisor's heartbeat, still fresh on the
+  // host, read before the new supervisor had written anything.
+  const beat = (startedAt: number, seenAt: number): Liveness => ({
+    state: "live",
+    heartbeat: { runId: "r", startedAt, seenAt, jobs: [], maxConcurrent: 2 },
+    ageMs: 0,
+  });
+  const containerStart = 1_000_000;
+
+  test("a heartbeat from a supervisor that started after the container is live", () => {
+    expect(liveSince(beat(containerStart + 500, containerStart + 900), containerStart)).toBe(true);
+  });
+
+  test("a fresh heartbeat from BEFORE the container started is not this container's", () => {
+    expect(liveSince(beat(containerStart - 60_000, containerStart + 100), containerStart)).toBe(false);
+  });
+
+  test("a little clock disagreement is tolerated", () => {
+    expect(liveSince(beat(containerStart - 1_000, containerStart), containerStart)).toBe(true);
+  });
+
+  test("with no known container start, it is the plain liveness check", () => {
+    expect(liveSince(beat(0, 0), null)).toBe(true);
+    expect(liveSince({ state: "never", heartbeat: null, ageMs: null }, null)).toBe(false);
+  });
+
+  test("the container's start time is read from docker, and the zero time is no time", async () => {
+    const { makeDocker } = await import("../src/docker");
+    const docker = (stdout: string) =>
+      makeDocker({ runner: async () => ({ code: 0, stdout, stderr: "", truncated: false }) as never, timeoutMs: 1000 });
+    const config = { workspaceFile: "/srv/one/cod.json" } as never;
+    expect(await docker("2026-10-02T07:36:00.123456789Z\n").startedAt(config)).toBe(Date.parse("2026-10-02T07:36:00.123Z"));
+    expect(await docker("0001-01-01T00:00:00Z\n").startedAt(config)).toBeNull();
   });
 });

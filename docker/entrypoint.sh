@@ -17,6 +17,26 @@ else
   log "workspace found at $WORKSPACE_FILE"
 fi
 
+# The state directory is the one host path the container writes - the ledger,
+# the heartbeat, the log, the results - and a bind mount carries the HOST's
+# ownership in. One the container's uid cannot write used to surface as the
+# supervisor dying on its first mkdir, and `cod up` saying only "not live".
+# Checked here, where the uid asking is the uid that matters, and said in a
+# FATAL line `cod up` repeats along with the fix. Directories and the
+# database: everything else in it is written by rename, which only needs the
+# directory.
+STATE_DIR="${COD_STATE_DIR:-/cod}"
+unwritable=""
+for path in "$STATE_DIR" "$STATE_DIR/logs" "$STATE_DIR/work" "$STATE_DIR/work/ledger.sqlite" \
+            "$STATE_DIR/work/ledger.sqlite-wal" "$STATE_DIR/work/ledger.sqlite-shm" \
+            "$STATE_DIR/results" "$STATE_DIR/inflight" "$STATE_DIR/export"; do
+  if [ -e "$path" ] && [ ! -w "$path" ]; then unwritable="$unwritable $path"; fi
+done
+if [ -n "$unwritable" ]; then
+  log "FATAL: uid $(id -u) cannot write the state directory:$unwritable"
+  exit 78
+fi
+
 mkdir -p /work
 
 # One directory per worker, owned by the uid the agent runs as. Convention, not
@@ -79,6 +99,17 @@ if [ -f "$WORKSPACE_FILE" ]; then
   # Idempotent, and keyed on the COMMIT rather than on .git existing: a volume
   # that has a repository but no commits is exactly the broken state above, and
   # checking only for the directory would skip the repair.
+  # The per-job AGENTS.md is generated into every worktree. It is the agent's
+  # instructions, not the agent's work, and an agent told to "commit your work"
+  # with `git add -A` committed it - so every landed branch carried an
+  # instruction file into the base. Excluded in the shared info/exclude, which
+  # every worktree reads. Idempotent: added once.
+  if ! grep -qx 'AGENTS.md' /work/.git/info/exclude 2>/dev/null; then
+    mkdir -p /work/.git/info
+    printf 'AGENTS.md\n' >> /work/.git/info/exclude
+    log "excluded the generated AGENTS.md from commits"
+  fi
+
   if ! git -C /work rev-parse --verify HEAD >/dev/null 2>&1; then
     # An empty first commit, so there is something to branch from. `.cod-repo`
     # is the marker that says "this volume is a cod work volume", not content.

@@ -1,9 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { openWork, propose, get } from "../src/work";
+import { openWork, propose, get, claimById, commit } from "../src/work";
 import { landWork, resolveBase, changedPaths } from "../src/land";
 import { isGlobalPath } from "../src/boundary";
 
@@ -54,6 +54,13 @@ function seeded(state: string): string {
   const made = propose(handle, { from: "engineering", to: "engineering", kind: "task", payload: "do it", goal: "do it", targetPaths: ["notes.md"] });
   handle.close();
   if (!made.ok || made.item === undefined) throw new Error("seed");
+  // Finished the way the real worker finishes - claimed by id, committed done -
+  // because only finished work is reviewed.
+  const finisher = openWork(state);
+  finisher.db.query("UPDATE work SET state = 'ready' WHERE id = ?").run(made.item.id);
+  const claimed = claimById(finisher, made.item.id, "test-worker");
+  if (claimed !== null) commit(finisher, made.item.id, claimed.lease_epoch, "done", "worker finished");
+  finisher.close();
   return made.item.id;
 }
 
@@ -140,4 +147,8 @@ describe("isGlobalPath agrees with the list the gate uses", () => {
   });
 });
 
-for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+// In afterAll, not at module top level: top-level code runs while bun is
+// COLLECTING the tests, before any directory exists, and so deleted nothing.
+afterAll(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});

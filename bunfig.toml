@@ -1,0 +1,3 @@
+[test]
+# One temporary root per run, removed afterwards. See tests/setup.ts.
+preload = ["./tests/setup.ts"]

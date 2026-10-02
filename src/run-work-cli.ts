@@ -18,15 +18,18 @@
  * operator's runbook treats them differently.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { chooseSandbox, jobPolicy } from "./sandbox";
 import { Workspace } from "./workspace";
-import { openWork, get } from "./work";
-import { runWorkItem, briefFor } from "./runwork";
+import { openWork, get, latestReview } from "./work";
+import { runWorkItem, briefFor, radiusForWork, targetPathsOfItem } from "./runwork";
 import { resolveTarget } from "./assign";
 import { dispatch } from "./dispatch";
 import { driverFor } from "./drivers";
 import { acquireWorktree, releaseWorktree } from "./worktree";
-import { buildInstructions, writeInstructions, SKILLS_DIR } from "./skills";
+import { buildInstructions, writeInstructions, resolveSkillsRoot } from "./skills";
 
 
 const args = process.argv.slice(2);
@@ -73,10 +76,11 @@ if (target.worker === undefined) {
 if (target.note !== undefined) process.stderr.write(`${target.note}\n`);
 const worker = target.worker;
 const department = target.department;
-// The TEXT, not the JSON wrapper. The paths are bookkeeping; handing them to
-// the model as part of its instruction is the system showing its plumbing to
-// the thing it is directing.
-const goal = briefFor(item);
+// The TEXT, not the JSON wrapper - plus every objection a reviewer has made so
+// far, read from the review row. The paths are bookkeeping; handing them to the
+// model as part of its instruction is the system showing its plumbing to the
+// thing it is directing.
+const goal = briefFor(item, latestReview(handle, workId));
 const cron = {
   name: item.id,
   // The WORKER, not the addressee - so the log and the result line name who
@@ -85,9 +89,9 @@ const cron = {
   task: goal,
   schedule: "0 0 1 1 *",
   enabled: true,
-  // Strict, always: work dispatched from the ledger is expected to change
-  // something. A read-only job is a cron with a schedule, not a work item.
-  expectTools: true,
+  // Strict for a task: it is expected to change something. A PLAN only reads,
+  // and its product is the task it proposes, so no tool call is demanded.
+  expectTools: item.kind !== "plan",
 };
 
 const worktree = acquireWorktree(workRoot, worktreeRoot, item.id);
@@ -95,20 +99,32 @@ try {
   // Unconditional now. The old `if (worker && department)` guard is what let a
   // missing instruction file pass as a successful run.
   if (department === undefined) throw new Error(`resolved worker ${worker.name} has no department`);
+  const radius = radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius);
   const instructionsPath = writeInstructions(
     worktree.path,
-    buildInstructions(department, worker, { name: item.id, task: goal }, 0, SKILLS_DIR),
+    buildInstructions(department, worker, { name: item.id, task: goal }, radius, resolveSkillsRoot()),
   );
   // Verified, not assumed. The whole bug was a file that was never written and
   // nothing that noticed.
   if (!existsSync(instructionsPath)) {
     throw new Error(`instructions were not written to ${instructionsPath}`);
   }
+  // The same sandbox the supervisor gives a dispatched item: a plan reads, a
+  // task writes its own worktree. Required unless cod.json says "off".
+  try {
+    mkdirSync(join(workRoot, ".git", "logs", "refs", "heads", "cod"), { recursive: true });
+  } catch {
+    // No reflogs is fine; the sandbox skips a rule for a path that is not there.
+  }
+  const sandbox = {
+    choice: chooseSandbox(workspace.agentSandbox, process.env["COD_SANDBOX"], existsSync),
+    policy: jobPolicy({ repo: workRoot, worktree: worktree.path, job: item.id, home: homedir(), mode: item.kind === "plan" ? "read" : "write" }),
+  };
   const result = await runWorkItem({
     stateDir,
     workId,
     cron,
-    driver: driverFor(worker ?? null, workspace.company, { workdir: worktree.path }),
+    driver: driverFor(worker ?? null, workspace.company, { workdir: worktree.path, sandbox }),
   });
   void dispatch;
   if (result.ok) {

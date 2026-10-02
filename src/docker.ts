@@ -13,9 +13,11 @@
  *    CLI attach to a foreign container and inherit its mounts and capabilities.
  */
 
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { PATHS } from "./image";
-import type { Config } from "./config";
+import { CONTAINER_GID, CONTAINER_UID, type Config } from "./config";
 import { RuntimeFailure, UnsupportedRuntimeError, UsageError } from "./errors";
 import type { Workspace } from "./workspace";
 
@@ -220,18 +222,63 @@ export function containerName(workspace: string): string {
 }
 
 /**
- * The Docker socket is the only path from "contained" to "host lost". Mounting
- * it would hand every agent in the container root on this machine, so it is
- * refused at the one place a mount is built.
+ * A container runtime socket is the only path from "contained" to "host lost".
+ * Mounting one hands every agent in the container root on this machine, so it
+ * is refused at the one place a mount is built.
+ *
+ * The guard this replaces compared the source with two exact strings, so
+ * `/var/run/docker.sock/`, a symlink to the socket, a rootless or Desktop
+ * socket, and - the realistic one - a DIRECTORY that contains the socket (a
+ * state directory of /var/run, or of $HOME on Docker Desktop) all went straight
+ * through (SEC-04 A). Now the path is resolved, symlinks followed, and refused
+ * if it is a socket of any kind, is a runtime's own directory, or contains a
+ * runtime socket where runtimes put them.
  */
-const FORBIDDEN_MOUNT_SOURCES = ["/var/run/docker.sock", "/run/docker.sock"] as const;
+const SOCKET_NAMES = ["docker.sock", "containerd.sock", "podman.sock", "crio.sock", "buildkitd.sock", "dockershim.sock"] as const;
+/** Where those sockets live, relative to a directory someone might mount. */
+const SOCKET_HOMES = [
+  "", "run", "docker", "containerd", "podman", "crio", "buildkit",
+  ".docker/run", ".docker/desktop", "user/1000", "run/user/1000",
+] as const;
+const RUNTIME_DIRS = [
+  "/var/run/docker", "/run/docker", "/run/containerd", "/var/run/containerd", "/run/podman",
+  "/var/run/podman", "/run/crio", "/var/run/crio", "/run/buildkit", "/var/lib/docker", "/var/lib/containerd",
+] as const;
 
 export function assertMountAllowed(source: string): void {
-  for (const forbidden of FORBIDDEN_MOUNT_SOURCES) {
-    if (source === forbidden) {
-      throw new UsageError(
-        `refusing to mount ${forbidden}: it would give every agent root on this host`,
-      );
+  if (typeof source !== "string" || !isAbsolute(source)) {
+    // Docker resolves nothing for a bind source; a relative or missing one is a
+    // bug upstream, and checking it against the rules below would be checking
+    // some other path.
+    throw new UsageError(`refusing to mount ${String(source)}: a bind mount needs an absolute host path`);
+  }
+  const refuse = (what: string): never => {
+    throw new UsageError(`refusing to mount ${source}: ${what}; it would give every agent root on this host`);
+  };
+  const lexical = resolve(source);
+  let real = lexical;
+  try {
+    real = realpathSync(lexical);
+  } catch {
+    // A path that does not exist yet holds nothing; it is still checked by name.
+  }
+  for (const path of new Set([lexical, real])) {
+    if (path === "/") refuse("it is the whole host filesystem");
+    if ((SOCKET_NAMES as readonly string[]).includes(basename(path))) refuse("it is a container runtime socket");
+    if (RUNTIME_DIRS.some((dir) => path === dir || path.startsWith(`${dir}/`))) refuse("it is a container runtime's own directory");
+    try {
+      const stat = statSync(path);
+      if (stat.isSocket()) refuse("it is a socket");
+      if (stat.isDirectory()) {
+        for (const home of SOCKET_HOMES) {
+          for (const name of SOCKET_NAMES) {
+            if (existsSync(join(path, home, name))) refuse(`it contains ${join(home, name)}`);
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof UsageError) throw error;
+      // Unreadable or absent: nothing in it can be handed over by this mount.
     }
   }
 }
@@ -376,6 +423,35 @@ async function containerWorkspaceLabel(
 
 }
 
+/**
+ * Why a running container no longer matches what `cod up` would start, or null.
+ *
+ * Only a DEFINITE mismatch counts: a container from before the label existed,
+ * or an inspect that cannot be read, is adopted as it always was - replacing a
+ * container stops the work running in it, which is not a guess to make.
+ */
+async function staleness(name: string, spec: ContainerSpec, runner: Runner): Promise<string | null> {
+  const facts = await tryRun(runner, ["inspect", "--format", "{{json .Config.Labels}}\t{{.Image}}", name], 10_000);
+  if (facts === undefined || facts.code !== 0) return null;
+  const [labelsJson = "", imageId = ""] = facts.stdout.trim().split("\t");
+  let labels: Record<string, unknown> = {};
+  try {
+    labels = (JSON.parse(labelsJson) as Record<string, unknown> | null) ?? {};
+  } catch {
+    return null;
+  }
+  const recorded = labels[CONFIG_LABEL];
+  if (typeof recorded === "string" && recorded !== spec.labels[CONFIG_LABEL]) {
+    return "cod.json changed since this container started";
+  }
+  const current = await tryRun(runner, ["image", "inspect", "--format", "{{.Id}}", spec.image], 10_000);
+  const currentId = current?.code === 0 ? current.stdout.trim() : "";
+  if (imageId.startsWith("sha256:") && currentId.startsWith("sha256:") && imageId !== currentId) {
+    return `the image ${spec.image} was rebuilt since this container started`;
+  }
+  return null;
+}
+
 /** Whether a container of this name exists at all, labelled or not. */
 async function containerExists(name: string, runner: Runner): Promise<boolean> {
   const result = await tryRun(runner, ["inspect", "--format", "{{.Id}}", name], 10_000);
@@ -445,6 +521,17 @@ export async function doctor(
   };
 }
 
+/** The label that records which workspace definition a container runs. */
+export const CONFIG_LABEL = "cod.config";
+
+/**
+ * A digest of the workspace AS PARSED - what the supervisor acts on - so a
+ * reformatted cod.json is the same workspace and an edited one is not.
+ */
+export function workspaceDigest(workspace: Workspace): string {
+  return createHash("sha256").update(JSON.stringify(workspace)).digest("hex").slice(0, 16);
+}
+
 /**
  * The container spec for a workspace.
  *
@@ -461,7 +548,10 @@ export function buildWorkspaceSpec(config: Config, workspace: Workspace): Contai
           // that decides whether `cod up` may adopt an already-running container,
           // and a name-only label made every workspace called cod.json compare
           // equal - so the guard adopted the wrong container instead of refusing.
-          labels: { "cod.workspace": config.workspaceFile },
+          //
+          // And what the container was started FROM, so `cod up` can tell a
+          // running container that no longer matches cod.json - see up().
+          labels: { "cod.workspace": config.workspaceFile, [CONFIG_LABEL]: workspaceDigest(workspace) },
           mounts: [
             // The workspace is a bind mount, so the repo and its worktrees live
             // in the container's own writable layer under /work. That keeps a
@@ -475,21 +565,11 @@ export function buildWorkspaceSpec(config: Config, workspace: Workspace): Contai
             // and every worktree with it. A volume survives both the restart and
             // the removal, which is what makes a worktree worth having.
             { source: workVolume(config), target: "/work", readOnly: false, volume: true },
-            // OPT-IN ONLY, and absent unless the operator named a path.
-            //
-            // A writable mount of host state is the single most dangerous thing
-            // this container could be given, so it happens on request only, at a
-            // fixed target rather than wherever the host happens to keep it,
-            // and it goes through assertMountAllowed like every other mount.
-            ...(workspace.landing === undefined
-              ? []
-              : (() => {
-                  // Asserted here rather than filtered later: the guard exists
-                  // to REFUSE, so its result cannot be a value that goes on
-                  // being used.
-                  assertMountAllowed(workspace.landing.repo);
-                  return [{ source: workspace.landing.repo, target: "/landing", readOnly: false }];
-                })()),
+            // And NOTHING else - not even when `landing.repo` is set. Landed
+            // work leaves as a bundle in the state directory and `cod land`
+            // fetches it on the host (src/export.ts). A writable host repository
+            // used to be mounted here at /landing, which let an agent plant a
+            // hook or an fsmonitor that the operator's own git would later run.
           ],
           // Egress is deliberate: agents install packages, so --network none is
           // incompatible with the requirement and was removed on purpose. This
@@ -498,7 +578,7 @@ export function buildWorkspaceSpec(config: Config, workspace: Workspace): Contai
           memory: "2g",
           cpus: "2",
           env: { TZ: workspace.timezone },
-          user: "1000:1000",
+          user: `${CONTAINER_UID}:${CONTAINER_GID}`,
   };
 }
 
@@ -545,16 +625,14 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
       return { code: result.code, out: `${result.stdout}${result.stderr}` };
     },
 
-    async up(config: Config, workspace: Workspace): Promise<string> {
+    async up(config: Config, workspace: Workspace, report: (line: string) => void = () => {}): Promise<string> {
       const wsName = workspaceFromConfig(config);
 
       // The landing repository is checked BEFORE the container exists.
       //
-      // Checked here because checking it later means checking it per merge: the
-      // container would start, agents would work, work would be reviewed and
-      // merged, and only then would the push fail on a path that was a typo
-      // from the beginning. Nothing is lost in that case, but the operator
-      // finds out far too late.
+      // It is not mounted - `cod land` exports into it from the host - but a
+      // typo here would otherwise surface only at the first export, after work
+      // had already been reviewed and merged.
       if (workspace.landing !== undefined) {
         const { checkLandingRepo } = await import("./landing");
         const check = checkLandingRepo(workspace.landing.repo);
@@ -566,22 +644,67 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
         }
       }
       const name = containerNameForFile(config.workspaceFile);
+      const spec = buildWorkspaceSpec(config, workspace);
 
       // Idempotent, but only by label: a container of the same name that we did
       // not create is a conflict, not something to adopt.
       const state = await tryRun(runner, ["inspect", "--format", "{{.State.Running}}", name], 10_000);
-      if (state?.code === 0 && state.stdout.trim() === "true") {
+      if (state?.code === 0) {
         const label = await containerWorkspaceLabel(name, runner);
-        if (label === config.workspaceFile) return name;
-        throw new UsageError(
-          `a container named ${name} is already running but belongs to a different workspace (${label ?? "unlabelled"}); ` +
-            `refusing to adopt it. Stop it with \`docker rm -f ${name}\` first.`,
-        );
+        if (label !== config.workspaceFile) {
+          throw new UsageError(
+            `a container named ${name} already exists but belongs to a different workspace (${label ?? "unlabelled"}); ` +
+              `refusing to adopt it. Remove it with \`docker rm -f ${name}\` first.`,
+          );
+        }
+        if (state.stdout.trim() === "true") {
+          // Running, and ours - but is it still THIS workspace? An edited
+          // cod.json or a rebuilt image used to change nothing: `cod up` adopted
+          // the old container and reported success. Worse, cod.json is a file
+          // bind mount, which pins the inode, so an editor that saves by rename
+          // left the container reading the OLD file until it was recreated.
+          const stale = await staleness(name, spec, runner);
+          if (stale === null) return name;
+          report(`${stale}; replacing ${name} (work in flight is stopped, and reported as abandoned on the next start)`);
+        } else {
+          report(`${name} was stopped; replacing it (the work is in the volume, not the container)`);
+        }
+        // OUR container, stopped (after the restart policy gave up, after a
+        // reboot, after `docker stop`) or stale. `docker run` with its name used
+        // to fail with a name conflict, so `cod up` - and the systemd unit that
+        // runs it - could not bring the workspace back without a manual
+        // `cod down`. The work is in the volume, not the container, so the
+        // container is replaced.
+        await run(["rm", "--force", name], wsName);
       }
 
-      const spec = buildWorkspaceSpec(config, workspace);
       await run(buildRunArgv(spec), wsName);
       return name;
+    },
+
+    /**
+     * The last lines the workspace container wrote, for a failure message.
+     *
+     * When the supervisor never comes up, the reason is in the container's own
+     * output - "cannot write the state directory", a schema error - and "check
+     * docker logs" made the operator go and find it. Never throws: a failure
+     * report must not fail.
+     */
+    async logTail(config: Config, lines = 15): Promise<string[]> {
+      const name = containerNameForFile(config.workspaceFile);
+      const result = await tryRun(runner, ["logs", "--tail", String(lines), name], 10_000);
+      if (result === undefined || result.code !== 0) return [];
+      return `${result.stdout}\n${result.stderr}`.split("\n").map((line) => line.trimEnd()).filter((line) => line !== "");
+    },
+
+    /** When the workspace container last started, in epoch ms, or null. */
+    async startedAt(config: Config): Promise<number | null> {
+      const name = containerNameForFile(config.workspaceFile);
+      const result = await tryRun(runner, ["inspect", "--format", "{{.State.StartedAt}}", name], 10_000);
+      if (result === undefined || result.code !== 0) return null;
+      const ms = Date.parse(result.stdout.trim());
+      // Docker reports the zero time, year 1, for a container that never ran.
+      return Number.isFinite(ms) && ms > 0 ? ms : null;
     },
 
     async down(config: Config): Promise<boolean> {

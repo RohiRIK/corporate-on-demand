@@ -19,12 +19,12 @@
  * model, and so the supervisor can supply the one that has a driver behind it.
  */
 
-import { runCycle, type CycleResult } from "./cycle";
+import { cycleMinutesFor, runCycle, type CycleResult } from "./cycle";
 import { holdMeeting, type Meeting } from "./meeting";
 // Re-exported through one seam so the tick and the dispatch path cannot drift
 // apart on how a radius is derived.
 import { radiusForWork, targetPathsOfItem } from "./runwork";
-import { openWork, listWork, latestReview, type WorkItem } from "./work";
+import { openWork, listWork, latestReview, type ReviewRecord, type WorkItem } from "./work";
 import type { Workspace } from "./workspace";
 
 /** What happened to a piece of finished work. */
@@ -32,7 +32,10 @@ export type LandOutcome =
   | { readonly outcome: "landed"; readonly branch: string; readonly reason: string }
   | { readonly outcome: "changes-requested"; readonly reason: string }
   | { readonly outcome: "rejected"; readonly reason: string }
-  | { readonly outcome: "skipped"; readonly reason: string };
+  /** Nothing to review for this run (no branch). Offered again after it runs again. */
+  | { readonly outcome: "skipped"; readonly reason: string }
+  /** Nobody could judge it - the reviewer was unreachable, or git failed. Offered again next tick. */
+  | { readonly outcome: "deferred"; readonly reason: string };
 
 export interface DispatchOutcome {
   readonly ok: boolean;
@@ -79,7 +82,6 @@ export interface GovernanceReport {
 }
 
 const DEFAULT_MAX_DISPATCH = 2;
-const DEFAULT_INTERVAL_MINUTES = 30;
 
 /**
  * Is this item one the company may start on its own?
@@ -106,6 +108,37 @@ function dispatchable(item: WorkItem, workspace: Workspace): boolean {
   // own value is written by the proposing agent, so trusting it means the rule
   // constrains the thing it constrains.
   return radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius) < 2;
+}
+
+/**
+ * Should this item be offered for review on this tick?
+ *
+ * Only finished WORK: a task that ran in a worktree. A plan's product is a task,
+ * not a branch, and a proposal the CEO decided is closed as `done` without ever
+ * running - neither has anything to land.
+ *
+ * Read from the RECORD, never from this tick's memory - a Set is empty after a
+ * restart, which is how a rejected item used to come back on every boot:
+ *   - nothing recorded yet, or `deferred` (nobody could judge it), or `cleared`
+ *     (a person unblocked it): offer it;
+ *   - `landed`, `rejected`: never again;
+ *   - `skipped` or `changes-requested`: only once the item has RUN again since
+ *     that review - otherwise a branch with nothing to land would be offered,
+ *     and skipped, on every tick for ever.
+ */
+export function reviewable(item: WorkItem, review: ReviewRecord | null): boolean {
+  if (item.state !== "done" || item.kind === "plan" || item.to_agent === "ceo") return false;
+  if (review === null) return true;
+  switch (review.outcome) {
+    case "landed":
+    case "rejected":
+      return false;
+    case "deferred":
+    case "cleared":
+      return true;
+    default:
+      return (item.started_at ?? 0) > review.reviewedAt;
+  }
 }
 
 /**
@@ -152,9 +185,6 @@ export async function runGovernance(
 
   const dispatched: string[] = [];
   const failed: { id: string; reason: string }[] = [];
-  // Once-per-process, so a landed branch is not re-landed every tick. A merge
-  // is not idempotent by accident.
-  const landedIds = new Set<string>();
   for (const item of queue.slice(0, Math.max(0, maxDispatch))) {
     try {
       const outcome = await options.dispatch(item.id);
@@ -176,20 +206,7 @@ export async function runGovernance(
     try {
       const handle = openWork(stateDir);
       try {
-        finished = listWork(handle).filter((item) => {
-          if (item.state !== "done") return false;
-          if (landedIds.has(item.id)) return false;
-          // Skip anything already JUDGED terminally - landed OR rejected - read
-          // from the record rather than from this tick's memory.
-          //
-          // This is the defect the record was added for. `landWork` returned
-          // `rejected` without writing anything, so the item stayed `done`,
-          // this filter kept offering it, and every tick paid for a model
-          // review of work that was never going to land. A Set is empty after a
-          // restart, which is how it came back on every boot as well.
-          const seen = latestReview(handle, item.id)?.outcome;
-          return seen !== "landed" && seen !== "rejected";
-        });
+        finished = listWork(handle).filter((item) => reviewable(item, latestReview(handle, item.id)));
       } finally {
         handle.close();
       }
@@ -200,8 +217,7 @@ export async function runGovernance(
       try {
         const outcome = await options.land(item.id);
         landed.push({ id: item.id, outcome: outcome.outcome });
-        if (outcome.outcome === "landed") landedIds.add(item.id);
-        // "changes-requested" is the ONE retry, and the item goes back to ready
+        // "changes-requested" sends the item back to ready
         // so the next tick re-runs it with the review as its brief. Not here:
         // the lander owns that transition, because only it knows the diff.
       } catch (error) {
@@ -217,6 +233,11 @@ export async function runGovernance(
     `failed ${failed.length}`,
     `${queue.length} item(s) ready`,
     ...(landed.length > 0 ? [`landed ${landed.filter((l) => l.outcome === "landed").length}/${landed.length} reviewed`] : []),
+    // A department that did not plan, and why - resting after empty plans, or
+    // held after three strikes. The supervisor logs this line and nothing else
+    // of the cycle, so without it a quiet department was indistinguishable
+    // from a broken one.
+    ...(cycle.held ?? []).map((h) => `${h.department} held: ${h.reason}`),
   ].join("; ");
   return { cycle, meeting, dispatched, landed, failed, summary };
 }
@@ -225,13 +246,37 @@ function emptyCycle(reason: string): CycleResult {
   return {
     proposed: [],
     duplicates: 0,
-    reconciled: { promoted: [], rejected: [], expired: [], resolved: [], unchanged: 0, errors: [reason] },
+    reconciled: { promoted: [], rejected: [], expired: [], resolved: [], retried: [], unchanged: 0, errors: [reason] },
     summary: reason,
   };
 }
 
 function emptyMeeting(): Meeting {
   return { cast: [], speaking: [], decisions: [], summary: "meeting did not run", spoken: false };
+}
+
+/**
+ * Run `fn` at most once at a time; a call while one is in flight is skipped.
+ *
+ * Bun.cron fires on the minute whether or not the last tick finished, and a
+ * tick that dispatches agents takes minutes. Overlapping ticks saw the same
+ * finished item and both reviewed it - two model calls, and two merges racing
+ * in one repository - so the second one is refused, and `onBusy` says so.
+ */
+export function singleFlight(fn: () => Promise<void>, onBusy: () => void): () => Promise<void> {
+  let running = false;
+  return async (): Promise<void> => {
+    if (running) {
+      onBusy();
+      return;
+    }
+    running = true;
+    try {
+      await fn();
+    } finally {
+      running = false;
+    }
+  };
 }
 
 /**
@@ -242,11 +287,7 @@ function emptyMeeting(): Meeting {
  * off, and nonsense intervals fall back rather than scheduling nonsense.
  */
 export function governanceIntervalFor(workspace: Workspace): number {
-  const raw = (workspace as { governance?: { enabled?: boolean; cycleEveryMinutes?: number } }).governance;
+  const raw = (workspace as { governance?: { enabled?: boolean } }).governance;
   if (raw?.enabled === false) return 0;
-  const wanted = raw?.cycleEveryMinutes;
-  if (typeof wanted !== "number" || !Number.isFinite(wanted) || wanted <= 0) {
-    return DEFAULT_INTERVAL_MINUTES;
-  }
-  return Math.floor(wanted);
+  return cycleMinutesFor(workspace);
 }

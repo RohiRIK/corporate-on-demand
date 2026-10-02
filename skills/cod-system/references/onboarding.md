@@ -38,8 +38,9 @@ success every single night.
 - `cod init` writes the host's zone, so a new workspace is right by default.
 - The zone is validated with `Intl` at parse time. An unrecognised zone is
   rejected by name rather than silently behaving as UTC.
-- It is passed as `-e TZ=` on `docker run` **and** on every `docker exec`. A
-  zone set only at start is a zone the scheduler does not use.
+- It is passed as `-e TZ=` on `docker run`, and the supervisor - PID 1 -
+  inherits it. Its startup line prints the workspace's zone and the zone its own
+  clock reads; the two must agree, or a cron fires at the wrong hour.
 - `cod status` always prints the resolved zone with its current offset. A cron
   expression with no visible clock is not interpretable.
 

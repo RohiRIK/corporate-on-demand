@@ -9,13 +9,13 @@
  ╚═════╝   ╚═════╝ ╚═╝  ╚═╝
 ```
 
-**A credential-free container workspace for scheduled AI agents**
+**A credential-free container workspace for an unattended company of AI agents**
 
-One container per workspace. On-device cron. No API key.
+One container per workspace. Agents confined by the kernel. No API key.
 
 [![Bun](https://img.shields.io/badge/bun-1.3.12-white?style=flat-square&logo=bun)](https://bun.sh)
 [![opencode](https://img.shields.io/badge/opencode-1.18.31-blue?style=flat-square)](https://github.com/sst/opencode)
-[![Tests](https://img.shields.io/badge/tests-310%20passing-brightgreen?style=flat-square)]()
+[![Tests](https://img.shields.io/badge/tests-785%20passing-brightgreen?style=flat-square)]()
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)]()
 
 </div>
@@ -104,9 +104,10 @@ Verified end to end: a cron asked *"What is 17 plus 26?"* returned **`43`** in
 that is the check — see the note in `CHANGELOG.md` about a verification that
 passed against a job that had done nothing.
 
-What an agent may do is deliberately **minimal**: it returns text, and it is
-told it cannot change files. No `--auto`, no tool grant, no worktree per agent,
-no merge. Those are open decisions, not omissions.
+An agent **acts**: it runs with tools (`--auto`) in its own git worktree, on its
+own `cod/` branch, and what it commits is reviewed and merged by the company -
+never by the agent. What confines it is not its working directory but the
+**sandbox**: every agent runs inside Landlock, below.
 
 Two facts worth knowing if you run this yourself:
 
@@ -117,10 +118,76 @@ Two facts worth knowing if you run this yourself:
   `execFile` hangs to its own timeout on the identical command, while
   `Bun.spawn` returns it in ~3.3s.
 
-`echoDriver` remains as the deterministic reference implementation and is the
-fallback when a workspace names no worker; `echoTask` in `src/task.ts` is off
-the live path entirely. `TaskResult` remains the result contract between the
+`echoDriver` remains as the deterministic reference implementation of the driver
+contract, for tests; it is not on the live path - a cron naming no worker runs
+the free default model and says so. `echoTask` in `src/task.ts` is off the live
+path entirely. `TaskResult` remains the result contract between the
 supervisor and the work.
+
+## The agent sandbox
+
+Every agent - a cron job, a dispatched ledger item, `cod work run`, the reviewer,
+a meeting's voice - runs through `cod-sandbox`, a small static launcher compiled
+into the image (`docker/sandbox.c`), with a policy decided in `src/sandbox.ts`.
+It uses **Landlock**, an unprivileged Linux LSM: a process restricts itself and
+every child inherits it, so it works under the container's `--cap-drop ALL` and
+no-new-privileges, with no root and no extra capability.
+
+| An agent... | |
+|---|---|
+| reads and writes `/cod` - the ledger, results, logs, `cod.json` | **denied**: not granted at all |
+| writes the main checkout, `.git/config`, `.git/hooks`, `.git/info` | **denied** |
+| moves the base branch, or any ref outside `refs/heads/cod/` | **denied** |
+| writes another job's worktree | **denied** |
+| signals the supervisor (Landlock ABI 6+) | **denied** |
+| writes its own worktree and commits on its own branch | allowed |
+| reads the repository, uses `/tmp` and its `$HOME`, reaches the network | allowed - see [the posture](docs/SECURITY_POSTURE.md) |
+
+A plan writes nothing of the repository; the reviewer and the meeting get no
+repository at all, only a scratch directory. It **fails closed**: with no
+launcher, or no Landlock in the kernel, an agent is refused rather than run
+unconfined - unless `cod.json` says `"agentSandbox": "off"`, which is recorded
+and shown by `cod status`. `tests/sandbox.test.ts` compiles the real launcher and
+runs real git through it; the clean room checks a live container.
+
+## The company, unattended
+
+The supervisor runs one governance tick on its own interval
+(`governance.cycleEveryMinutes`, default 30):
+
+1. **Plan.** Each department with nothing in motion proposes a plan to the CEO.
+   The reconciler vets it; the meeting decides; the plan runs read-only and
+   answers `GOAL / PATHS / CHECK` (`src/plan.ts`).
+2. **Task.** The answer becomes a task scoped to the paths it named. Its blast
+   radius is **derived from those paths** - global ones are refused by rule.
+3. **Work.** A worker runs it in its own worktree, inside the sandbox, briefed
+   with the goal, the paths, and any reviewer objections so far.
+4. **Review and land.** Mechanical checks first (secrets, global paths, a push
+   or a merge in the diff, symlinks, submodules, binaries) - no model can
+   override them. Then a reviewer model: approve, request changes (the work goes
+   back with the objection, up to `maxReviewRetries`), or reject. An approved
+   change is merged into the base branch and written out as a bundle.
+5. **Again.** A department plans again once its work has landed. Three bad
+   outcomes in a row hold it until a person looks; a plan that finds nothing new
+   makes it rest, twice as long each time, up to a day.
+
+`cod work blocked` is the queue of what stopped and needs a person, and
+`cod work unblock` is the way out.
+
+### Landing
+
+Nothing on the host is writable from the container except the state directory,
+which agents cannot reach. After each landing the supervisor writes the base
+branch as a git bundle into `<state>/export/`, and on the host:
+
+```sh
+cod land                                     # into landing.repo as cod-landed
+git -C /path/to/repo push origin cod-landed  # publishing it is yours
+```
+
+`cod land` verifies every object (`git fsck --strict`, in a throwaway repository)
+before anything reaches your repository, and only fast-forwards; `--force`
+replaces `cod-landed` if the history no longer descends from it.
 
 ## The work ledger
 
@@ -191,10 +258,11 @@ hook would add nothing the loop does not already re-derive.
 It must therefore be **idempotent**, because cron re-fires it whether or not the
 last tick did anything — running it twice must equal running it once.
 
-It rides the **existing 30s supervisor tick** rather than adding a timer, and it
-is wrapped so a ledger failure cannot take down every cron in the workspace.
+It rides the supervisor's **30-second heartbeat tick** rather than adding a timer,
+runs again inside every governance tick and on `cod reconcile`, and it is wrapped
+so a ledger failure cannot take down every cron in the workspace.
 
-Four jobs per pass:
+Five jobs per pass:
 
 1. **Promote or reject proposals.** Only the reconciler may make a proposal
    runnable.
@@ -205,7 +273,10 @@ Four jobs per pass:
    file**, and never re-runs the job. The case is "work was paid for, the ack
    was lost" — re-running would double-execute and double-bill a job that
    already finished.
-4. **Report**, and do nothing else.
+4. **Retry failed runs**, a bounded number of times (`run failed (n/3)`), on the
+   pass after the one that failed them; after that they wait in
+   `cod work blocked`.
+5. **Report**, and do nothing else.
 
 ## The anti-loop gate
 
@@ -218,14 +289,13 @@ of department + goal + sorted target paths, truncated to 32 hex chars. This is
 **real enforcement, not a prompt asking an agent to notice**, and it is the
 brake on self-graded work.
 
-Blast radius is a **rule, not a judgement**. Radius 2 is global and is refused
-by the reconciler whatever proposed it; radius 1 is cross-department and stays
-runnable. The predicate is a separate pure function (`needsCeo`) so the policy
-is testable and cannot drift.
-
-**`blast_radius` is currently supplied by the agent, so this is a policy hint,
-not an unspoofable control.** An agent can submit `0` for global work, and the
-reconciler's refusal is only as strong as that input.
+Blast radius is a **rule, not a judgement**, and it is **derived, not
+asserted**: a task that names a global path (`src/`, `package.json`, any
+`.gitattributes`...) is radius 2 whatever number its proposer wrote, and radius 2
+is refused by the reconciler. A declared radius is recorded but can never lower
+what the paths imply. At landing the radius is derived again from the paths the
+change *actually* touched, so naming harmless paths and touching global ones
+does not get through either.
 
 ## The CLI surface
 
@@ -233,22 +303,27 @@ All of this is reachable from the command line, which is a hard project
 requirement. Flags below are as implemented in `src/index.ts` and `src/meta.ts`.
 
 ```sh
-cod work list [--state <s>] [--json]
+cod work list [--status <s>] [--json]
 cod work propose --from <agent> --to <agent> --goal <text> \
-                 [--payload <t>] [--paths a,b] [--blast 0|1|2] [--kind <k>]
+                 [--payload <t>] [--paths a,b] [--blast 0|1|2] [--kind task|plan]
 cod work claim [--owner <name>] [--to <agent>]
 cod work commit <id> --epoch <n> [--reason <text>] [--failed]
+cod work run <id>                  # run one ready item in the container, now
+cod work blocked                   # what stopped and needs a person
+cod work unblock <id> [why] [--override]
 cod reconcile
 ```
+
+A refusal - a fenced commit, a duplicate proposal, an unblock that would skip a
+live objection - **exits 2**, so a script can tell it from success.
 
 The work-item id is a **positional argument**, not `--id`. It was a flag
 advertised in `--help` and wired to nothing, and it was removed rather than left
 as a trap one commit away from being live.
 
-**One caveat, stated rather than hidden:** `--state` is *also* the global
-state-directory flag, so `cod work list --state ready` cannot filter by state —
-`ready` is taken as the state directory. The examples below therefore set
-`COD_STATE_DIR` and pass no `--state`. See the changelog for the full defect.
+`--status` filters the list; `--state` is the state *directory*, as on every
+other command. (They were once the same flag, and the filter silently listed
+nothing.)
 
 ### The lifecycle, worked
 
@@ -256,35 +331,34 @@ Every line below is real output from this repository, not an illustration.
 
 ```console
 $ cod work propose --from engineering --to engineering \
-      --goal "add a healthcheck to the compose file" \
-      --paths docker/compose.yml --blast 1
-proposed w-mun3fld6-256770 (state proposed; it is NOT runnable until the CEO reconciles it)
+      --goal "add a healthcheck to the compose file" --paths compose/healthcheck.yml
+proposed w-muqn5e5a-6175ae (state proposed; it is NOT runnable until the CEO reconciles it)
 
 $ cod work propose --from engineering --to engineering \
-      --goal "add a healthcheck to the compose file" \
-      --paths docker/compose.yml --blast 1
-refused: already proposed as w-mun3fld6-256770 (state proposed); re-proposing identical work is refused
-
-$ cod work list
-w-mun3fld6-256770  proposed  engineering -> engineering  epoch=0 attempts=0  blast=1
+      --goal "add a healthcheck to the compose file" --paths compose/healthcheck.yml
+refused: already proposed as w-muqn5e5a-6175ae (state proposed); re-proposing identical work is refused
+$ echo $?
+2
 
 $ cod work claim --owner worker-a
 nothing to claim
 
 $ cod reconcile
-promoted w-mun3fld6-256770 to ready
+promoted w-muqn5e5a-6175ae to ready
 
 $ cod work claim --owner worker-a
-claimed w-mun3fld6-256770 as worker-a (lease_epoch 1, attempt 1)
+claimed w-muqn5e5a-6175ae as worker-a (lease_epoch 1, attempt 1)
 
-$ cod work commit w-mun3fld6-256770 --epoch 0 --reason "the zombie result"
+$ cod work commit w-muqn5e5a-6175ae --epoch 0 --reason "the zombie result"
 commit REFUSED: fenced: lease_epoch 0 is stale (current 1); a newer run owns this item
+$ echo $?
+2
 
-$ cod work commit w-mun3fld6-256770 --epoch 1 --reason "the real result"
-committed w-mun3fld6-256770 as done
+$ cod work commit w-muqn5e5a-6175ae --epoch 1 --reason "the real result"
+committed w-muqn5e5a-6175ae as done
 
 $ cod work list
-w-mun3fld6-256770  done  engineering -> engineering  epoch=2 attempts=1  blast=1  (the real result)
+w-muqn5e5a-6175ae  done      add a healthcheck to the compose file            engineering -> engineering  epoch=2 attempts=1  (the real result)
 ```
 
 The proposal is **unclaimable until `cod reconcile` runs**, the duplicate is
@@ -292,17 +366,18 @@ refused at the database rather than asked not to happen, the stale-epoch commit
 is fenced, and the good one is accepted. Note `epoch=2` after a commit at epoch
 1: the epoch was consumed.
 
-Global work is refused by the rule, whatever proposed it:
+Global work is refused by the rule - here because it names `package.json`,
+whatever radius it claims:
 
 ```console
-$ cod work propose --from engineering --to engineering --goal "change the schema" --blast 2
-proposed w-mun3mb6l-a276f9 (state proposed; it is NOT runnable until the CEO reconciles it)
+$ cod work propose --from engineering --to engineering --goal "change the build" --paths package.json
+proposed w-muqn5eop-0320ea (state proposed; it is NOT runnable until the CEO reconciles it)
 
 $ cod reconcile
-rejected w-mun3mb6l-a276f9
+rejected w-muqn5eop-0320ea
 
-$ cod work list
-w-mun3mb6l-a276f9  failed  engineering -> engineering  epoch=1 attempts=0  blast=2  (blast radius is global; the CEO must dispatch this itself)
+$ cod work list --status rejected
+w-muqn5eop-0320ea  rejected  change the build                                 engineering -> engineering  epoch=0 attempts=0  (blast radius is global; the CEO must di…)
 ```
 
 ## Deliberately not built
@@ -310,8 +385,9 @@ w-mun3mb6l-a276f9  failed  engineering -> engineering  epoch=1 attempts=0  blast
 These are decisions, not omissions.
 
 - **The 9-state machine**, cut to `proposed` / `ready` / `running` / `done` /
-  `failed` plus an `attempts` counter. `claimed`, `review`, `merged` and
-  `abandoned` are states for a pipeline and a reviewer that do not exist.
+  `failed` / `rejected` plus an `attempts` counter. A review's outcome lives in
+  its own `review` table - `landed`, `changes-requested`, `rejected`,
+  `deferred`, `cleared` - not as more work states.
 - **A `priority` column.** Nothing in the system can compute a priority that
   means anything. A column that is always a constant is a lie in a schema.
 - **`tokens_used`.** Budget ceilings were closed because every model is free, so
@@ -323,31 +399,38 @@ These are decisions, not omissions.
 
 | | |
 |---|---|
-| `cod init <name>` | onboarding; writes a secret-free `cod.json` |
-| `cod up` / `down` | start / stop the workspace container (`down` is idempotent) |
-| `cod status` | container state **and** schedule state, separately |
-| `cod supervise` | run the in-container scheduler by hand |
+| `cod init <name>` | onboarding; writes a secret-free `cod.json` (refuses to overwrite one without `--force`) |
+| `cod up` / `down` | start / stop the workspace container (`down` is idempotent and keeps the work volume); `up` replaces a stopped container, or one that no longer matches `cod.json` or the image |
+| `cod status` | container, schedule, sandbox, blocked work and unexported landings |
+| `cod supervise` | what the running supervisor registered - read-only |
 | `cod logs` | the event log — the answer to "what happened" |
 | `cod results` | persisted job results — what ran, and did it work |
+| `cod land` | export landed work into `landing.repo` as `cod-landed` |
+| `cod cycle` / `cod meet` | one company cycle, or one meeting, by hand |
+| `cod work` | the work ledger: `list`, `propose`, `claim`, `commit`, `run`, `blocked`, `unblock` |
+| `cod reconcile` | one pass of the CEO's loop; the supervisor also runs it every 30s and on every governance tick |
+| `cod skills` | the agent skill bundle, and this workspace checked against it |
 | `cod image` | build the workspace image |
 | `cod doctor` | host checks, with the fix for anything missing |
-| `cod purge` | remove the work volume and every commit in it (`--purge` confirms) |
-| `cod work` | the work ledger: `list`, `propose`, `claim`, `commit` |
-| `cod reconcile` | one pass of the CEO's loop; also runs on the supervisor's 30s tick |
+| `cod purge` | remove the work volume, every commit in it, and the export (`--purge` confirms) |
 | `cod config show` | resolved configuration and where each value came from |
 
-Exit codes: `0` success, `1` retryable runtime failure, `2` deterministic usage
-or configuration error.
+Exit codes: `0` success, `1` retryable runtime failure, `2` usage failure or
+refusal - the same command will fail again.
 
 ## What is actually verified
 
 Not claimed — measured, and re-checked by `scripts/cleanroom.sh` on every run:
 
-- one container per workspace, starting in **~0.4s** once the image exists
-- a cron job firing on a real minute boundary, inside a real container
-- an agent producing real output, at **zero cost**, with no credential on disk
-- 11 security controls read back off a live container via `docker inspect`
-- **310 tests**, clean strict typecheck
+- one container per workspace, its supervisor **PID 1** and live before `up`
+  returns
+- the container flags (`--cap-drop ALL`, no-new-privileges, PID and memory
+  limits) and the **exact** mount list, read back off a live container
+- Landlock available, and a sandboxed process denied `/cod` and the main
+  checkout while it reads what it was granted
+- an agent answering an arithmetic question through the sandbox, at **zero
+  cost**, with no credential on disk
+- **785 tests**, clean strict typecheck
 
 The ledger and the reconciler are verified by **mutation, not only by assertion**.
 An assertion proves the code does what you wrote; a mutation proves the test
@@ -355,8 +438,15 @@ would notice if it stopped. Measured on this tree:
 
 | Mutation | Result |
 |---|---|
-| Remove the `lease_epoch` predicate from `commit()` | **18 tests fail** |
-| Make proposals born `ready`, bypassing the CEO entirely | **12 tests fail** |
+| Remove the `lease_epoch` predicate from `commit()` | **3 tests fail** |
+| Make proposals born `ready`, bypassing the CEO entirely | **15 tests fail** |
+
+The first number went DOWN, from 18, and that is the honest reading rather than
+a regression: `commit()` now also requires `running`, which refuses most zombies
+on its own. What is left for the epoch is a zombie that wakes while a newer run
+holds the item, and three tests pin exactly that case. Re-measured on this tree
+with the mutation applied to the SQL itself - a first attempt edited the object
+literal, which the INSERT never reads, and "passed".
 
 A test that passes against broken code is worth nothing.
 
@@ -385,11 +475,14 @@ than as bugs.
 ## Running on boot
 
 Docker's `--restart on-failure:5` survives a **daemon** restart, not a **host**
-reboot — after a reboot the container is simply gone. A templated systemd unit
-closes that:
+reboot. A templated systemd unit closes that; each workspace gets its own state
+directory, owned by uid 1000 - the uid the container runs as:
 
 ```sh
 sudo install -m 644 ops/cod-workspace@.service /etc/systemd/system/
+sudo install -d -o 1000 -g 1000 -m 0750 /var/lib/cod/acme
+sudo cod init acme --yes --workspace /var/lib/cod/acme/cod.json --state /var/lib/cod/acme
+sudo chown -R 1000:1000 /var/lib/cod/acme
 sudo systemctl enable --now cod-workspace@acme.service
 ```
 
@@ -400,37 +493,38 @@ runtime surprise rather than a startup error. See [ops/README.md](ops/README.md)
 ## Verifying it yourself
 
 ```sh
-sh verify.sh                        # typecheck, tests, build inputs
+sh verify.sh                        # typecheck, tests, build inputs, secret scan
 sh scripts/cleanroom.sh /tmp/cod    # empty dir -> a real agent working
 ```
 
 The clean-room rebuilds the image from a clean cache, starts a real container,
-runs a real agent call, and tears the whole thing down — including purging its
-own throwaway workspace, so a run leaves zero volumes and zero containers
-behind. It is the check that a new user needs no manual step.
+checks its posture and its sandbox, runs a real agent call through the sandbox,
+and tears the whole thing down — including purging its own throwaway workspace,
+so a run leaves zero volumes and zero containers behind, even when it fails. It
+is the check that a new user needs no manual step. `COD_CLEANROOM_IMAGE=<tag>`
+runs it against an image that already exists, and says the build was not
+checked.
 
 ## Not yet done
 
 Honest limits. The decisions that were open are closed and recorded in
 [docs/OPEN_QUESTIONS.md](docs/OPEN_QUESTIONS.md) — with the reasoning, so a
-later change reads as a revision rather than an accident.
+later change reads as a revision rather than an accident. Security findings and
+what became of each are indexed in
+[.security-review/STATUS.md](.security-review/STATUS.md).
 
-- **The driver is still the echo driver.** The dispatch *contract* is real and
-  on the live path — steps, boundaries, fencing-friendly stop polling — but
-  `echoDriver` does no work. A real driver implements the same contract; nothing
-  above `dispatch` changes.
-- **No agent-to-agent isolation** (see above).
-- **Job isolation is per-worktree**, on its own git branch. The merge policy is
-  decided (the org approves, never a human — question 2 in the open-questions
-  doc) but not implemented; no merge step runs yet.
-- **`blast_radius` is self-asserted by the proposer.** The rule is enforced
-  correctly, but the input is not: an agent can submit `0` for global work. It
-  is a policy hint, not an unspoofable control.
-- **The novelty key catches byte-identical repeats only.** A department that
-  rewords its goal defeats it, and reworded goals are normal LLM output rather
-  than an edge case.
-- **Ledger growth is uncapped** and the reconciler scans all history on every
-  tick. Fine at this scale; it is the first thing to fix if the ledger grows.
+- **Read isolation between agents.** The sandbox stops an agent writing what is
+  not its own; it can still read the repository and other worktrees, and `/tmp`
+  and `$HOME` are shared.
+- **Any `cod/` branch is writable by any agent**, not only its own: refs share
+  one directory, and Landlock grants directories. The reviewer and the merge
+  see what is on the branch when they look.
+- **Egress is open**, by design: agents install packages. It is also the
+  exfiltration path. See [the posture](docs/SECURITY_POSTURE.md).
+- **The novelty key catches identical repeats only.** A reworded goal is new
+  work; a department that finds nothing rests, but one that rephrases does not.
+- **Ledger growth is bounded, not capped.** The rest stops idle departments
+  adding rows every tick; nothing prunes history yet.
 - **No budget ceiling**, deliberately — every model is free, so there is nothing
   to meter. This needs revisiting the moment a paid model is added.
 

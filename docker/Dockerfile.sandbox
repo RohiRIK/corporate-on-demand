@@ -44,12 +44,21 @@ RUN id -u bun | grep -qx 1000 \
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # The supervisor reads the mounted workspace and registers its cron jobs on
-# Bun.cron. It is run via docker exec rather than from the entrypoint, so a
-# crash is visible as a failed exec instead of a restart loop.
+# Bun.cron. The entrypoint `exec`s it as PID 1 (docker/entrypoint.sh), so the
+# container lives exactly as long as the schedule does; it refuses to run as
+# anything else, so no second one can be exec'd in beside it.
 # The supervisor is BUNDLED, not copied. Copying loose .ts files pulls in the
 # whole import graph, and the container has no node_modules to resolve it
 # from - the copy compiled fine and then died on the first import.
 # `bun build --target=bun` inlines all 99 modules into one readable file.
+#
+# The build directory is named, not inherited. It has to stay off the path
+# from bun's global directory up to /: `bun add --global` below looks for a
+# package.json in every ancestor of /usr/local/install/global, and with this
+# project's at / it installed kilo into /node_modules - along with this
+# project's devDependencies - and the step after it found no kilo. It worked
+# only because the base image happens to set this same WORKDIR.
+WORKDIR /home/bun/app
 COPY package.json bun.lock ./
 COPY src ./src
 RUN bun install --production --frozen-lockfile
@@ -67,15 +76,6 @@ RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/superv
 # `--version` at the end is the build-time assertion. Verified keyless and
 # credential-free before this line was added: 12/12 on a trivial prompt across
 # three of its free models, against roughly 25% on the Zen tier we were on.
-# BUN_INSTALL is set deliberately. Left to default, `bun add --global`
-# installs under /root/.bun and symlinks /usr/local/bin/kilo into it - which
-# works during THIS build, because the build runs as root, and then fails at
-# runtime with "Permission denied" because the container runs as 1000:1000 and
-# cannot traverse /root. A build that passes and a container that cannot start
-# is a worse failure than a build that fails.
-#
-# The version check runs AS THE UNPRIVILEGED USER for the same reason: it is
-# the only check that would have caught the above.
 #
 # BUN_INSTALL is set deliberately. Left to default, `bun add --global`
 # installs under /root/.bun and symlinks /usr/local/bin/kilo into it - which
@@ -83,6 +83,10 @@ RUN bun build src/supervisor.ts --target=bun --outfile /usr/local/lib/cod/superv
 # runtime with "Permission denied" because the container runs as 1000:1000 and
 # cannot traverse /root. A build that passes and a container that cannot start
 # is a worse failure than a build that fails.
+#
+# The `kilo --version` below runs as root, like the rest of this build, so it
+# cannot catch that; a second check after `USER bun` runs every agent tool AS
+# the unprivileged user, which is the only check that would have.
 #
 # The published `kilo` bin is a Node shim (`#!/usr/bin/env node`) that locates
 # the native binary for the platform. This image deliberately ships no Node, so
@@ -101,6 +105,24 @@ RUN BUN_INSTALL=/usr/local bun add --global @kilocode/cli@7.8.1 \
     && chmod a+r /usr/local/install/global/node_modules/@kilocode/cli/bin/kilo.pkg \
     && chmod -R a+rX /usr/local/install/global \
     && kilo --version
+
+# The agent skill bundle, injected into each job's AGENTS.md by the worker's
+# `skills` list. It was never copied into the image, and the supervisor looked
+# for it relative to its own working directory - so in the container every skill
+# silently resolved to nothing. COD_SKILLS_DIR names it; src/skills.ts reads it.
+COPY skills/agent /usr/local/lib/cod/skills/agent
+ENV COD_SKILLS_DIR=/usr/local/lib/cod/skills/agent
+
+# The agent sandbox: a static Landlock launcher every agent runs through
+# (docker/sandbox.c, src/sandbox.ts). Static, so it depends on nothing at run
+# time. Built here because build-essential already is; probed at supervisor
+# start rather than at build time, because the kernel that matters is the one
+# the container RUNS on, not the one that built it.
+COPY docker/sandbox.c /tmp/cod-sandbox.c
+RUN gcc -static -O2 -Wall -Wextra -Werror -o /usr/local/bin/cod-sandbox /tmp/cod-sandbox.c \
+    && rm -f /tmp/cod-sandbox.c \
+    && chmod 755 /usr/local/bin/cod-sandbox
+ENV COD_SANDBOX=/usr/local/bin/cod-sandbox
 
 # Readable by the unprivileged user the container runs as: a root-owned file
 # behind a root-owned directory is unreadable to `bun`.
@@ -127,9 +149,16 @@ RUN { \
 USER bun
 WORKDIR /work
 
-# `git config --system` as a non-root user fails; the safe.directory setting is
-# what lets an agent read a bind-mounted repository owned by another uid.
-RUN git config --global --add safe.directory '*' || true
+# Every agent tool, run as the uid agents run as: a tool installed somewhere
+# uid 1000 cannot reach passes every root-run check above and fails in the
+# first job.
+RUN kilo --version && opencode --version && bun --version
+
+# NO `safe.directory '*'`. It existed so an agent could operate on a
+# bind-mounted repository owned by another uid - the landing repo, which is no
+# longer mounted (src/export.ts). /work is owned by the uid everything runs as,
+# so git's ownership check passes on its own, and a wildcard that switches the
+# check off everywhere is a setting nothing here needs.
 
 # Git identity, image-wide.
 #

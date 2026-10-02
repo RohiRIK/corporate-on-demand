@@ -1,10 +1,10 @@
 /**
  * Supervisor liveness.
  *
- * A `Bun.cron` schedule lives in the supervisor's memory. If the supervisor
- * dies while the container keeps running — which is the normal case, since the
- * container blocks in `tail -f` — the container is `up` and the schedule is
- * gone. Nothing about the container's state says so.
+ * A `Bun.cron` schedule lives in the supervisor's memory. The supervisor is the
+ * container's PID 1, so the container dies with it - but between a crash and
+ * the restart, or with a supervisor wedged in a tick, the container can be `up`
+ * while nothing is scheduled. Nothing about the container's state says so.
  *
  * That is the same class of failure this project has guarded against since the
  * `Bun.cron` version check: a scheduler that looks healthy while doing nothing.
@@ -28,6 +28,8 @@ export interface Heartbeat {
   readonly seenAt: number;
   readonly jobs: readonly string[];
   readonly maxConcurrent: number;
+  /** Whether agents run sandboxed, as the supervisor found it at startup. */
+  readonly sandbox?: string;
 }
 
 export type Liveness =
@@ -69,10 +71,30 @@ export function supervisorLiveness(stateDir: string, now: number = Date.now()): 
   return { state: "live", heartbeat, ageMs };
 }
 
+/** How far the container's clock and the heartbeat's may disagree, in ms. */
+const START_SLACK_MS = 2_000;
+
+/**
+ * Is the heartbeat from a supervisor that started in THIS container?
+ *
+ * The heartbeat file is on the host and outlives the container. Right after
+ * `cod up` replaced a container, the OLD supervisor's heartbeat was seconds old
+ * and read as "live" before the new one had written anything - so a new
+ * container whose supervisor never came up would have been reported healthy.
+ * A supervisor starts after its container does, so a heartbeat that started
+ * before the container is not this container's. With no known start time it
+ * falls back to the plain check.
+ */
+export function liveSince(liveness: Liveness, containerStartedAt: number | null): boolean {
+  if (liveness.state !== "live") return false;
+  if (containerStartedAt === null) return true;
+  return liveness.heartbeat.startedAt >= containerStartedAt - START_SLACK_MS;
+}
+
 /** One line for a human. Never says healthy when it is not. */
 export function formatLiveness(liveness: Liveness): string {
   if (liveness.state === "never") {
-    return "supervisor: NOT RUNNING (no heartbeat - run `cod supervise`)";
+    return "supervisor: NOT RUNNING (no heartbeat - start it with `cod up`, and check `docker logs`)";
   }
   const { heartbeat, ageMs } = liveness;
   const seconds = Math.round((ageMs ?? 0) / 1000);

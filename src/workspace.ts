@@ -150,6 +150,14 @@ export const Workspace = z
     landing: z.object({
       repo: z.string().min(1),
     }).optional(),
+    /**
+     * Whether agents run inside the Landlock sandbox (src/sandbox.ts).
+     *
+     * `required` by default, and required means required: on a kernel without
+     * Landlock an agent is refused, not run unconfined. `off` is the explicit,
+     * recorded way to accept running agents with the access their uid has.
+     */
+    agentSandbox: z.enum(["required", "off"]).default("required"),
   })
   .strict();
 export type Workspace = z.infer<typeof Workspace>;

@@ -43,16 +43,18 @@ becomes a ledger item. `cod work run` dispatches it.
 Verified on a fresh `cod init`: 2 departments proposed, 2 decisions, and the
 CEO's decisions landed as `ceo -> cto` and `ceo -> engineering`.
 
-Two things about that meeting are deliberately unfinished, and are marked as
-such in `src/meeting.ts` rather than glossed: **the positions are computed, not
-spoken by a model**, so it decides real work from real state and is a first
-version rather than a discussion.
+The meeting's positions are now **spoken by a model** in the live loop - each
+role in its own scratch directory, inside the sandbox - and fall back to the
+computed ones when the provider does not answer. The CEO's decision is still a
+rule (the derived blast radius), deliberately: a decision about authority is
+not a judgement call.
 
 **Stage 4 — Review and merge. DONE.**
 Mechanical checks (secrets, a push or merge in the diff, a global path) are
 deterministic and no model may override them. The reviewer is a model call for
 scope and tests, and its verdict is recorded in a `review` table so it survives a
-restart. One retry with the review as the brief, then it stops.
+restart. A request for changes goes back to the worker with every objection so
+far in its brief, up to `governance.maxReviewRetries` (default 3), then it stops.
 `cod work blocked` is the queue of things that stopped.
 
 Verified unattended: two branches created and commit `94c9f55` written by an
@@ -67,9 +69,20 @@ A tick is deliberately ONE STAGE BEHIND: it proposes, the meeting decides, and
 the next tick reconciles and dispatches the decisions. A meeting must not
 dispatch work it has not reconciled.
 
-Landing is opt-in: a workspace naming `landing.repo` gets it mounted read-write
-at `/landing` and landed work is pushed to `refs/heads/cod-landed`. Absent by
-default, and the default mount list is asserted by a test.
+Landing is opt-in and host-side: landed work is written as a git bundle into the
+state directory, and `cod land` verifies it and fetches it into `landing.repo`
+as `refs/heads/cod-landed`. Nothing on the host is mounted writable for it.
+
+**Stage 5b — Confined, and iterating. DONE (2026-10-02).**
+The gate on unattended running is lifted: every agent runs inside a Landlock
+sandbox that denies it the ledger, the main checkout, git's configuration and
+hooks, the base branch and other agents' worktrees (`src/sandbox.ts`). The
+company plans, works, is reviewed, lands and plans again - verified by running
+it: a dogfood company with a live supervisor went through two generations,
+a request for changes and its retry, `cod land`, and a hostile worker that was
+denied everything it tried. Running it found what the tests had not: the
+second generation of plans was being refused as a duplicate of the first, and
+a department with nothing to do planned every tick for ever. Both are fixed.
 
 ### The agent skill bundle
 
@@ -180,7 +193,9 @@ a rejected attempt is retried once rather than argued about.
 
 One department, one workspace, proven. The scaling questions are real and
 untested: bounded work per department so a noisy one cannot starve a quiet one,
-ledger growth with no cap, and what happens when several workspaces share a host.
+ledger growth (bounded now by the rest an idle department takes, but nothing
+prunes history), and what happens when several workspaces share a host - one
+state directory per workspace is enforced now, which was the first collision.
 
 The container-name collision just fixed is the first bug this stage will produce
 if it is not planned for. Per-department fairness and a ledger that does not grow

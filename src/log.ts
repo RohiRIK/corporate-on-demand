@@ -25,9 +25,9 @@
  * as the unbounded subprocess output this stage exists to fix, so the file sink
  * caps both the file size and the number of archives kept.
  *
- * Redaction is deliberately NOT here yet. Job output is logged verbatim. Once
- * agents do real work, that becomes a place secrets can land, and redaction
- * turns from advisable to mandatory. Recorded in docs/SECURITY_POSTURE.md.
+ * Redaction happens at the SINK - `fileSink` wraps `redactingSink` - so a new
+ * call site cannot forget it. It catches known credential shapes, which is a
+ * mitigation rather than a guarantee; see docs/SECURITY_POSTURE.md.
  */
 
 import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";

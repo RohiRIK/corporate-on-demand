@@ -23,8 +23,9 @@
  * not been made; what this provides is the fact you need to make it.
  */
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { redact } from "./redact";
 import type { Cron } from "./workspace";
 
 const DIRNAME = "inflight";
@@ -47,6 +48,8 @@ export interface InFlight {
 
 export interface Abandoned extends InFlight {
   readonly stuckForMs: number;
+  /** The marker's file name, so it can be archived once reported. */
+  readonly marker?: string;
 }
 
 function dir(stateDir: string): string {
@@ -74,7 +77,9 @@ export function beginJob(stateDir: string, cron: Cron, now: number = Date.now())
     const record: InFlight = {
       cron: cron.name,
       agent: cron.agent,
-      task: cron.task,
+      // Redacted: this is a file on disk like a result, and the result beside
+      // it has always redacted the same task text.
+      task: redact(cron.task).text,
       startedAt: now,
     };
     const name = fileName(now, cron.name);
@@ -118,16 +123,16 @@ export function settleJob(stateDir: string, marker: string | null): void {
 }
 
 /** Every job currently announced as in flight. */
-export function claimInflight(stateDir: string): InFlight[] {
+export function claimInflight(stateDir: string): (InFlight & { readonly marker: string })[] {
   const path = dir(stateDir);
   if (!existsSync(path)) return [];
-  const found: InFlight[] = [];
+  const found: (InFlight & { readonly marker: string })[] = [];
   for (const name of readdirSync(path)) {
     if (!name.endsWith(".json")) continue;
     try {
       const record = JSON.parse(readFileSync(join(path, name), "utf8")) as InFlight;
       if (typeof record.cron === "string" && typeof record.startedAt === "number") {
-        found.push(record);
+        found.push({ ...record, marker: name });
       }
     } catch {
       // A half-written marker from a crash mid-write. Skip it: losing one entry
@@ -154,6 +159,23 @@ export function findAbandoned(
   return claimInflight(stateDir)
     .filter((job) => now - job.startedAt >= timeoutMs)
     .map((job) => ({ ...job, stuckForMs: now - job.startedAt }));
+}
+
+/**
+ * Mark a reported casualty as reported.
+ *
+ * Renamed, not deleted - the file is the evidence - and out of the `.json`
+ * namespace, so it is never reported again. Before this, an abandoned marker
+ * stayed for ever and every supervisor start after one crash re-announced the
+ * same casualty, until the log was mostly old news.
+ */
+export function archiveAbandoned(stateDir: string, job: Abandoned): void {
+  if (job.marker === undefined) return;
+  try {
+    renameSync(join(dir(stateDir), job.marker), join(dir(stateDir), `${job.marker}.abandoned`));
+  } catch {
+    // Already gone: nothing left to re-report.
+  }
 }
 
 /** One line for a human. */

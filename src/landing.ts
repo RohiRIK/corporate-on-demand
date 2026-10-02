@@ -33,12 +33,12 @@ function git(repo: string, args: readonly string[]): string | null {
 }
 
 /**
- * Is this path a git repository with somewhere to push to?
+ * Is this path a git repository that landed work can be exported into?
  *
- * Three refusals and each one is a per-merge failure if it is missed:
- * the path does not exist, it is not a repository, or it has no `origin`. The
- * first is the typo; the third is the one that looks most configured and fails
- * every single time.
+ * Two refusals, each naming its own fix: the path does not exist (the typo), or
+ * it is not a repository. It no longer has to have an `origin`: `cod land`
+ * fetches INTO this repository on the host, and pushing `cod-landed` onward is
+ * the operator's own step, with the operator's own credentials.
  */
 export function checkLandingRepo(path: string): LandingCheck {
   if (path.trim() === "") {
@@ -57,13 +57,6 @@ export function checkLandingRepo(path: string): LandingCheck {
     return {
       ok: false,
       reason: `landing.repo "${path}" is not a git repository; run \`git init\` there`,
-    };
-  }
-  const origin = git(path, ["remote", "get-url", "origin"]);
-  if (origin === null || origin === "") {
-    return {
-      ok: false,
-      reason: `landing.repo "${path}" has no origin to push to; run \`git remote add origin <url>\` there`,
     };
   }
   return { ok: true };

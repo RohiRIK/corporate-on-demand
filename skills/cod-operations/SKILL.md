@@ -19,8 +19,8 @@ Always this first. It cannot change anything.
 
 ```bash
 cod doctor            # config, image, container, volume, state
-cod status            # is the container up, what is the supervisor doing
-cod logs --tail 200   # the supervisor's own log
+cod status            # container, supervisor, sandbox, blocked, unexported
+cod logs --last 200   # the supervisor's own log; the governance line per tick
 cod results           # what each job did, and WHICH FILES it changed
 cod work list         # the ledger: what is proposed, running, failed
 ```
@@ -40,17 +40,26 @@ ok   author   16721ms r0  [1 file: answer.txt]  builder: Create a file…
 **Symptom:** `cod up` fails, or the container exits immediately.
 
 ```bash
-docker ps -a --filter name=cod-sandbox        # is it there, and what state
-docker logs <container> --tail 100            # the real error
-cod doctor                                   # image present? config valid?
+cod up                                        # quotes the container's FATAL lines
+docker logs "$(cod container-name --json | jq -r .container)" --tail 100
+cod doctor                                    # image present? config valid?
 ```
 
-The usual cause is a **missing image**, because the image is built rather than
-pulled:
+`cod up` waits for a live supervisor and, when there is none, prints what the
+container said. The causes, most common first:
 
-```bash
-cod build          # rebuilds cod-sandbox
-```
+- **`uid 1000 cannot write the state directory`** - the state directory
+  belongs to another user (a root `cod init`, a `sudo cod work ...`). The
+  container runs as uid 1000. `cod up` prints the exact command:
+  `sudo chown -R 1000:1000 <state dir>`.
+- **A missing image** - it is built, not pulled: `cod image --rebuild`.
+- **`agent sandbox: UNAVAILABLE`** in the log - the kernel has no Landlock, so
+  agents will be refused (the supervisor still runs). Use a newer kernel, or
+  set `"agentSandbox": "off"` in `cod.json` to accept running them unconfined.
+
+`cod up` also replaces a container of this workspace that is stopped, or that
+no longer matches `cod.json` or the image - so after editing `cod.json`, `cod up`
+is the whole step.
 
 If the logs show the entrypoint dying, read `docker/entrypoint.sh` first - the
 entrypoint is what seeds the initial Git commit, and a volume that has `.git`
@@ -81,9 +90,18 @@ cod status                 # the "blocked" line
 cod work blocked           # what stopped, oldest first, with the reason
 ```
 
-To retry one by hand: `cod work run <id>`. Nothing clears a rejection
-automatically - an automatic clear would let a rejected item re-enter the queue
-on its own, which is the company arguing with itself.
+To look at one again: `cod work unblock <id> [why]` - a rejected item is
+reviewed again, a failed one (three failed runs) goes back on the queue. An item
+the reviewer sent back for changes is mid-retry, and unblocking it needs
+`--override`, which is recorded as an operator override. Nothing clears a
+rejection automatically - that would let a rejected item re-enter the queue on
+its own, which is the company arguing with itself. `cod work run <id>` runs a
+`ready` item now, in the container, the same way the tick would.
+
+A department that stopped proposing is in the governance line of `cod logs`:
+`held: its last 3 tasks all ended badly` (three strikes - unblock or fix what it
+keeps getting wrong), or `held: resting until ...` (its plans found nothing new;
+it will plan again by itself).
 
 ### 3. It all looks stuck and nothing is moving
 
@@ -93,9 +111,17 @@ engines**, so check both - one being down while the other works is the normal
 state of a free tier, and it is why both are installed:
 
 ```bash
-docker exec <container> sh -lc 'cd /work && timeout 60 kilo run --pure --auto --format json -m kilo/kilo-auto/free "What is 2 plus 2?"'
-docker exec <container> sh -lc 'cd /work && timeout 60 opencode run --pure --auto --format json -m opencode/space-bunny-free "What is 2 plus 2?"'
+c="$(cod container-name --json | jq -r .container)"
+for model in kilo/kilo-auto/free opencode/space-bunny-free; do
+  engine="${model%%/*}"
+  docker exec "$c" sh -c 'd=$(mktemp -d) && cd "$d" && exec cod-sandbox --ro /usr --ro /bin --ro /lib --ro /lib64 --ro /etc --ro /proc --ro /sys \
+    --rw /tmp --rw /dev --rw "$HOME" --rw "$d" -- timeout 60 '"$engine"' run --pure --auto --format json -m '"$model"' "What is 17 multiplied by 23?"'
+done
 ```
+
+In a scratch directory and through the sandbox, like every agent - never
+`cd /work`: an engine with `--auto` in the main checkout is an unconfined agent
+in the live repository. Look for `391` in a `"type":"text"` line.
 
 If BOTH hang or error, the system is fine and the **providers** are not. If
 either answers, the scheduler is the problem and `cod logs` will say so.
@@ -139,25 +165,33 @@ given a real prompt.
 ### 4. Everything is fine but you want it to start by itself
 
 `cod down` stops the container. That is not the same as boot persistence - the
-container's restart policy does not survive a recreated host:
+container's restart policy does not survive a host reboot. The systemd unit in
+`ops/` runs `cod up` on boot; `ops/README.md` has the steps:
 
 ```bash
-cod boot install acme   # writes a systemd unit
-systemctl --user enable cod-workspace@acme.service
+sudo install -m 644 ops/cod-workspace@.service /etc/systemd/system/
+sudo install -d -o 1000 -g 1000 -m 0750 /var/lib/cod/acme
+sudo cod init acme --yes --workspace /var/lib/cod/acme/cod.json --state /var/lib/cod/acme
+sudo chown -R 1000:1000 /var/lib/cod/acme
+sudo systemctl enable --now cod-workspace@acme.service
 ```
 
 ## Destructive steps, and their undo
 
 These are the only ones that lose anything. Each says what is lost first.
 
-Where landed work goes: a workspace naming `landing.repo` has it mounted
-read-write and reviewed changes are pushed to `refs/heads/cod-landed`. Without
-it, merges stay in the `/work` volume, which is not visible from the host.
+Where landed work goes: merges happen in the `/work` volume, and after each one
+the supervisor writes the base branch as a bundle into the state directory. A
+workspace naming `landing.repo` imports it with `cod land` - verified, and
+fast-forward only - as `refs/heads/cod-landed`; pushing it anywhere is yours.
+`cod status` says when there is landed work you have not exported. If `cod land`
+refuses because the history no longer descends (the volume was purged and
+recreated), `cod land --force` replaces the ref.
 
 ```bash
 cod down               # STOPS the container. The work VOLUME is kept.
-cod purge              # asks first; --purge skips the question. DELETES the
-                       # work volume: every branch, commit and worktree.
+cod purge              # refuses without --purge. DELETES the work volume -
+                       # every branch, commit and worktree - and the export.
 ```
 
 `cod purge` destroys the agent's committed work. There is no undo and no

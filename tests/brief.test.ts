@@ -34,44 +34,64 @@ function item(reason: string | null): WorkItem {
 }
 
 describe("the brief an agent is given", () => {
-  test("with no review history it is the task alone", () => {
-    expect(briefFor(item(null))).toBe("Write notes/today.md");
+  const changes = (reason: string) => ({ outcome: "changes-requested" as const, reason });
+
+  const named = "Write notes/today.md\n\nPaths this task named - keep the change to these: notes/today.md";
+
+  test("with no review history it is the task alone, with the paths it named", () => {
+    expect(briefFor(item(null))).toBe(named);
+    expect(briefFor(item(null), null)).toBe(named);
   });
 
-  test("a plain reason is NOT presented as a review", () => {
+  test("the named paths are in the brief, because the reviewer holds the change to them", () => {
+    // The reviewer is shown "Paths the task named"; the worker used to be shown
+    // only the goal, and so was judged against a list it never saw.
+    expect(briefFor(item(null))).toContain("notes/today.md");
+    const plain = { ...item(null), payload: "Write anything" } as WorkItem;
+    expect(briefFor(plain)).toBe("Write anything");
+  });
+
+  test("a plain reason on the item is NOT presented as a review", () => {
     // Guards the label. Telling a model "the reviewer said X" when nobody said
     // X is worse than saying nothing at all.
-    expect(briefFor(item("could not reach the model provider"))).toBe("Write notes/today.md");
+    expect(briefFor(item("could not reach the model provider"))).toBe(named);
   });
 
   test("AFTER A REVIEW the objection is IN the brief", () => {
     // THE test. Without it a retry re-runs the identical prompt and the whole
     // retry policy is decoration.
-    const brief = briefFor(item("review: the interpolated values are all blank"));
+    const brief = briefFor(item("the worker's own output"), changes("review (attempt 1): the interpolated values are all blank"));
     expect(brief).toContain("Write notes/today.md");
     expect(brief).toContain("the interpolated values are all blank");
   });
 
   test("the objection is labelled, so the agent knows it is feedback", () => {
-    expect(briefFor(item("review: add a test")).toLowerCase()).toContain("review");
+    expect(briefFor(item(null), changes("review (attempt 1): add a test")).toLowerCase()).toContain("reviewed and returned");
   });
 
   test("EVERY accumulated objection is present, not just the last", () => {
     // Attempt three that only sees attempt two's objection may fix that one and
     // regress the first, and the reviewer will say so for a fourth time.
-    const brief = briefFor(item("review (attempt 1): no test" + String.fromCharCode(10) + "review (attempt 2): test does not run"));
+    const brief = briefFor(item(null), changes("review (attempt 1): no test" + String.fromCharCode(10) + "review (attempt 2): test does not run"));
     expect(brief).toContain("no test");
     expect(brief).toContain("test does not run");
   });
 
   test("the task still comes FIRST, so the objective is not buried", () => {
-    expect(briefFor(item("review: fix it")).startsWith("Write notes/today.md")).toBe(true);
+    expect(briefFor(item(null), changes("review (attempt 1): fix it")).startsWith("Write notes/today.md")).toBe(true);
   });
 
-  test("a reason that merely CONTAINS the word review is not mistaken for one", () => {
-    // "review the docs" is a legitimate task note, not a verdict. The guard is a
-    // prefix test; this is the sharp edge it creates, asserted so a change to
-    // it is deliberate.
-    expect(briefFor(item("please review the docs first"))).toBe("Write notes/today.md");
+  test("only a LIVE request for changes briefs - not a rejection, a landing, or a cleared verdict", () => {
+    // A rejected item is not being retried, and a cleared one was unblocked by
+    // a person: neither is a list of things the worker must now fix.
+    for (const outcome of ["rejected", "landed", "cleared", "skipped", "deferred"] as const) {
+      expect(briefFor(item(null), { outcome, reason: "review (attempt 1): x" })).toBe(named);
+    }
+  });
+
+  test("a reason that merely starts with 'review' is not mistaken for one", () => {
+    // The old guard was a prefix test on work.reason, which the worker's commit
+    // overwrites. The objection now comes only from the review row.
+    expect(briefFor(item("review the docs first"))).toBe(named);
   });
 });

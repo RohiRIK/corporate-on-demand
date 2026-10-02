@@ -97,9 +97,30 @@ Steps 1-3 are done, in `src/inflight.ts`:
    never finished - the supervisor died mid-job: run the build
    ```
 
-Step 4 — re-queueing — is deliberately **not** done. Re-running work is a
-policy decision that has not been made, and a system that silently re-runs jobs
-is worse than one that reports them.
+Once reported, the marker is **archived** (renamed `*.abandoned`, kept as
+evidence) so the next start does not announce the same casualty again - it used
+to, on every start, until the log was mostly old news. The marker's task text
+is redacted, like the result beside it.
+
+Step 4 — re-queueing a cron job — is deliberately **not** done. Re-running work
+is a policy decision that has not been made, and a system that silently re-runs
+jobs is worse than one that reports them. Ledger work is different: a failed
+run is retried a bounded number of times by the reconciler (`run failed (n/3)`),
+and a run whose lease expired is reclaimed - see `scheduling.md`.
+
+## Bringing a workspace back
+
+`cod up` owns the container's lifecycle. A container of this workspace that is
+**stopped** - the restart policy gave up, the host rebooted, someone ran
+`docker stop` - is replaced, not refused on its name, so `cod up` and the
+systemd unit that runs it always bring the workspace back. The work survives:
+it is in the `/work` volume and the state directory, not the container. A
+running container that no longer matches - an edited `cod.json`, a rebuilt
+image - is replaced too, and `cod up` says why.
+
+If the supervisor never comes up, `cod up` quotes the container's own FATAL
+lines. The common one on a host whose user is not uid 1000:
+`uid 1000 cannot write the state directory`, with the `chown` to run.
 
 ## Restart bounds
 

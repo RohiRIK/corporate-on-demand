@@ -7,7 +7,7 @@
  * source next to the value rather than making the user guess.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { UsageError } from "./errors";
@@ -135,14 +135,75 @@ export function loadConfig(flags: ConfigFlags = {}): Config {
   };
 }
 
+/**
+ * The uid and gid the container runs as (`--user` in src/docker.ts), and so
+ * the owner the state directory - its one writable bind mount - needs.
+ */
+export const CONTAINER_UID = 1000;
+export const CONTAINER_GID = 1000;
+
+/**
+ * Create a directory the container will write, owned so that it can.
+ *
+ * A bind mount carries the HOST's ownership into the container. A state
+ * directory created by a root `cod init` was root's, the supervisor (uid 1000)
+ * died on its first mkdir, and `cod up` could only report "not live". So when
+ * root creates one, it hands it to the container's uid - only a directory it
+ * has just CREATED, never one that already existed, which is the operator's to
+ * own (ops/ creates its own with `install -d -o 1000`). Created 0750.
+ */
+export function makeContainerDir(path: string): void {
+  // 0750: the ledger, the results and the log are nobody else's business on a
+  // shared host. A default-umask directory left them world-readable (SEC-07).
+  const created = mkdirSync(path, { recursive: true, mode: 0o750 });
+  if (created !== undefined && process.platform === "linux" && process.getuid?.() === 0) {
+    chownSync(path, CONTAINER_UID, CONTAINER_GID);
+  }
+}
+
 /** Create the state directory and its parents; returns the directory. */
 export function ensureStateDir(config: Config): string {
-  mkdirSync(config.stateDir, { recursive: true });
-  mkdirSync(join(config.stateDir, "bus"), { recursive: true });
+  makeContainerDir(config.stateDir);
+  makeContainerDir(join(config.stateDir, "bus"));
   return config.stateDir;
 }
 
 /** Create the parent directory of a file that may not exist yet. */
 export function ensureParentDir(file: string): void {
   mkdirSync(dirname(file), { recursive: true });
+}
+
+/** The file in a state directory that names the workspace it belongs to. */
+export const OWNER_FILE = "workspace.json";
+
+/**
+ * Bind a state directory to ONE workspace, or refuse.
+ *
+ * The default state directory is the same for every workspace on the machine,
+ * while containers and volumes are per workspace. So a second workspace on the
+ * default directory shared the first one's ledger, heartbeat, results and log:
+ * its `cod status` read the other supervisor's heartbeat, and its governance
+ * dispatched the other company's work. The first workspace to use a state
+ * directory owns it; another one is refused with the two fixes.
+ */
+export function claimStateDir(config: Pick<Config, "stateDir" | "workspaceFile">): void {
+  const owner = join(config.stateDir, OWNER_FILE);
+  if (existsSync(owner)) {
+    let recorded = "";
+    try {
+      recorded = String((JSON.parse(readFileSync(owner, "utf8")) as { workspace?: unknown }).workspace ?? "");
+    } catch {
+      recorded = "";
+    }
+    if (recorded !== "" && recorded !== config.workspaceFile) {
+      throw new UsageError(
+        `the state directory ${config.stateDir} belongs to another workspace (${recorded}). ` +
+          "Give this one its own with --state <dir> or COD_STATE_DIR - or, if you MOVED that workspace " +
+          `to ${config.workspaceFile}, delete ${owner}.`,
+      );
+    }
+    if (recorded === config.workspaceFile) return;
+  }
+  makeContainerDir(config.stateDir);
+  writeFileSync(owner, `${JSON.stringify({ workspace: config.workspaceFile }, null, 2)}\n`, "utf8");
 }

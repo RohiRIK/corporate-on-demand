@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,8 @@ describe("blockedWork", () => {
     handle.close();
     expect(blocked).toHaveLength(1);
     expect(blocked[0]?.item.id).toBe(rejected.item.id);
-    expect(blocked[0]?.review.reason).toContain("no test");
+    expect(blocked[0]?.reason).toContain("no test");
+    expect(blocked[0]?.kind).toBe("rejected");
   });
 
   test("work never reviewed is not blocked", () => {
@@ -48,7 +49,7 @@ describe("blockedWork", () => {
     }
     const blocked = blockedWork(handle);
     handle.close();
-    expect(blocked[0]?.review.reason).toBe("first");
+    expect(blocked[0]?.reason).toBe("first");
   });
 
   test("a re-review that succeeds CLEARS it - the queue is not a graveyard", () => {
@@ -64,4 +65,8 @@ describe("blockedWork", () => {
   });
 });
 
-for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+// In afterAll, not at module top level: top-level code runs while bun is
+// COLLECTING the tests, before any directory exists, and so deleted nothing.
+afterAll(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});

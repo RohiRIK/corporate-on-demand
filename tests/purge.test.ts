@@ -95,20 +95,22 @@ describe("purgeVolume", () => {
     expect(result.reason).toContain("no such volume");
   });
 
-  test("the name is derived, never taken from the caller", () => {
+  test("the name is derived, never taken from the caller", async () => {
     // There is no parameter through which a caller could name another volume,
     // so this cannot be turned into "delete an arbitrary volume".
     makeVolume(purgeTarget("/w/acme.json").volume);
-    purgeVolume("/w/acme.json", { confirmed: true });
+    // Awaited: it is async, and the check below passed only because nothing in
+    // it happens to yield before the docker call today.
+    await purgeVolume("/w/acme.json", { confirmed: true });
     expect(volumeExists("/w/acme.json")).toBe(false);
   });
 
-  test("one workspace's purge leaves another's alone", () => {
+  test("one workspace's purge leaves another's alone", async () => {
     const a = purgeTarget("/w/a.json").volume;
     const b = purgeTarget("/w/b.json").volume;
     makeVolume(a);
     makeVolume(b);
-    purgeVolume("/w/a.json", { confirmed: true });
+    await purgeVolume("/w/a.json", { confirmed: true });
     expect(volumeExists("/w/a.json")).toBe(false);
     expect(volumeExists("/w/b.json")).toBe(true);
   });

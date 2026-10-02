@@ -34,6 +34,19 @@ const GLOBAL_PREFIXES = [
 /** Single files that are global on their own. */
 const GLOBAL_FILES = ["package.json", "verify.sh", "bun.lock", "tsconfig.json", ".gitignore"] as const;
 
+/**
+ * Files that are global WHEREVER they sit, because they change what git itself
+ * does rather than what the project contains.
+ *
+ * `.gitattributes` names diff, merge and filter drivers - the configured half of
+ * those lives in git config, and the attributes file is how a branch points git
+ * at one. `.gitmodules` makes git fetch a URL of the branch's choosing. Both
+ * are a few ordinary-looking lines that no secret or path scan noticed
+ * (SEC-02/SEC-03), and an attributes file in a subdirectory applies to that
+ * subdirectory, so a top-level-only rule would miss most of them.
+ */
+const GLOBAL_BASENAMES = [".gitattributes", ".gitmodules"] as const;
+
 /** Radius 2 and above is global. Lower radii are department or self-contained. */
 export const GLOBAL_RADIUS = 2;
 
@@ -46,10 +59,17 @@ function normalise(path: string): string {
     .replace(/^\//, "");
 }
 
+/** The global paths, as one line a planner can be told not to name. */
+export function globalPathsSummary(): string {
+  return [...GLOBAL_PREFIXES, ...GLOBAL_FILES, ...GLOBAL_BASENAMES.map((b) => `any ${b}`)].join(", ");
+}
+
 /** Is this one path global? */
 export function isGlobalPath(path: string): boolean {
   const p = normalise(path);
   if ((GLOBAL_FILES as readonly string[]).includes(p)) return true;
+  const base = p.split("/").pop() ?? p;
+  if ((GLOBAL_BASENAMES as readonly string[]).includes(base)) return true;
   return GLOBAL_PREFIXES.some((prefix) => p.startsWith(prefix));
 }
 
