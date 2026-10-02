@@ -27,7 +27,8 @@ describe("blockedWork", () => {
     handle.close();
     expect(blocked).toHaveLength(1);
     expect(blocked[0]?.item.id).toBe(rejected.item.id);
-    expect(blocked[0]?.review.reason).toContain("no test");
+    expect(blocked[0]?.reason).toContain("no test");
+    expect(blocked[0]?.kind).toBe("rejected");
   });
 
   test("work never reviewed is not blocked", () => {
@@ -48,7 +49,7 @@ describe("blockedWork", () => {
     }
     const blocked = blockedWork(handle);
     handle.close();
-    expect(blocked[0]?.review.reason).toBe("first");
+    expect(blocked[0]?.reason).toBe("first");
   });
 
   test("a re-review that succeeds CLEARS it - the queue is not a graveyard", () => {

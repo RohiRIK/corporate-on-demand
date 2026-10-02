@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openWork, propose, listWork, get, commit, recordReview } from "../src/work";
+import { openWork, propose, listWork, claimById, commit, recordReview } from "../src/work";
 import { runGovernance, governanceIntervalFor } from "../src/governance";
 import type { Workspace } from "../src/workspace";
 
@@ -121,7 +121,9 @@ describe("runGovernance", () => {
         ran.push(id);
         const handle = openWork(dir);
         try {
-          const item = get(handle, id);
+          // Claimed by id first, as the real dispatcher does: commit() only
+          // accepts work that is running.
+          const item = claimById(handle, id, "test");
           if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
         } finally {
           handle.close();
@@ -162,7 +164,9 @@ describe("runGovernance", () => {
     const dispatch = async (id: string) => {
       const handle = openWork(dir);
       try {
-        const item = get(handle, id);
+        // Claimed by id first, as the real dispatcher does: commit() only
+        // accepts work that is running.
+        const item = claimById(handle, id, "test");
         if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
       } finally {
         handle.close();
@@ -191,7 +195,9 @@ describe("runGovernance", () => {
     const dispatch = async (id: string) => {
       const handle = openWork(dir);
       try {
-        const item = get(handle, id);
+        // Claimed by id first, as the real dispatcher does: commit() only
+        // accepts work that is running.
+        const item = claimById(handle, id, "test");
         if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
       } finally {
         handle.close();

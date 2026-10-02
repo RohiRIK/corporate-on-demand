@@ -13,13 +13,11 @@
  * proposed value can only ever narrow the result, never widen it.
  */
 
-import { openWork, claim, commit, get, type WorkItem } from "./work";
+import { openWork, claimById, commit, get, reject, runFailureReason, type WorkItem } from "./work";
 import { isGlobalPath } from "./boundary";
 import { dispatch, type Driver, type Step } from "./dispatch";
+import { isAgentFailure } from "./agent";
 import type { Cron } from "./workspace";
-
-/** Paths that make work cross-department rather than self-contained. */
-const CROSS_DEPARTMENT = ["src/", "docker/", "ops/", "templates/", "scripts/", ".github/"] as const;
 
 /**
  * The radius this work must run under.
@@ -34,16 +32,13 @@ export function radiusForWork(
   proposed?: number | null,
 ): number {
   void goal;
-  let derived = 0;
-  for (const path of targetPaths) {
-    if (isGlobalPath(path)) {
-      derived = 2;
-      break;
-    }
-    if (CROSS_DEPARTMENT.includes(path.split("/")[0]?.toLowerCase() as (typeof CROSS_DEPARTMENT)[number])) {
-      derived = Math.max(derived, 1);
-    }
-  }
+  // 0 or 2, never 1, and deliberately so: "cross-department" needs to know
+  // which department OWNS a path, which a string cannot say. A list that tried
+  // (`src/`, `docker/`, ...) sat here for a while and could never match - its
+  // entries kept the trailing slash while the lookup stripped it - and every
+  // one of those prefixes is global anyway. Radius 1 is something a job states
+  // about itself, and it can only ever narrow.
+  const derived = targetPaths.some((path) => isGlobalPath(path)) ? 2 : 0;
   // A proposed value may narrow, but it can NEVER narrow GLOBAL work.
   //
   // `min(derived, proposed)` looks safe and is not: an agent proposing a
@@ -173,36 +168,31 @@ export async function runWorkItem(options: RunWorkOptions): Promise<RunWorkResul
     const radius = radiusForWork(existing.payload, paths, existing.blast_radius);
 
     if (!canSelfDispatch(radius) && options.asCeo !== true) {
-      // Refused BEFORE the agent runs, and marked FAILED. Not caught
-      // afterwards - an agent that already edited the schema is not a
-      // boundary, it is an incident.
+      // Refused BEFORE the agent runs. Not caught afterwards - an agent that
+      // already edited the schema is not a boundary, it is an incident.
       //
-      // A department cannot dispatch global work, so failing it is the honest
-      // record. The CEO re-proposes it with the authority the department lacks,
-      // and the work is not lost because the proposal itself is still on file.
-      const held = commit(
-        handle, existing.id, existing.lease_epoch, "failed",
-        `global work (radius ${radius}) targets ${describeWorkTarget(paths)}; only the CEO may dispatch it`,
-      );
-      return {
-        ok: false,
-        workId: existing.id,
-        radius,
-        reason: held.ok
-          ? `global work (radius ${radius}) targets ${describeWorkTarget(paths)}; only the CEO may dispatch it`
-          : (held.reason ?? "fenced"),
-      };
+      // `rejected`, not `failed`: it never ran, and "not permitted" is a
+      // different fact from "did not work". It used to be committed `failed`,
+      // which only worked because commit() also accepted items nobody had
+      // claimed - the hole that let a proposal be marked done at epoch 0.
+      const why = `global work (radius ${radius}) targets ${describeWorkTarget(paths)}; only the CEO may dispatch it`;
+      const held = reject(handle, existing.id, why);
+      return { ok: false, workId: existing.id, radius, reason: held.ok ? why : (held.reason ?? why) };
     }
 
     // The epoch we act under. Supplied by the tests to simulate a zombie; in
-    // production the claim we just made supplies it.
+    // production the claim we just made supplies it - a claim of THIS item, by
+    // id. Claiming "the next item for this department" ran one item's agent
+    // under another item's lease.
     let epoch = options.leaseEpoch;
+    let previousReason = existing.reason;
     if (epoch === undefined) {
-      const claimed = claim(handle, `run:${options.cron.name}`, existing.to_agent);
+      const claimed = claimById(handle, existing.id, `run:${options.cron.name}`);
       if (claimed === null) {
-        return { ok: false, workId: existing.id, radius, reason: "the item was not claimable (already running, or not ready)" };
+        return { ok: false, workId: existing.id, radius, reason: `${existing.id} was not claimable: it is ${existing.state}, and only ready work can run` };
       }
       epoch = claimed.lease_epoch;
+      previousReason = claimed.reason;
     }
 
     // The driver, through the dispatcher, so the job gets the same step
@@ -216,13 +206,18 @@ export async function runWorkItem(options: RunWorkOptions): Promise<RunWorkResul
         onStep: options.onStep === undefined ? undefined : (step): void => { options.onStep?.(step); },
       });
       output = result.output;
-      succeeded = result.ok;
+      // NOT `result.ok` alone. `dispatch` only fails when the driver THROWS,
+      // and the real driver never does: it returns "agent FAILED: ..." as text.
+      // So a provider outage was committed `done`, reported `ok: true`, and then
+      // offered for review with an empty branch - the exact wrong-reason
+      // success the cron path stopped recording months ago, still alive here.
+      succeeded = result.ok && !isAgentFailure(output);
     } catch (error) {
       // Recorded as FAILED rather than left running: an item that stays
       // `running` looks identical to an item that is genuinely still working,
       // which is the ambiguity the budget rule then has to resolve by timeout.
       const message = (error as Error).message;
-      const failed = commit(handle, existing.id, epoch, "failed", message);
+      const failed = commit(handle, existing.id, epoch, "failed", runFailureReason(previousReason, message));
       void failed;
       return { ok: false, workId: existing.id, radius, reason: message };
     }
@@ -230,15 +225,19 @@ export async function runWorkItem(options: RunWorkOptions): Promise<RunWorkResul
     // FENCED. The commit carries the epoch we were given, so a run whose lease
     // was reclaimed updates zero rows and its result is refused rather than
     // overwriting a newer one.
-    // `dispatch` never throws - it turns a throwing driver into a not-ok
-    // result. So the failure has to be read from the RESULT, or a job that
-    // blew up is recorded as `done` with the error message as its reason,
-    // which is a successful-looking record of a failure.
-    const outcome = commit(handle, existing.id, epoch, succeeded ? "done" : "failed", output);
+    //
+    // A failed run is recorded with a COUNTED reason, so the reconciler can put
+    // it back on the queue a bounded number of times - a free provider failing
+    // one call is not a verdict on the work.
+    const outcome = succeeded
+      ? commit(handle, existing.id, epoch, "done", output)
+      : commit(handle, existing.id, epoch, "failed", runFailureReason(previousReason, output));
     if (!outcome.ok) {
       return { ok: false, workId: existing.id, radius, reason: outcome.reason ?? "fenced" };
     }
-    return { ok: succeeded, workId: existing.id, radius, output };
+    return succeeded
+      ? { ok: true, workId: existing.id, radius, output }
+      : { ok: false, workId: existing.id, radius, output, reason: outcome.item?.reason ?? output };
   } catch (error) {
     return { ok: false, workId: options.workId, reason: (error as Error).message };
   } finally {

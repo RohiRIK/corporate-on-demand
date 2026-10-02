@@ -29,8 +29,9 @@
 
 import { Database } from "bun:sqlite";
 import { mkdirSync, renameSync, writeFileSync, openSync, fsyncSync, closeSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
+import { redact } from "./redact";
 
 /**
  * The work lifecycle. Deliberately small.
@@ -192,36 +193,93 @@ export function noveltyKey(dept: string, goal: string, targetPaths: readonly str
 }
 
 /**
+ * A safe id, or an error.
+ *
+ * The id becomes a FILENAME and a git BRANCH (`cod/<id>`), so an unvalidated one
+ * is a path-traversal write - an id of "../escaped" wrote outside the work
+ * directory - and, with a leading dash, an argument git can mistake for an
+ * option. This is now the SAME rule src/worktree.ts applies to the branch, not
+ * a looser second standard: the two used to disagree (uppercase and a leading
+ * dot or dash passed here and failed there), so a custom id could be proposed
+ * and then never run.
+ */
+const SAFE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+export function assertSafeId(id: string): void {
+  if (SAFE_ID.test(id) && !id.includes("..")) return;
+  throw new Error(
+    `unsafe work id ${JSON.stringify(id)}: expected 1-64 chars of [a-z0-9._-], starting with a letter or digit, and no ".."`,
+  );
+}
+
+/**
+ * Bounds on the free text the ledger stores.
+ *
+ * `reason` carries model output - a reviewer's words, an agent's final answer -
+ * and it is written to disk, shown by the CLI and, for some items, handed back
+ * to a model. Unbounded, one verbose agent turns every listing into a wall and
+ * every brief into a prompt the next model has to wade through.
+ */
+export const MAX_PAYLOAD = 16_000;
+export const MAX_REASON = 2_000;
+
+/**
+ * Text bound for the ledger: redacted, then capped, saying so when it was cut.
+ *
+ * Redacted because the ledger is a SINK, like the log and the result files, and
+ * it was the one sink that skipped redaction - so an agent that quoted a key it
+ * had read put that key in a SQLite file and a JSON file on the host.
+ */
+export function ledgerText(text: string, max: number = MAX_REASON): string {
+  const clean = redact(text).text;
+  return clean.length <= max ? clean : `${clean.slice(0, max - 15)}… [truncated]`;
+}
+
+/**
+ * A target path, as a REPOSITORY path or not at all.
+ *
+ * The target paths decide the blast radius, so they are the input the whole
+ * authority rule hangs from. They used to be stored as whatever strings arrived:
+ * an absolute path, a `..`, a NUL. None of those is a claim about this
+ * repository, and a radius derived from them is derived from nothing.
+ */
+export function assertSafeTargetPath(path: string): void {
+  const bad =
+    path.length === 0 ||
+    path.length > 256 ||
+    /[\u0000-\u001f\\]/.test(path) ||
+    path.startsWith("/") ||
+    path.split("/").some((segment) => segment === ".." || segment === ".");
+  if (bad) {
+    throw new Error(
+      `unsafe target path ${JSON.stringify(path)}: expected a relative repository path with no "..", no "." segment, no backslash and no control character`,
+    );
+  }
+}
+
+/** Department and worker names, as the workspace schema spells them. */
+const SAFE_AGENT = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const SAFE_KIND = /^[a-z][a-z0-9-]{0,31}$/;
+
+/**
  * Write the durable record for a unit of work.
  *
  * tmp -> fsync(file) -> rename() -> fsync(dir), the standard recipe, and the
  * reason a reader NEVER sees a half-written message. Without the rename a crash
  * mid-write leaves a file that exists and is full of garbage.
  */
-/**
- * A safe id, or an error.
- *
- * The id becomes a FILENAME, so an unvalidated one is a path-traversal write:
- * an id of "../escaped" wrote outside the work directory. The same rule already
- * exists in src/worktree.ts, and this mirrors it rather than inventing a second
- * standard.
- */
-const SAFE_ID = /^[A-Za-z0-9._-]{1,64}$/;
-
-export function assertSafeId(id: string): void {
-  if (SAFE_ID.test(id) && id !== "." && id !== "..") return;
-  throw new Error(`unsafe work id ${JSON.stringify(id)}: expected 1-64 chars of [A-Za-z0-9._-] and not a path segment`);
-}
-
 export function writeWorkFile(stateDir: string, item: WorkItem): string {
   assertSafeId(item.id);
   const dir = join(stateDir, "work");
   mkdirSync(dir, { recursive: true });
   const final = join(dir, `${item.id}.json`);
-  // Belt and braces: the regex already forbids separators, but the containment
-  // check is the property that actually matters, so assert it directly.
+  // Belt and braces: the id rule already forbids separators, and this is the
+  // property that actually matters, asserted directly. The check this replaces
+  // compared `replace(dir, "")` with `slice(dir.length)` - equal for EVERY
+  // path, inside the directory or not - so it never threw and only read as a
+  // guard. A real containment test is a prefix test on the resolved path.
   const resolvedDir = resolve(dir);
-  if (resolve(final).replace(resolvedDir, "") !== resolve(final).slice(resolvedDir.length)) {
+  if (!resolve(final).startsWith(`${resolvedDir}${sep}`)) {
     throw new Error(`refusing to write outside the work directory: ${item.id}`);
   }
   const tmp = `${final}.tmp`;
@@ -272,7 +330,27 @@ export function propose(
   // Validated up front, so a bad id is a clean error rather than a file written
   // somewhere unexpected later on.
   if (fields.id !== undefined) assertSafeId(fields.id);
-  const key = noveltyKey(fields.from, fields.goal, fields.targetPaths ?? []);
+  // Refusals, not throws: a proposal is data arriving from an agent's plan or
+  // from the CLI, and "that is not a valid proposal" is an answer, not a crash.
+  if (!SAFE_AGENT.test(fields.from) || !SAFE_AGENT.test(fields.to)) {
+    return { ok: false, reason: `from and to must be department or worker names (got ${JSON.stringify(fields.from)} -> ${JSON.stringify(fields.to)})` };
+  }
+  if (!SAFE_KIND.test(fields.kind)) {
+    return { ok: false, reason: `kind must be a short lowercase word (got ${JSON.stringify(fields.kind)})` };
+  }
+  if (fields.payload.length > MAX_PAYLOAD) {
+    return { ok: false, reason: `payload is ${fields.payload.length} chars; the limit is ${MAX_PAYLOAD}` };
+  }
+  const targetPaths = fields.targetPaths ?? [];
+  if (targetPaths.length > 64) {
+    return { ok: false, reason: `${targetPaths.length} target paths; the limit is 64` };
+  }
+  try {
+    for (const path of targetPaths) assertSafeTargetPath(path);
+  } catch (error) {
+    return { ok: false, reason: (error as Error).message };
+  }
+  const key = noveltyKey(fields.from, fields.goal, targetPaths);
   const existing = handle.db.query("SELECT * FROM work WHERE novelty_key = ?").get(key) as WorkItem | null;
   if (existing !== null) {
     return {
@@ -294,11 +372,14 @@ export function propose(
   // them - which meant the blast radius had nothing to derive from and every
   // item looked self-contained. The payload becomes JSON only when there are
   // paths to carry, so the common case stays a plain readable string.
-  const paths = fields.targetPaths ?? [];
+  const paths = targetPaths;
+  // Redacted on the way IN: the ledger is a sink like the log, and a payload
+  // routinely quotes the file it is about.
+  const text = redact(fields.payload).text;
   const payload =
     paths.length === 0
-      ? fields.payload
-      : JSON.stringify({ text: fields.payload, targetPaths: paths });
+      ? text
+      : JSON.stringify({ text, targetPaths: paths });
   const item: WorkItem = {
     id,
     from_agent: fields.from,
@@ -398,14 +479,86 @@ export function claim(handle: WorkDb, owner: string, toAgent?: string): WorkItem
 }
 
 /**
- * Refuse a proposal. Distinct from `failed`, which means work RAN and did not
- * succeed - a refused proposal never ran at all, and collapsing the two loses
- * the difference between "this was attempted" and "this was not permitted".
+ * Claim ONE NAMED item, if it is runnable.
  *
- * `rejected` existed in the state union from the start and was never used,
- * which is how a design decision turns into decoration: nothing tested it,
- * because nothing could observe it.
+ * `cod work run <id>` and the governance tick dispatch a specific item, and they
+ * used to claim through `claim(owner, to_agent)` - "the oldest ready item for
+ * this department". With two ready items for one department, running the second
+ * claimed the FIRST: it was left `running` with nobody working on it until the
+ * budget reclaimed it, while the second item's agent ran, finished, and had its
+ * result fenced out for holding the wrong epoch. Measured before this existed.
+ *
+ * Same statement shape as `claim`, so the same write lock makes one caller win.
  */
+export function claimById(handle: WorkDb, id: string, owner: string): WorkItem | null {
+  const row = handle.db
+    .query(
+      `UPDATE work
+          SET state = 'running',
+              lease_owner = ?,
+              lease_epoch = lease_epoch + 1,
+              attempts = attempts + 1,
+              started_at = ?
+        WHERE id = ? AND state = 'ready'
+      RETURNING *`,
+    )
+    .get(owner, Date.now(), id) as WorkItem | null;
+  return row ?? null;
+}
+
+/**
+ * Put a finished item back on the queue for another attempt.
+ *
+ * Only from `done`, and it consumes the epoch, so a run that is somehow still
+ * holding the old one can never commit over the retry.
+ */
+export function requeue(handle: WorkDb, id: string): boolean {
+  const row = handle.db
+    .query("UPDATE work SET state = 'ready', lease_owner = NULL, lease_epoch = lease_epoch + 1 WHERE id = ? AND state = 'done' RETURNING id")
+    .get(id) as { id: string } | null;
+  return row !== null;
+}
+
+/**
+ * How many times a RUN may fail before the item waits for a person.
+ *
+ * A run failure is usually the provider - free models fail a measurable share
+ * of calls - so the first one is not a verdict on the work. The reconciler puts
+ * the item back on the queue until this many consecutive runs have failed, and
+ * then it stops and shows up in `cod work blocked`. Delivery is at-least-once,
+ * which is the target docs/AGENT_COMMUNICATION.md set; never unbounded.
+ */
+export const MAX_RUN_ATTEMPTS = 3;
+
+const RUN_FAILURE = /^run failed \((\d+)\/(\d+)\): /;
+
+/** The attempt counter a run-failure reason carries, or null for any other reason. */
+export function parseRunFailure(reason: string | null): { readonly n: number; readonly max: number } | null {
+  const match = RUN_FAILURE.exec(reason ?? "");
+  if (match === null) return null;
+  return { n: Number(match[1]), max: Number(match[2]) };
+}
+
+/**
+ * The reason to record for a failed run, counting CONSECUTIVE failures.
+ *
+ * The count lives in the reason because the reason is what the next attempt
+ * replaces: a run that succeeds overwrites it and the count is gone, which is
+ * exactly "consecutive".
+ */
+export function runFailureReason(previous: string | null, detail: string, max: number = MAX_RUN_ATTEMPTS): string {
+  const prior = parseRunFailure(previous);
+  const n = (prior?.n ?? 0) + 1;
+  return `run failed (${n}/${max}): ${detail}`;
+}
+
+/** Will the reconciler retry this failed item on its own? */
+export function isRetryableFailure(item: Pick<WorkItem, "state" | "reason">): boolean {
+  if (item.state !== "failed") return false;
+  const parsed = parseRunFailure(item.reason);
+  return parsed !== null && parsed.n < parsed.max;
+}
+
 /** One review verdict, as recorded. The durable answer to "was this looked at". */
 export interface ReviewRecord {
   readonly workId: string;
@@ -489,16 +642,49 @@ export function latestReview(handle: WorkDb, workId: string): ReviewRecord | nul
  * say "I am stopping here, and this is why" - otherwise a rejection is
  * indistinguishable from nothing happening at all.
  */
-export function blockedWork(handle: WorkDb): { readonly item: WorkItem; readonly review: ReviewRecord }[] {
-  const rows = handle.db
+export interface BlockedEntry {
+  readonly item: WorkItem;
+  /** `rejected`: a reviewer stopped it. `failed`: its runs did, and retries are spent. */
+  readonly kind: "rejected" | "failed";
+  /** The reviewer's words, or the last run's failure. */
+  readonly reason: string;
+  readonly branch: string;
+  /** When it stopped, for oldest-first order. */
+  readonly since: number;
+  /** The review row, when a reviewer stopped it. */
+  readonly review: ReviewRecord | null;
+}
+
+/**
+ * Items that stopped and need a PERSON, oldest first.
+ *
+ * Two kinds. A review rejection, as before - and a run that FAILED with no
+ * automatic retry left. The second used to be invisible: a failed item was not
+ * in this queue and not in `cod status`, so an operator was told "nothing is
+ * waiting on you" while work sat dead in the ledger.
+ */
+export function blockedWork(handle: WorkDb): BlockedEntry[] {
+  const rejected = (handle.db
     .query(
       `SELECT w.* FROM work w
          JOIN review r ON r.work_id = w.id
-        WHERE r.outcome = 'rejected'
-        ORDER BY r.reviewed_at ASC`,
+        WHERE r.outcome = 'rejected'`,
     )
-    .all() as WorkItem[];
-  return rows.map((item) => ({ item, review: latestReview(handle, item.id) as ReviewRecord }));
+    .all() as WorkItem[]).map((item): BlockedEntry => {
+    const review = latestReview(handle, item.id) as ReviewRecord;
+    return { item, kind: "rejected", reason: review.reason, branch: review.branch, since: review.reviewedAt, review };
+  });
+  const failed = (handle.db.query("SELECT * FROM work WHERE state = 'failed'").all() as WorkItem[])
+    .filter((item) => !isRetryableFailure(item))
+    .map((item): BlockedEntry => ({
+      item,
+      kind: "failed",
+      reason: item.reason ?? "failed with no reason recorded",
+      branch: `cod/${item.id}`,
+      since: item.started_at ?? 0,
+      review: latestReview(handle, item.id),
+    }));
+  return [...rejected, ...failed].sort((a, b) => a.since - b.since);
 }
 
 /**
@@ -520,6 +706,17 @@ export function clearReview(
   note: string,
   override = false,
 ): { ok: boolean; reason?: string } {
+  // A FAILED item has no verdict to archive: its runs stopped it. Unblocking it
+  // puts it back on the queue for a fresh run, with the operator's note as its
+  // reason, which also resets the consecutive-failure count.
+  const current = get(handle, id);
+  if (current !== null && current.state === "failed") {
+    const why = note.trim() === "" ? "no reason given" : note.trim();
+    handle.db
+      .query("UPDATE work SET state = 'ready', lease_owner = NULL, reason = ? WHERE id = ? AND state = 'failed'")
+      .run(ledgerText(`unblocked by operator: ${why} | was failed: ${current.reason ?? "no reason recorded"}`), id);
+    return { ok: true };
+  }
   const previous = latestReview(handle, id);
   if (previous === null) return { ok: false, reason: `no review to clear for ${id}` };
   if (previous.outcome === "landed") {
@@ -562,19 +759,34 @@ export function clearReview(
   handle.db
     .query("UPDATE review SET outcome = 'cleared', reason = ? WHERE work_id = ?")
     .run(
-      `${override ? "OPERATOR OVERRIDE of the reviewer" : "cleared by operator"}: ${note.trim() || "no reason given"} | was ${previous.outcome}: ${previous.reason}`,
+      ledgerText(`${override ? "OPERATOR OVERRIDE of the reviewer" : "cleared by operator"}: ${note.trim() || "no reason given"} | was ${previous.outcome}: ${previous.reason}`),
       id,
     );
-  handle.db.query("UPDATE work SET reason = ? WHERE id = ?").run(operatorNote, id);
+  handle.db.query("UPDATE work SET reason = ? WHERE id = ?").run(ledgerText(operatorNote), id);
   return { ok: true };
 }
 
+/**
+ * Refuse an item that never ran. Distinct from `failed`, which means work RAN
+ * and did not succeed - a refused item never ran at all, and collapsing the two
+ * loses the difference between "this was attempted" and "this was not
+ * permitted".
+ *
+ * Only from `proposed` or `ready`. Refusing running or finished work would
+ * rewrite the record of something that happened.
+ */
 export function reject(handle: WorkDb, id: string, reason: string): CommitOutcome {
   const result = handle.db
-    .query("UPDATE work SET state = 'rejected', reason = ?, lease_owner = NULL WHERE id = ? RETURNING *")
-    .get(reason, id) as WorkItem | null;
+    .query("UPDATE work SET state = 'rejected', reason = ?, lease_owner = NULL WHERE id = ? AND state IN ('proposed', 'ready') RETURNING *")
+    .get(ledgerText(reason), id) as WorkItem | null;
   if (result === null) {
-    return { ok: false, fenced: false, item: get(handle, id), reason: "no such work item" };
+    const current = get(handle, id);
+    return {
+      ok: false,
+      fenced: false,
+      item: current,
+      reason: current === null ? "no such work item" : `cannot refuse ${id}: it is ${current.state}, and only work that never ran can be refused`,
+    };
   }
   return { ok: true, fenced: false, item: result };
 }
@@ -593,17 +805,19 @@ export interface CommitOutcome {
 }
 
 export function commit(handle: WorkDb, id: string, leaseEpoch: number, outcome: "done" | "failed", reason?: string): CommitOutcome {
+  // Bounded and redacted ONCE, here, so the file and the row cannot disagree.
+  const recorded = reason === undefined ? null : ledgerText(reason);
   // The durable record is written BEFORE the row is updated, and only here.
   // That ordering is the whole recovery story: if the process dies between the
   // two, the file is on disk and the reconciler can apply it. Writing it any
   // earlier would make a file's existence meaningless.
   const existing = get(handle, id);
-  if (existing !== null && existing.lease_epoch === leaseEpoch) {
+  if (existing !== null && existing.lease_epoch === leaseEpoch && existing.state === "running") {
     try {
       writeWorkFile(stateDirOf(handle), {
         ...existing,
         state: outcome,
-        reason: reason ?? null,
+        reason: recorded,
       });
     } catch {
       // A file we cannot write must not block the commit; the row is the
@@ -619,21 +833,33 @@ export function commit(handle: WorkDb, id: string, leaseEpoch: number, outcome: 
   //  - It makes a RECLAIM fence the worker it reclaimed. A worker that overran
   //    its budget was never killed; without this bump it still held a valid
   //    epoch and could overwrite the reclaim verdict with its own success.
+  //
+  // `state = 'running'` is the other half of the fence. Without it, an item
+  // that was never claimed could be committed: a `proposed` row sits at epoch
+  // 0, so `cod work commit <id> --epoch 0` marked a proposal `done` - past the
+  // CEO, past the claim, past the run - and the governance tick then offered it
+  // for landing. Only work that is running can finish.
   const result = handle.db
     .query(
-      "UPDATE work SET state = ?, reason = ?, lease_owner = NULL, lease_epoch = lease_epoch + 1 WHERE id = ? AND lease_epoch = ? RETURNING *",
+      "UPDATE work SET state = ?, reason = ?, lease_owner = NULL, lease_epoch = lease_epoch + 1 WHERE id = ? AND lease_epoch = ? AND state = 'running' RETURNING *",
     )
-    .get(outcome, reason ?? null, id, leaseEpoch) as WorkItem | null;
+    .get(outcome, recorded, id, leaseEpoch) as WorkItem | null;
   if (result === null) {
     const current = get(handle, id);
+    if (current === null) return { ok: false, fenced: true, item: null, reason: "no such work item" };
+    if (current.lease_epoch !== leaseEpoch) {
+      return {
+        ok: false,
+        fenced: true,
+        item: current,
+        reason: `fenced: lease_epoch ${leaseEpoch} is stale (current ${current.lease_epoch}); a newer run owns this item`,
+      };
+    }
     return {
       ok: false,
       fenced: true,
       item: current,
-      reason:
-        current === null
-          ? "no such work item"
-          : `fenced: lease_epoch ${leaseEpoch} is stale (current ${current.lease_epoch}); a newer run owns this item`,
+      reason: `${id} is ${current.state}, not running: only claimed work can be committed`,
     };
   }
   return { ok: true, fenced: false, item: result };

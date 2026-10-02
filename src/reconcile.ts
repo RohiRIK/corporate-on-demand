@@ -25,12 +25,15 @@
  *  3. Resolve work that finished but whose acknowledgement was lost. If the
  *     result file exists and the row says otherwise, the file wins: the work
  *     was paid for, so it is reconciled by READING it, never by re-running it.
- *  4. Report, and do nothing else.
+ *  4. Put a failed RUN back on the queue, a bounded number of times. A run
+ *     failure is usually the free provider, not the work; after
+ *     MAX_RUN_ATTEMPTS consecutive failures the item waits for a person.
+ *  5. Report, and do nothing else.
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { claim, commit, get, listWork, openWork, reject, type WorkDb, type WorkItem } from "./work";
+import { claim, commit, get, isRetryableFailure, listWork, openWork, parseRunFailure, reject, runFailureReason, type WorkDb, type WorkItem } from "./work";
 import { radiusForWork, targetPathsOfItem } from "./runwork";
 
 /** Default per-item budget. Generous, because the cost of a wrong timeout is asymmetric. */
@@ -51,35 +54,22 @@ export interface ReconcileReport {
   readonly rejected: string[];
   readonly expired: string[];
   readonly resolved: string[];
+  /** Failed runs put back on the queue for another attempt. */
+  readonly retried: string[];
   unchanged: number;
   readonly errors: string[];
 }
 
 /**
- /**
-  * Global work is not runnable by a department, whatever it proposed.
-  *
-  * DERIVED from the target paths, not read from the row. The row's own
-  * `blast_radius` is filled in by the proposing agent, so trusting it here would
-  * mean the rule once again constrains the thing it constrains - an agent
-  * wanting a global change simply writes 0.
-  */
- function derivedRadius(item: WorkItem): number {
-   return radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius);
- }
-
- /**
  * Does this proposal need the CEO?
  *
- * DERIVED, not read from the row. The row's own `blast_radius` is filled in by
- * the proposing agent, so trusting it means the rule once again constrains the
- * thing it constrains - an agent wanting a global change simply writes 0.
- *
- * The old predicate is kept for the row's declared value, because it is still
- * the reason recorded alongside the decision.
+ * DERIVED from the target paths, not read from the row. The row's own
+ * `blast_radius` is filled in by the proposing agent, so trusting it means the
+ * rule once again constrains the thing it constrains - an agent wanting a
+ * global change simply writes 0.
  */
 export function needsCeo(item: WorkItem): boolean {
-  return derivedRadius(item) >= 2;
+  return radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius) >= 2;
 }
 
 /** Is a proposal addressed to an agent that exists? Kept pluggable for tests. */
@@ -96,7 +86,7 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
   const budget = options.budgetMs ?? DEFAULT_BUDGET_MS;
   const owned = options.handle === undefined;
   const handle = options.handle ?? openWork(options.stateDir);
-  const report: ReconcileReport = { promoted: [], rejected: [], expired: [], resolved: [], unchanged: 0, errors: [] };
+  const report: ReconcileReport = { promoted: [], rejected: [], expired: [], resolved: [], retried: [], unchanged: 0, errors: [] };
 
   try {
     for (const item of listWork(handle, "proposed")) {
@@ -110,7 +100,7 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
           continue;
         }
         // Global work is not runnable by a department, whatever it proposed.
-        if (needsCeo(item) || derivedRadius(item) >= 2) {
+        if (needsCeo(item)) {
           const outcome = reject(handle, item.id, "blast radius is global; the CEO must dispatch this itself");
           if (outcome.ok) report.rejected.push(item.id);
           else report.errors.push(`${item.id}: ${outcome.reason ?? "fenced"}`);
@@ -130,7 +120,13 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
         // a fabricated timestamp is worse than waiting one more tick for it.
         const started = item.started_at;
         if (started !== null && now - started > budget) {
-          const outcome = commit(handle, item.id, item.lease_epoch, "failed", `exceeded its ${budget}ms budget and was reclaimed by ${options.actor}`);
+          // A COUNTED run failure, like any other: an overrun is as likely to
+          // be a slow provider as a stuck job, so it earns the same bounded
+          // retry - and it fences the overrunning worker either way.
+          const outcome = commit(
+            handle, item.id, item.lease_epoch, "failed",
+            runFailureReason(item.reason, `exceeded its ${budget}ms budget and was reclaimed by ${options.actor}`),
+          );
           if (outcome.ok) report.expired.push(item.id);
           else report.errors.push(`${item.id}: ${outcome.reason ?? "fenced"}`);
         } else {
@@ -198,6 +194,29 @@ export function reconcileOnce(options: ReconcileOptions, addresseeOk: AddresseeC
       if (outcome.ok) report.resolved.push(item.id);
       else report.errors.push(`${item.id}: ${outcome.reason ?? "fenced"}`);
     }
+
+    // A failed RUN goes back on the queue, a bounded number of times.
+    //
+    // Only failures that carry the run counter qualify: an operator's
+    // `--failed`, or anything else that is a decision rather than a casualty,
+    // stays failed. The reason is KEPT, because it carries the count the next
+    // failure increments; the item stops being retried when the count is spent,
+    // and from then on it is in `cod work blocked`.
+    //
+    // Never in the pass that failed it: a reclaim must be visible as `failed`
+    // for at least one tick, and the next tick is the backoff.
+    const failedThisPass = new Set(report.expired);
+    for (const item of listWork(handle, "failed")) {
+      try {
+        if (failedThisPass.has(item.id) || !isRetryableFailure(item)) continue;
+        const row = handle.db
+          .query("UPDATE work SET state = 'ready', lease_owner = NULL WHERE id = ? AND state = 'failed' RETURNING id")
+          .get(item.id) as { id: string } | null;
+        if (row !== null) report.retried.push(item.id);
+      } catch (error) {
+        report.errors.push(`${item.id}: ${(error as Error).message}`);
+      }
+    }
   } finally {
     if (owned) handle.close();
   }
@@ -212,9 +231,10 @@ export function formatReport(report: ReconcileReport): string[] {
   for (const id of report.rejected) lines.push(`rejected ${id}`);
   for (const id of report.expired) lines.push(`reclaimed ${id}: over budget`);
   for (const id of report.resolved) lines.push(`recovered ${id} from its result file`);
+  for (const id of report.retried) lines.push(`retrying ${id} after a failed run`);
   if (lines.length === 0) lines.push(`nothing to do (${report.unchanged} item(s) still running)`);
   for (const error of report.errors) lines.push(`ERROR ${error}`);
   return lines;
 }
 
-export { claim, get };
+export { claim, get, parseRunFailure };

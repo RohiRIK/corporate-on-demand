@@ -545,9 +545,12 @@ const commands: Record<
                 ? "nothing is blocked"
                 : [
                     `${blocked.length} item(s) waiting on a person:`,
-                    ...blocked.map(({ item, review }) => `  ${item.id}  ${review.branch}\n      ${review.reason}`),
+                    ...blocked.map(({ item, kind, branch, reason }) => `  ${item.id}  ${kind.padEnd(8)} ${branch}\n      ${reason}`),
                     "",
-                    "to retry one by hand: cod work run <id>",
+                    // `cod work run` cannot help here: a rejected item is `done`
+                    // and a failed one is not `ready`, so neither is claimable.
+                    // Unblocking is the way out, and it is the command named.
+                    "to look at one again: cod work unblock <id> [why]",
                   ].join("\n"),
           );
         } finally {

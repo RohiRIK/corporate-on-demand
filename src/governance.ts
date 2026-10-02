@@ -225,7 +225,7 @@ function emptyCycle(reason: string): CycleResult {
   return {
     proposed: [],
     duplicates: 0,
-    reconciled: { promoted: [], rejected: [], expired: [], resolved: [], unchanged: 0, errors: [reason] },
+    reconciled: { promoted: [], rejected: [], expired: [], resolved: [], retried: [], unchanged: 0, errors: [reason] },
     summary: reason,
   };
 }

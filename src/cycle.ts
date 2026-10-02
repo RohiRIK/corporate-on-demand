@@ -108,7 +108,7 @@ export function runCycle(
   options: { readonly actor: string },
 ): CycleResult {
   let planned: PlannedWork[] = [];
-  let reconciled: ReconcileReport = { promoted: [], rejected: [], expired: [], resolved: [], unchanged: 0, errors: [] };
+  let reconciled: ReconcileReport = { promoted: [], rejected: [], expired: [], resolved: [], retried: [], unchanged: 0, errors: [] };
 
   try {
     planned = planDepartmentWork(workspace, stateDir);
@@ -141,6 +141,7 @@ export function runCycle(
   ];
   if (reconciled.resolved.length > 0) parts.push(`${reconciled.resolved.length} resolved from a durable result`);
   if (reconciled.expired.length > 0) parts.push(`${reconciled.expired.length} lease(s) expired`);
+  if (reconciled.retried.length > 0) parts.push(`${reconciled.retried.length} failed run(s) retried`);
   if (reconciled.errors.length > 0) parts.push(`${reconciled.errors.length} error(s)`);
 
   return { proposed: planned, duplicates: 0, reconciled, summary: parts.join("; ") };
