@@ -65,7 +65,11 @@ fi
 
 step "the vendored opencode binary"
 if [ -x vendor/opencode/1.18.31/opencode ]; then
-  pass "vendored ($(vendor/opencode/1.18.31/opencode --version))"
+  # In a private TMPDIR: even `--version` leaves a $TMPDIR/opencode behind,
+  # and a check should not litter the machine it checks.
+  vtmp="$(mktemp -d)"
+  pass "vendored ($(TMPDIR="$vtmp" vendor/opencode/1.18.31/opencode --version))"
+  rm -rf "$vtmp"
 else
   fail "opencode is not vendored - run: sh scripts/vendor-opencode.sh"
 fi
