@@ -13,7 +13,7 @@
  * proposed value can only ever narrow the result, never widen it.
  */
 
-import { openWork, claimById, commit, get, reject, runFailureReason, type WorkItem } from "./work";
+import { openWork, claimById, commit, get, reject, runFailureReason, type ReviewRecord, type WorkItem } from "./work";
 import { isGlobalPath } from "./boundary";
 import { dispatch, type Driver, type Step } from "./dispatch";
 import { isAgentFailure } from "./agent";
@@ -108,30 +108,33 @@ export function textOfItem(item: WorkItem): string {
 }
 
 /**
- * What the agent is actually told, including any objection it must fix.
+ * What the agent is actually told, including every objection it must fix.
  *
- * `textOfItem` reads the payload alone, so a retried item was handed the exact
- * same prompt as its first attempt and had no way to know what the reviewer had
- * objected to. The retry existed; the fix demand did not.
+ * `textOfItem` reads the payload alone, so a retried item used to be handed the
+ * exact same prompt as its first attempt and had no way to know what the
+ * reviewer had objected to.
  *
- * Only feedback the review loop itself wrote is treated as a review: it all
- * starts with `review`. An unrelated reason - "could not reach the model" - is
- * left alone rather than dressed up as a reviewer's verdict, because telling a
- * model "the reviewer said X" when nobody said X is worse than saying nothing.
+ * The objections come from the REVIEW ROW, and only from a live
+ * `changes-requested` one. They used to come from `work.reason` when it started
+ * with "review" - a shape test on a free-text field that the worker's own commit
+ * overwrites, so in production a retry saw at most the newest objection, and an
+ * unrelated reason that happened to start with "review" was presented to a
+ * model as a reviewer's verdict.
  *
  * The task stays FIRST. The objection is context, not the objective, and an
  * agent that reads a wall of criticism before it knows what it was asked to do
  * is being asked something else.
  */
-export function briefFor(item: WorkItem): string {
+export function briefFor(item: WorkItem, review?: Pick<ReviewRecord, "outcome" | "reason"> | null): string {
   const task = textOfItem(item);
-  const reason = (item.reason ?? "").trim();
-  if (!reason.startsWith("review")) return task;
+  if (review === undefined || review === null || review.outcome !== "changes-requested") return task;
+  const objections = review.reason.trim();
+  if (objections === "") return task;
   return [
     task,
     "",
     "Your previous attempt was reviewed and returned. Fix these points:",
-    reason,
+    objections,
   ].join("\n");
 }
 

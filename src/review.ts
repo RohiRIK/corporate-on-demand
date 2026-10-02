@@ -22,6 +22,8 @@
  */
 
 import { isGlobalPath } from "./boundary";
+import { FAILURE_PREFIX } from "./agent";
+import { redact } from "./redact";
 
 /** What a mechanical check found. Never "probably fine". */
 export interface MechanicalResult {
@@ -89,7 +91,51 @@ export interface ReviewVerdict {
   readonly outcome: ReviewOutcome;
   readonly reason: string;
   readonly mechanical: readonly string[];
+  /**
+   * True when no reviewer actually judged the change - the provider failed or
+   * the call threw. The outcome is still `reject`, so nothing fails open, but a
+   * caller must not RECORD it as a verdict: a provider blip used to put work in
+   * the blocked queue as though a reviewer had turned it down.
+   */
+  readonly unavailable?: boolean;
 }
+
+/**
+ * The verdict an answer gives, or null when it gives none.
+ *
+ * Models wrap a verdict in emphasis, a heading or a label - "**Approve**",
+ * "Verdict: request changes" - and the strict first-word test this replaces read
+ * every one of those as a refusal, so a reviewer that agreed still blocked the
+ * work. Tolerant of the wrapping, strict about the meaning:
+ *
+ *   - only a line that STARTS with a verdict counts; a verdict word somewhere in
+ *     a sentence is not a verdict;
+ *   - a verdict followed by "?" is a question, not an answer;
+ *   - lines that disagree make the answer ambiguous, and ambiguous is a refusal.
+ *
+ * Every doubt resolves to null, which the caller treats as `reject`. Failing open
+ * here is the one direction that ships bad merges.
+ */
+export function parseVerdict(answer: string): ReviewOutcome | null {
+  const found = new Set<ReviewOutcome>();
+  for (const raw of answer.split("\n")) {
+    const line = raw
+      .trim()
+      .replace(/^[\s>#*_`"'\-\u2013\u2014\u2022.]+/, "")
+      .replace(/^(final\s+)?(verdict|decision|answer|review|outcome)\s*[:\-\u2013\u2014]\s*/i, "")
+      .replace(/^[\s*_`"']+/, "")
+      .toLowerCase();
+    if (line === "") continue;
+    const match = /^(approved?|request(?:ing|ed)?[\s-]+changes?|changes[\s-]+requested|rejected|reject)\b(\s*\?)?/.exec(line);
+    if (match === null || match[2] !== undefined) continue;
+    const word = match[1] ?? "";
+    found.add(word.startsWith("approve") ? "approve" : word.startsWith("reject") ? "reject" : "request-changes");
+  }
+  return found.size === 1 ? ([...found][0] ?? null) : null;
+}
+
+/** How much of a diff a reviewer is sent. Past this it is told the rest exists. */
+export const MAX_REVIEW_DIFF = 100_000;
 
 /** The reviewer's actual brief. Kept as data so the test can read it. */
 export const REVIEW_SKILL = [
@@ -108,6 +154,39 @@ export interface ReviewInput {
   readonly mechanical: MechanicalResult;
   /** The model's answer. Injected, so this is testable without a provider. */
   readonly ask: (prompt: string) => Promise<string>;
+  /** The paths the work said it would touch, so scope can be judged against them. */
+  readonly declaredPaths?: readonly string[];
+  /** The paths it actually touched, from git. */
+  readonly changedPaths?: readonly string[];
+}
+
+/**
+ * The prompt a reviewer is sent.
+ *
+ * The task and the diff are REDACTED first. The mechanical scan refuses the
+ * credential shapes it knows, but a diff is otherwise sent to a model provider
+ * whole - and egress to a provider is a credential path in its own right
+ * (SEC-06). Scope gets the declared and the actual paths side by side, because
+ * "does it touch only what it said" is the first thing asked and the diff alone
+ * makes the reviewer reconstruct it.
+ */
+export function reviewPrompt(input: Omit<ReviewInput, "ask" | "mechanical">): string {
+  const diff = redact(input.diff).text;
+  const shown = diff.length <= MAX_REVIEW_DIFF
+    ? diff
+    : `${diff.slice(0, MAX_REVIEW_DIFF)}\n[... diff truncated: ${diff.length - MAX_REVIEW_DIFF} more characters were not shown ...]`;
+  const paths = (label: string, list: readonly string[] | undefined): string[] =>
+    list === undefined ? [] : [`${label}: ${list.length === 0 ? "(none)" : list.join(", ")}`];
+  return [
+    REVIEW_SKILL,
+    "",
+    `Task: ${redact(input.task).text}`,
+    ...paths("Paths the task named", input.declaredPaths),
+    ...paths("Paths the change touched", input.changedPaths),
+    "",
+    "Diff:",
+    shown,
+  ].join("\n");
 }
 
 /**
@@ -132,25 +211,26 @@ export async function judgeReview(input: ReviewInput): Promise<ReviewVerdict> {
 
   let answer: string;
   try {
-    answer = await input.ask(`${REVIEW_SKILL}\n\nTask: ${input.task}\n\nDiff:\n${input.diff}`);
+    answer = await input.ask(reviewPrompt(input));
   } catch (error) {
     return {
       outcome: "reject",
       reason: `the reviewer could not be reached: ${(error as Error).message}`,
       mechanical: [],
+      unavailable: true,
     };
   }
 
-  const text = answer.trim().toLowerCase();
-  const outcome: ReviewOutcome = text.startsWith("approve")
-    ? "approve"
-    : text.startsWith("request")
-      ? "request-changes"
-      : text.startsWith("reject")
-        ? "reject"
-        // Unreadable, or a paragraph instead of a verdict. Refuse rather than
-        // guess: a reviewer that cannot answer has not approved anything.
-        : "reject";
+  // A failed reviewer RUN is the provider, not a reviewer's opinion. The agent
+  // runner reports it as text with a fixed prefix rather than throwing, and the
+  // old parse read that text as an unreadable verdict - a rejection.
+  if (answer.startsWith(FAILURE_PREFIX)) {
+    return { outcome: "reject", reason: `the reviewer run failed: ${answer.slice(0, 300)}`, mechanical: [], unavailable: true };
+  }
+
+  // Unreadable, or a paragraph instead of a verdict: refuse rather than guess.
+  // A reviewer that cannot answer has not approved anything.
+  const outcome: ReviewOutcome = parseVerdict(answer) ?? "reject";
 
   const reason = answer.trim() === ""
     ? "the reviewer returned nothing usable, which is not approval"

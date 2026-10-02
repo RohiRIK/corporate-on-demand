@@ -32,7 +32,10 @@ export type LandOutcome =
   | { readonly outcome: "landed"; readonly branch: string; readonly reason: string }
   | { readonly outcome: "changes-requested"; readonly reason: string }
   | { readonly outcome: "rejected"; readonly reason: string }
-  | { readonly outcome: "skipped"; readonly reason: string };
+  /** Nothing to review for this run (no branch). Offered again after it runs again. */
+  | { readonly outcome: "skipped"; readonly reason: string }
+  /** Nobody could judge it - the reviewer was unreachable, or git failed. Offered again next tick. */
+  | { readonly outcome: "deferred"; readonly reason: string };
 
 export interface DispatchOutcome {
   readonly ok: boolean;

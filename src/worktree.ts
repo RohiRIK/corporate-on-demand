@@ -18,10 +18,10 @@
  * right direction: the alternative is two agents corrupting each other's work.
  */
 
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { RuntimeFailure, UsageError } from "./errors";
+import { resolveBase, runGit } from "./git";
 
 /** Branch names must be usable as both a git ref and a directory name. */
 const SAFE = /^[a-z0-9][a-z0-9._-]*$/;
@@ -31,13 +31,14 @@ export interface Worktree {
   readonly branch: string;
 }
 
+/**
+ * Through src/git.ts, like every supervisor-side git command: no global config,
+ * no hooks - `git worktree add` runs the `post-checkout` hook, which a branch
+ * nobody reviewed has no business supplying - and no fsmonitor.
+ */
 function git(args: readonly string[], cwd: string): { ok: boolean; out: string; err: string } {
-  const result = spawnSync("git", [...args], { cwd, encoding: "utf8", timeout: 120_000 });
-  return {
-    ok: result.status === 0,
-    out: (result.stdout ?? "").trim(),
-    err: (result.stderr ?? "").trim(),
-  };
+  const result = runGit(cwd, args, 120_000);
+  return { ok: result.ok, out: result.out, err: result.err };
 }
 
 /** Reject anything that could escape the root or confuse a ref. */
@@ -60,7 +61,7 @@ export function acquireWorktree(
   repoRoot: string,
   root: string,
   job: string,
-  baseRef = "HEAD",
+  baseRef?: string,
 ): Worktree {
   const safeJob = assertSafeName(job, "job name");
   const branch = `cod/${safeJob}`;
@@ -84,9 +85,11 @@ export function acquireWorktree(
   const branchExists = git(["rev-parse", "--verify", `refs/heads/${branch}`], repoRoot).ok;
   const args = branchExists
     ? ["worktree", "add", "--force", path, branch]
-    : // A fresh job branches from the current line. A retry reattaches to the
-      // branch it already made, which is what preserves partial work.
-      ["worktree", "add", "-b", branch, path, baseRef];
+    : // A fresh job branches from the BASE branch - resolved, not "HEAD", so a
+      // main checkout that is somewhere unexpected cannot become every new
+      // job's starting point. A retry reattaches to the branch it already made,
+      // which is what preserves partial work.
+      ["worktree", "add", "-b", branch, path, baseRef ?? resolveBase(repoRoot)];
 
   const added = git(args, repoRoot);
   if (!added.ok) {

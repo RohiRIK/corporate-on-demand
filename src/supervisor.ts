@@ -70,7 +70,7 @@ const STATE_DIR = process.env["COD_STATE_DIR"] ?? "/cod";
  * real behaviour.
  */
 async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{ ok: boolean; reason?: string }> {
-  const { openWork, get } = await import("./work");
+  const { openWork, get, latestReview } = await import("./work");
   const { runWorkItem, briefFor } = await import("./runwork");
   const { resolveTarget } = await import("./assign");
   const { driverFor } = await import("./drivers");
@@ -79,8 +79,10 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
 
   const handle = openWork(STATE_DIR);
   let item;
+  let review;
   try {
     item = get(handle, workId);
+    review = latestReview(handle, workId);
   } finally {
     handle.close();
   }
@@ -96,7 +98,8 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   if (target.note !== undefined) log(target.note);
   const worker = target.worker;
   const department = target.department;
-  const goal = briefFor(item);
+  // Every objection a reviewer has made so far, from the review row.
+  const goal = briefFor(item, review);
   const cron = { name: item.id, agent: worker.name, task: goal, schedule: "0 0 1 1 *", enabled: true, expectTools: true };
 
   const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, item.id);
@@ -115,6 +118,15 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   }
 }
 
+/** A read-only role call, in a scratch directory - see src/roles.ts. */
+async function askRoleInScratch(role: "reviewer" | "meeting", name: string, prompt: string): Promise<string> {
+  const { askRole } = await import("./roles");
+  const { runAgent } = await import("./agent");
+  return askRole(role, name, prompt, (cron, workdir) =>
+    runAgent(cron, null, async () => {}, { model: REVIEW_MODEL, workdir }),
+  );
+}
+
 /** One unattended company tick: propose, meet, dispatch. */
 async function governanceTick(workspace: Workspace): Promise<void> {
   const { runGovernance } = await import("./governance");
@@ -123,15 +135,9 @@ async function governanceTick(workspace: Workspace): Promise<void> {
     // The meeting gets a VOICE in the live loop. Without it the positions are
     // computed from the ledger - honest arithmetic, but arithmetic - and the
     // output says so. This is the step that makes the meeting a discussion.
-    askRole: async (prompt) => {
-      const { runAgent } = await import("./agent");
-      return runAgent(
-        { name: "meeting", agent: "cto", task: prompt, schedule: "0 0 1 1 *", enabled: true, expectTools: false },
-        null,
-        async () => {},
-        { model: REVIEW_MODEL, workdir: WORK_REPO },
-      );
-    },
+    // A read-only role, in a directory of its own - never /work, where merges
+    // happen. See src/roles.ts.
+    askRole: async (prompt) => askRoleInScratch("meeting", "meeting", prompt),
     land: async (id) => {
       // The one place that merges. The reviewer is a MODEL call, unlike the
       // mechanical checks beside it, because judging scope and whether a test
@@ -139,7 +145,6 @@ async function governanceTick(workspace: Workspace): Promise<void> {
       // refusal cannot be talked past, and the radius decides who lands.
       const { openWork, get } = await import("./work");
       const { landWork } = await import("./land");
-      const { runAgent } = await import("./agent");
       const handle = openWork(STATE_DIR);
       let item;
       try {
@@ -151,17 +156,8 @@ async function governanceTick(workspace: Workspace): Promise<void> {
       return landWork(WORK_REPO, item, {
         repo: WORK_REPO,
         stateDir: STATE_DIR,
-        landingRepo: workspace.landing === undefined ? undefined : "/landing",
         maxRetries: workspace.governance.maxReviewRetries,
-        ask: async (prompt) => {
-          const out = await runAgent(
-            { name: `review-${id}`, agent: "reviewer", task: prompt, schedule: "0 0 1 1 *", enabled: true, expectTools: false },
-            null,
-            async () => {},
-            { model: REVIEW_MODEL, workdir: WORK_REPO },
-          );
-          return out;
-        },
+        ask: async (prompt) => askRoleInScratch("reviewer", `review-${id}`, prompt),
       });
     },
     // The bound is the company's own concurrency ceiling, not a second number:

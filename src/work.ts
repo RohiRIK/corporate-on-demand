@@ -570,7 +570,7 @@ export interface ReviewRecord {
    * both pass it through - but it is history, and `blockedWork` excludes it so a
    * cleared item leaves the queue.
    */
-  readonly outcome: "landed" | "changes-requested" | "rejected" | "skipped" | "cleared";
+  readonly outcome: "landed" | "changes-requested" | "rejected" | "skipped" | "deferred" | "cleared";
   readonly reason: string;
   readonly branch: string;
   readonly landedSha: string;

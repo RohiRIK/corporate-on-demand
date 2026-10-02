@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { openWork, propose, get, latestReview } from "../src/work";
+import { openWork, propose, get, latestReview, claimById, commit } from "../src/work";
 import { landWork } from "../src/land";
 import { briefFor } from "../src/runwork";
 
@@ -46,7 +46,24 @@ function seeded(state: string, from = "engineering"): { id: string } {
   });
   handle.close();
   if (!made.ok || made.item === undefined) throw new Error("seed failed");
+  finished(state, made.item.id);
   return { id: made.item.id };
+}
+
+/**
+ * Finish an item the way the real worker does - claimed by id, committed done -
+ * because only finished work is reviewed. Called again after a request for
+ * changes to stand in for the worker's next attempt.
+ */
+function finished(state: string, id: string): void {
+  const handle = openWork(state);
+  try {
+    handle.db.query("UPDATE work SET state = 'ready' WHERE id = ? AND state = 'proposed'").run(id);
+    const claimed = claimById(handle, id, "test-worker");
+    if (claimed !== null) commit(handle, id, claimed.lease_epoch, "done", "worker finished");
+  } finally {
+    handle.close();
+  }
 }
 
 /**
@@ -75,7 +92,7 @@ describe("landWork", () => {
     const handle = openWork(state);
     const item = get(handle, id);
     handle.close();
-    const result = await landWork(dir, item!, { ...opts, repo: dir, stateDir: dir });
+    const result = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
     expect(result.outcome).toBe("landed");
     const master = execFileSync("git", ["-C", dir, "log", "--oneline", "master"], { encoding: "utf8" });
     expect(master).toContain("land cod/");
@@ -109,10 +126,12 @@ describe("landWork", () => {
     expect(result.outcome).toBe("changes-requested");
     const after = openWork(state);
     const updated = get(after, id);
+    const review = latestReview(after, id);
     after.close();
-    // The reviewer`s words are on the item, so the retry is BRIEFED rather than
-    // starting over from nothing.
-    expect(updated?.reason ?? "").toContain("no test");
+    // The reviewer's words are on the REVIEW ROW, and the next attempt's brief
+    // carries them, so the retry is BRIEFED rather than starting over.
+    expect(review?.reason ?? "").toContain("no test");
+    expect(briefFor(updated!, review)).toContain("no test");
     expect(updated?.state).toBe("ready");
   });
 
@@ -131,6 +150,7 @@ describe("landWork", () => {
     const { id } = seeded(state);
     branchWith(dir, `cod/${id}`, "notes/a.md", "v1\n");
     const land = async (): Promise<string> => {
+      finished(state, id); // the worker's next attempt
       const h = openWork(state);
       const item = get(h, id);
       h.close();
@@ -154,6 +174,8 @@ describe("landWork", () => {
     const item = get(h, id);
     h.close();
     const first = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, maxRetries: 1, ask: async () => "request changes - no test" });
+    void first;
+    finished(state, id); // the worker's next attempt
     const h2 = openWork(state);
     const second = get(h2, id);
     h2.close();
@@ -162,14 +184,14 @@ describe("landWork", () => {
     expect(result.reason).toContain("retr");
     expect(result.reason).toContain("no test");
   });
-  test("a branch that changed nothing is skipped, not merged", async () => {
+  test("an item with no branch at all is skipped, not merged", async () => {
     const dir = repo();
     const state = stateDir();
     const { id } = seeded(state);
     const handle = openWork(state);
     const item = get(handle, id);
     handle.close();
-    const result = await landWork(dir, item!, { ...opts, repo: dir, stateDir: dir });
+    const result = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
     expect(result.outcome).toBe("skipped");
   });
 
@@ -181,13 +203,18 @@ describe("landWork", () => {
     const handle = openWork(state);
     const item = get(handle, id);
     handle.close();
-    await landWork(dir, item!, { ...opts, repo: dir, stateDir: dir });
+    await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
     // The reason now names the REVIEW verdict rather than a Set that no longer
     // exists, and it says the branch as well as the verdict.
-    const again = await landWork(dir, item!, { ...opts, repo: dir, stateDir: dir });
+    const again = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state });
     expect(again.outcome).toBe("skipped");
     expect(again.reason).toContain("already reviewed");
     expect(again.reason).toContain("landed");
+    // And LOOKING did not overwrite the verdict. The guard used to record its
+    // "skipped" over `landed`, after which the next tick reviewed it again.
+    const h = openWork(state);
+    expect(latestReview(h, id)?.outcome).toBe("landed");
+    h.close();
   });
 
   test("an unreachable reviewer does NOT merge", async () => {
@@ -199,7 +226,9 @@ describe("landWork", () => {
     const item = get(handle, id);
     handle.close();
     const result = await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, ask: async () => { throw new Error("provider down"); } });
-    expect(result.outcome).toBe("rejected");
+    // Not merged - and not REJECTED either. Nobody judged it, so it is deferred
+    // to the next tick rather than parked in the blocked queue as a verdict.
+    expect(result.outcome).toBe("deferred");
     const master = execFileSync("git", ["-C", dir, "log", "--oneline", "master"], { encoding: "utf8" });
     expect(master).not.toContain("land cod/");
   });
@@ -271,6 +300,7 @@ describe("the review record", () => {
     const item = get(handle, id);
     handle.close();
     await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, ask: async () => "request changes - no test" });
+    finished(state, id); // the worker's next attempt
     await landWork(dir, item!, { ...opts, repo: dir, stateDir: state, ask: async () => "approve - fine now" });
     const after = openWork(state);
     expect(latestReview(after, id)?.outcome).toBe("landed");

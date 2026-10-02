@@ -20,7 +20,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { Workspace } from "./workspace";
-import { openWork, get } from "./work";
+import { openWork, get, latestReview } from "./work";
 import { runWorkItem, briefFor } from "./runwork";
 import { resolveTarget } from "./assign";
 import { dispatch } from "./dispatch";
@@ -73,10 +73,11 @@ if (target.worker === undefined) {
 if (target.note !== undefined) process.stderr.write(`${target.note}\n`);
 const worker = target.worker;
 const department = target.department;
-// The TEXT, not the JSON wrapper. The paths are bookkeeping; handing them to
-// the model as part of its instruction is the system showing its plumbing to
-// the thing it is directing.
-const goal = briefFor(item);
+// The TEXT, not the JSON wrapper - plus every objection a reviewer has made so
+// far, read from the review row. The paths are bookkeeping; handing them to the
+// model as part of its instruction is the system showing its plumbing to the
+// thing it is directing.
+const goal = briefFor(item, latestReview(handle, workId));
 const cron = {
   name: item.id,
   // The WORKER, not the addressee - so the log and the result line name who
