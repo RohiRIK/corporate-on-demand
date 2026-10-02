@@ -13,7 +13,8 @@
  *    CLI attach to a foreign container and inherit its mounts and capabilities.
  */
 
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { PATHS } from "./image";
 import type { Config } from "./config";
 import { RuntimeFailure, UnsupportedRuntimeError, UsageError } from "./errors";
@@ -220,18 +221,63 @@ export function containerName(workspace: string): string {
 }
 
 /**
- * The Docker socket is the only path from "contained" to "host lost". Mounting
- * it would hand every agent in the container root on this machine, so it is
- * refused at the one place a mount is built.
+ * A container runtime socket is the only path from "contained" to "host lost".
+ * Mounting one hands every agent in the container root on this machine, so it
+ * is refused at the one place a mount is built.
+ *
+ * The guard this replaces compared the source with two exact strings, so
+ * `/var/run/docker.sock/`, a symlink to the socket, a rootless or Desktop
+ * socket, and - the realistic one - a DIRECTORY that contains the socket (a
+ * state directory of /var/run, or of $HOME on Docker Desktop) all went straight
+ * through (SEC-04 A). Now the path is resolved, symlinks followed, and refused
+ * if it is a socket of any kind, is a runtime's own directory, or contains a
+ * runtime socket where runtimes put them.
  */
-const FORBIDDEN_MOUNT_SOURCES = ["/var/run/docker.sock", "/run/docker.sock"] as const;
+const SOCKET_NAMES = ["docker.sock", "containerd.sock", "podman.sock", "crio.sock", "buildkitd.sock", "dockershim.sock"] as const;
+/** Where those sockets live, relative to a directory someone might mount. */
+const SOCKET_HOMES = [
+  "", "run", "docker", "containerd", "podman", "crio", "buildkit",
+  ".docker/run", ".docker/desktop", "user/1000", "run/user/1000",
+] as const;
+const RUNTIME_DIRS = [
+  "/var/run/docker", "/run/docker", "/run/containerd", "/var/run/containerd", "/run/podman",
+  "/var/run/podman", "/run/crio", "/var/run/crio", "/run/buildkit", "/var/lib/docker", "/var/lib/containerd",
+] as const;
 
 export function assertMountAllowed(source: string): void {
-  for (const forbidden of FORBIDDEN_MOUNT_SOURCES) {
-    if (source === forbidden) {
-      throw new UsageError(
-        `refusing to mount ${forbidden}: it would give every agent root on this host`,
-      );
+  if (typeof source !== "string" || !isAbsolute(source)) {
+    // Docker resolves nothing for a bind source; a relative or missing one is a
+    // bug upstream, and checking it against the rules below would be checking
+    // some other path.
+    throw new UsageError(`refusing to mount ${String(source)}: a bind mount needs an absolute host path`);
+  }
+  const refuse = (what: string): never => {
+    throw new UsageError(`refusing to mount ${source}: ${what}; it would give every agent root on this host`);
+  };
+  const lexical = resolve(source);
+  let real = lexical;
+  try {
+    real = realpathSync(lexical);
+  } catch {
+    // A path that does not exist yet holds nothing; it is still checked by name.
+  }
+  for (const path of new Set([lexical, real])) {
+    if (path === "/") refuse("it is the whole host filesystem");
+    if ((SOCKET_NAMES as readonly string[]).includes(basename(path))) refuse("it is a container runtime socket");
+    if (RUNTIME_DIRS.some((dir) => path === dir || path.startsWith(`${dir}/`))) refuse("it is a container runtime's own directory");
+    try {
+      const stat = statSync(path);
+      if (stat.isSocket()) refuse("it is a socket");
+      if (stat.isDirectory()) {
+        for (const home of SOCKET_HOMES) {
+          for (const name of SOCKET_NAMES) {
+            if (existsSync(join(path, home, name))) refuse(`it contains ${join(home, name)}`);
+          }
+        }
+      }
+    } catch (error) {
+      if (error instanceof UsageError) throw error;
+      // Unreadable or absent: nothing in it can be handed over by this mount.
     }
   }
 }
@@ -558,13 +604,22 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
       // Idempotent, but only by label: a container of the same name that we did
       // not create is a conflict, not something to adopt.
       const state = await tryRun(runner, ["inspect", "--format", "{{.State.Running}}", name], 10_000);
-      if (state?.code === 0 && state.stdout.trim() === "true") {
+      if (state?.code === 0) {
         const label = await containerWorkspaceLabel(name, runner);
-        if (label === config.workspaceFile) return name;
-        throw new UsageError(
-          `a container named ${name} is already running but belongs to a different workspace (${label ?? "unlabelled"}); ` +
-            `refusing to adopt it. Stop it with \`docker rm -f ${name}\` first.`,
-        );
+        if (label !== config.workspaceFile) {
+          throw new UsageError(
+            `a container named ${name} already exists but belongs to a different workspace (${label ?? "unlabelled"}); ` +
+              `refusing to adopt it. Remove it with \`docker rm -f ${name}\` first.`,
+          );
+        }
+        if (state.stdout.trim() === "true") return name;
+        // OUR container, stopped: after the restart policy gave up, after a
+        // reboot, after `docker stop`. `docker run` with its name used to fail
+        // with a name conflict, so `cod up` - and the systemd unit that runs it
+        // - could not bring the workspace back without a manual `cod down`. The
+        // work is in the volume, not the container, so the container is
+        // replaced.
+        await run(["rm", "--force", name], wsName);
       }
 
       const spec = buildWorkspaceSpec(config, workspace);

@@ -1,0 +1,77 @@
+The workflow half of the CI secret-scan fix (SEC-06), as a patch.
+
+It could not be pushed from the session that wrote it: GitHub refuses a
+workflow change from a token without the `workflow` scope. Everything else
+landed - scripts/secret-scan.sh with src/redact.ts's seven credential shapes,
+run by verify.sh, which the CI `verify` job runs - so the TREE is already
+scanned with the full list on every push. What this adds is the RANGE scan:
+every line a push or pull request adds, so a secret committed and deleted in
+a later commit of the same push is caught too. It also replaces the old
+three-pattern inline scan with the script.
+
+Apply it from the repository root, with a token or session that may edit
+workflows:
+
+    git apply .security-review/ci-range-scan.patch
+    git commit -am "ci: scan every line a push adds, with the full pattern list"
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 149d0fb..b4753c2 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -62,29 +62,35 @@ jobs:
+ 
+       # The repository's own AGENTS.md requires a secret scan before
+       # publishing. It runs as its own job so a leak is a red build with an
+-      # obvious name rather than a failure buried in a test run.
++      # obvious name rather than a failure buried in a test run. The patterns
++      # and the exclusions live in the script, so CI and a developer running
++      # it locally scan for the same things.
+       - name: Scan tracked files for credential shapes
++        run: sh scripts/secret-scan.sh
++
++      # The tree scan sees only the tip. A secret committed and then deleted in
++      # a later commit of the same push is no longer in the tree, and is still
++      # published with the history - so every line the push or pull request
++      # ADDS is scanned as well.
++      - name: Scan every line this push or pull request adds
++        env:
++          PR_BASE: ${{ github.event.pull_request.base.sha }}
++          BEFORE: ${{ github.event.before }}
++          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+         run: |
+-          if git grep -nIE 'sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}' \
+-               -- . ':!bun.lock' ':!docs/SECURITY_POSTURE.md' ':!src/redact.ts' \
+-               ':!tests/redact.test.ts' ':!tests/results.test.ts' \
+-               ':!tests/review.test.ts' ':!tests/land.test.ts' \
+-               ':!scripts/vendor-opencode.sh'; then
+-            echo "::error::possible credential in a tracked file"
+-            exit 1
++          if [ -n "$PR_BASE" ]; then
++            base="$PR_BASE"
++          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
++            base="$BEFORE"
++          else
++            # A new branch: "before" is all zeros. Compare with where it forked.
++            base="$(git merge-base HEAD "origin/$DEFAULT_BRANCH" 2>/dev/null || true)"
++          fi
++          if [ -z "$base" ]; then
++            echo "no base to compare with; the tree scan above covers this push"
++            exit 0
+           fi
+-          echo "no credential shapes found in tracked files"
+-          # The exclusions above are all files that legitimately CONTAIN a
+-          # credential shape: the redaction patterns themselves, the tests that
+-          # prove they work, the checksum script, and this scan. They are listed
+-          # individually rather than globbed so a new one cannot slip in.
+-          #
+-          # tests/review.test.ts and tests/land.test.ts are excluded for the same
+-          # reason as tests/redact.test.ts: their fixtures ARE credential shapes,
+-          # because a test that proves the scanner catches a secret has to
+-          # contain one. Excluding them does not weaken the scan - it still sees
+-          # every other file - and the fixtures are visibly elided (`sk-liv...`)
+-          # rather than plausible tokens.
++          sh scripts/secret-scan.sh "$base..HEAD"
+ 
+       - name: Confirm the large binary is not tracked
+         run: |

@@ -10,7 +10,16 @@
 #   systemctl enable --now cod-workspace@acme.service
 #
 # It runs `cod up`, which is idempotent: if the container is already up this is
-# a no-op, so enabling it for a running workspace is safe.
+# a no-op, so enabling it for a running workspace is safe - and if the container
+# exists but stopped (after a reboot, or after the restart policy gave up),
+# `cod up` replaces it.
+#
+# Before enabling it, the workspace must exist, with its state dir beside it:
+#
+#   cod init acme --yes --workspace /var/lib/cod/acme/cod.json --state /var/lib/cod/acme
+#
+# and `bun` must be on the unit's PATH (/usr/local/bin is), because `cod` is a
+# `#!/usr/bin/env bun` script.
 
 [Unit]
 Description=cod workspace container (%i)
@@ -20,13 +29,20 @@ After=docker.service
 
 [Service]
 Type=oneshot
-# The state dir must exist before the container starts, or Docker creates the
-# bind mount root-owned and the agent cannot write to it. This lives in
-# [Service], not [Unit] - systemd-analyze verify caught that when it was there,
-# and ignored the directive rather than failing.
-ExecStartPre=/bin/sh -c 'mkdir -p /var/lib/cod/%i'
+# The state dir must exist before the container starts AND belong to uid 1000,
+# the uid the container runs as - or the supervisor cannot write its heartbeat,
+# its log or the ledger, and `cod up` fails waiting for a live schedule. This
+# used to be `mkdir -p`, which in a system unit runs as root and made exactly
+# the root-owned directory it said it was avoiding. `install -d` gives the leaf
+# the owner and mode and leaves /var/lib/cod itself root's.
+#
+# In [Service], not [Unit] - systemd-analyze verify caught that when it was
+# there, and ignored the directive rather than failing.
+ExecStartPre=/usr/bin/install -d -o 1000 -g 1000 -m 0750 /var/lib/cod/%i
 RemainAfterExit=yes
-Environment=COD_WORKSPACE_FILE=/var/lib/cod/%i/cod.json
+# COD_WORKSPACE is what the CLI reads (COD_WORKSPACE_FILE is the in-container
+# name, and setting it here did nothing). --workspace below says it again.
+Environment=COD_WORKSPACE=/var/lib/cod/%i/cod.json
 Environment=COD_STATE_DIR=/var/lib/cod/%i
 ExecStart=/usr/local/bin/cod up --workspace /var/lib/cod/%i/cod.json
 # `cod down` on stop, so `systemctl stop` means stop rather than leave it

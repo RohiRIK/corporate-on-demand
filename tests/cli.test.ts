@@ -606,7 +606,7 @@ describe("the adopt guard", () => {
     };
     const docker = makeDocker({ runner, timeoutMs: 1000 });
     await docker.up(
-      { workspaceFile: "/srv/team/one/cod.json" } as never,
+      { workspaceFile: "/srv/team/one/cod.json", stateDir: "/srv/team/one/state" } as never,
       { crons: [] } as never,
     );
     const runCall = argvSeen.find((a) => a.includes("--label")) ?? "";

@@ -7,7 +7,7 @@
  * source next to the value rather than making the user guess.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { UsageError } from "./errors";
@@ -145,4 +145,39 @@ export function ensureStateDir(config: Config): string {
 /** Create the parent directory of a file that may not exist yet. */
 export function ensureParentDir(file: string): void {
   mkdirSync(dirname(file), { recursive: true });
+}
+
+/** The file in a state directory that names the workspace it belongs to. */
+export const OWNER_FILE = "workspace.json";
+
+/**
+ * Bind a state directory to ONE workspace, or refuse.
+ *
+ * The default state directory is the same for every workspace on the machine,
+ * while containers and volumes are per workspace. So a second workspace on the
+ * default directory shared the first one's ledger, heartbeat, results and log:
+ * its `cod status` read the other supervisor's heartbeat, and its governance
+ * dispatched the other company's work. The first workspace to use a state
+ * directory owns it; another one is refused with the two fixes.
+ */
+export function claimStateDir(config: Pick<Config, "stateDir" | "workspaceFile">): void {
+  const owner = join(config.stateDir, OWNER_FILE);
+  if (existsSync(owner)) {
+    let recorded = "";
+    try {
+      recorded = String((JSON.parse(readFileSync(owner, "utf8")) as { workspace?: unknown }).workspace ?? "");
+    } catch {
+      recorded = "";
+    }
+    if (recorded !== "" && recorded !== config.workspaceFile) {
+      throw new UsageError(
+        `the state directory ${config.stateDir} belongs to another workspace (${recorded}). ` +
+          "Give this one its own with --state <dir> or COD_STATE_DIR - or, if you MOVED that workspace " +
+          `to ${config.workspaceFile}, delete ${owner}.`,
+      );
+    }
+    if (recorded === config.workspaceFile) return;
+  }
+  mkdirSync(config.stateDir, { recursive: true });
+  writeFileSync(owner, `${JSON.stringify({ workspace: config.workspaceFile }, null, 2)}\n`, "utf8");
 }

@@ -135,7 +135,7 @@ describe("formatLiveness", () => {
   test("never reads as NOT RUNNING with the command to fix it", () => {
     const line = formatLiveness({ state: "never", heartbeat: null, ageMs: null });
     expect(line).toContain("NOT RUNNING");
-    expect(line).toContain("cod supervise");
+    expect(line).toContain("cod up");
     // The single most important property: no wording here could be read as
     // "everything is fine".
     expect(line).not.toMatch(/live/i);

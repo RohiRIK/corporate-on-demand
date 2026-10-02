@@ -15,7 +15,7 @@ import { chooseSandbox, describeSandbox, jobPolicy, rolePolicy, type SandboxChoi
 import { Workspace, findWorker } from "./workspace";
 import { createLogger, fileSink, newRunId, type Level } from "./log";
 import { recordResult } from "./results";
-import { beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
+import { archiveAbandoned, beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
 import { heartbeatPath, type Heartbeat } from "./liveness";
 import { assertCronSupport, scheduleGovernance, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 import { singleFlight } from "./governance";
@@ -251,10 +251,10 @@ let runSeq = 0;
 /**
  * Write proof of life.
  *
- * The container blocks in `tail -f`, so it stays "up" long after the supervisor
- * dies. This file is the only thing that distinguishes a running schedule from
- * a dead one, and `cod status` reads it to refuse to call a dead supervisor
- * healthy. Written on start and on every tick.
+ * The supervisor is PID 1, so the container dies with it - but a container can
+ * still be up while the schedule is wedged, and between restarts it is up with
+ * nothing scheduled. This file is what `cod status` reads to refuse to call a
+ * dead schedule healthy. Written on start and on every tick.
  */
 function beat(jobs: readonly string[]): void {
   const heartbeat: Heartbeat = {
@@ -308,6 +308,19 @@ function log(line: string, level: Level = "info"): void {
 }
 
 function main(): void {
+  // ONE supervisor per container: the one the entrypoint `exec`s as PID 1.
+  // `cod supervise` used to start a second one with `docker exec`, and an exec'd
+  // process outlives its client - so it stayed, and every cron fired twice and
+  // two governance loops reviewed the same work. Refused outright now; the
+  // variable exists for running it outside a container on purpose.
+  if (process.pid !== 1 && process.env["COD_SUPERVISOR_NOT_PID1"] !== "1") {
+    process.stderr.write(
+      "[supervisor] refusing to start: the supervisor is the container's main process (PID 1), " +
+        "started by `cod up`. Set COD_SUPERVISOR_NOT_PID1=1 to run one deliberately elsewhere.\n",
+    );
+    process.exit(2);
+  }
+
   // Throws UnsupportedRuntimeError, which exits 2, when Bun.cron is missing.
   // That is the whole point: fail here rather than sit idle for ever.
   assertCronSupport();
@@ -351,6 +364,7 @@ function main(): void {
   // cannot answer from its own log - the log died with it.
   for (const stuck of findAbandoned(STATE_DIR)) {
     log(`ABANDONED: ${formatAbandoned(stuck)}`, "error");
+    archiveAbandoned(STATE_DIR, stuck);
   }
 
   const handles: ScheduledHandle[] = scheduleWorkspace(parsed.data, {

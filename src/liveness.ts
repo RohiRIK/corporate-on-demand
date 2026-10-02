@@ -1,10 +1,10 @@
 /**
  * Supervisor liveness.
  *
- * A `Bun.cron` schedule lives in the supervisor's memory. If the supervisor
- * dies while the container keeps running — which is the normal case, since the
- * container blocks in `tail -f` — the container is `up` and the schedule is
- * gone. Nothing about the container's state says so.
+ * A `Bun.cron` schedule lives in the supervisor's memory. The supervisor is the
+ * container's PID 1, so the container dies with it - but between a crash and
+ * the restart, or with a supervisor wedged in a tick, the container can be `up`
+ * while nothing is scheduled. Nothing about the container's state says so.
  *
  * That is the same class of failure this project has guarded against since the
  * `Bun.cron` version check: a scheduler that looks healthy while doing nothing.
@@ -74,7 +74,7 @@ export function supervisorLiveness(stateDir: string, now: number = Date.now()): 
 /** One line for a human. Never says healthy when it is not. */
 export function formatLiveness(liveness: Liveness): string {
   if (liveness.state === "never") {
-    return "supervisor: NOT RUNNING (no heartbeat - run `cod supervise`)";
+    return "supervisor: NOT RUNNING (no heartbeat - start it with `cod up`, and check `docker logs`)";
   }
   const { heartbeat, ageMs } = liveness;
   const seconds = Math.round((ageMs ?? 0) / 1000);

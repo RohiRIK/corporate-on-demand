@@ -31,8 +31,32 @@ function fail(error: unknown): never {
   process.exit(1);
 }
 
-async function main(argv: string[]): Promise<void> {
-  const { values, positionals } = parseArgs({
+/** `--last abc` used to become NaN, and NaN as a limit returned nothing at all. */
+function positiveInteger(flag: string, raw: string): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new UsageError(`${flag} needs a whole number of at least 1 (got "${raw}")`);
+  return n;
+}
+
+/**
+ * A flag parseArgs cannot accept - unknown, missing its value, or a value that
+ * starts with a dash - is a usage failure like any other, and exits 2 with the
+ * pointer to --help. It used to escape as a plain TypeError and exit 1, the
+ * code that means "worth retrying".
+ */
+function parseFlags(argv: string[]): ReturnType<typeof parseCli> {
+  try {
+    return parseCli(argv);
+  } catch (error) {
+    if (String((error as { code?: unknown }).code ?? "").startsWith("ERR_PARSE_ARGS_")) {
+      throw new UsageError((error as Error).message);
+    }
+    throw error;
+  }
+}
+
+function parseCli(argv: string[]) {
+  return parseArgs({
     args: argv,
     allowPositionals: true,
     strict: true,
@@ -62,13 +86,17 @@ async function main(argv: string[]): Promise<void> {
       to: { type: "string" },
       goal: { type: "string" },
       payload: { type: "string" },
-    override: { type: "boolean" },
+      override: { type: "boolean" },
       paths: { type: "string" },
       blast: { type: "string" },
       kind: { type: "string" },
       reason: { type: "string" },
     },
   });
+}
+
+async function main(argv: string[]): Promise<void> {
+  const { values, positionals } = parseFlags(argv);
 
   if (values.version) {
     process.stdout.write(`${VERSION}\n`);
@@ -95,7 +123,7 @@ async function main(argv: string[]): Promise<void> {
     purpose: values.purpose,
     level: values.level,
     run: values.run,
-    last: values.last === undefined ? undefined : Number(values.last),
+    last: values.last === undefined ? undefined : positiveInteger("--last", values.last),
     cron: values.cron,
     failed: values.failed,
     purge: values.purge,
@@ -105,6 +133,10 @@ async function main(argv: string[]): Promise<void> {
     to: values.to,
     goal: values.goal,
     payload: values.payload,
+    // Parsed and then dropped on the floor, for a while: `--override` reached
+    // no command, so `cod work unblock <id> --override` was refused for lacking
+    // the very flag it had been given.
+    override: values.override,
     paths: values.paths,
     blast: values.blast,
     kind: values.kind,

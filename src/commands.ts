@@ -11,8 +11,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_MAX_CONCURRENT } from "./limit";
 import { describeTimezone, hostTimezone } from "./timezone";
-import { loadConfig, ensureStateDir, ensureParentDir, type Config } from "./config";
-import { RuntimeFailure, UsageError } from "./errors";
+import { loadConfig, ensureStateDir, ensureParentDir, claimStateDir, type Config } from "./config";
+import { RefusedError, RuntimeFailure, UsageError } from "./errors";
 import { isDockerAvailable } from "./docker";
 import {
   Workspace,
@@ -45,15 +45,6 @@ export interface CommandFlags {
   readonly last?: number | undefined;
   /** Filter `cod results` to one job name. */
   readonly cron?: string | undefined;
-  /**
-   * Internal: the in-container half of `cod work run`.
-   *
-   * Not a user-facing flag. It exists so the host can hand a dispatch to the
-   * container, which is the only place /work and the ledger actually exist.
-   * Accepted on the command line because that is how the host reaches it, and
-   * it only ever does the inner half of one operation.
-   */
-  readonly inside?: boolean | undefined;
   /** Show only failed runs. */
   readonly failed?: boolean | undefined;
   /** Confirm a destructive `cod purge`. */
@@ -134,8 +125,18 @@ const commands: Record<
       throw new UsageError("init needs a workspace name: `cod init <name>`");
     }
     const config = configFrom(flags);
+    // An existing workspace is the operator's own file - their purpose, their
+    // crons, their landing repo. `init --yes` used to overwrite it without a
+    // word, and --yes means "take the defaults", not "destroy what is there".
+    if (existsSync(config.workspaceFile) && flags.force !== true) {
+      throw new UsageError(
+        `${config.workspaceFile} already exists; refusing to overwrite it. Pass --force to replace it, ` +
+          "or --workspace <path> to create another.",
+      );
+    }
     ensureParentDir(config.workspaceFile);
     ensureStateDir(config);
+    claimStateDir(config);
 
     // Non-interactive mode takes every default, so the scripted path is the
     // one the tests exercise. Prompts are added on top of it, never instead.
@@ -204,6 +205,10 @@ const commands: Record<
   async up(_positionals, flags, print) {
     const config = configFrom(flags);
     const workspace = readWorkspace(config);
+    // One state directory, one workspace: two workspaces on the default state
+    // dir shared one ledger, one heartbeat and one log. Refused here, before a
+    // container exists to corrupt anything.
+    claimStateDir(config);
     if (!(await isDockerAvailable())) {
       throw new RuntimeFailure("docker is not available on this host; is the daemon running?");
     }
@@ -268,25 +273,36 @@ const commands: Record<
     );
   },
 
-  /** Start the in-container supervisor, which registers the cron jobs. */
+  /**
+   * Show what the running supervisor registered.
+   *
+   * READ-ONLY. The supervisor is the container's main process, started by
+   * `cod up`. This command used to `docker exec` a SECOND supervisor - and an
+   * exec'd process outlives the client that started it, so after its 10s
+   * timeout the second supervisor kept running: every cron fired twice and two
+   * governance loops reviewed the same work. The supervisor now refuses to run
+   * as anything but PID 1, and this reads its heartbeat instead.
+   */
   async supervise(_positionals, flags, print) {
     const config = configFrom(flags);
+    const workspace = readWorkspace(config);
     const { isRunning } = await import("./docker");
-    if (!(await isRunning(config))) {
-      throw new RuntimeFailure("the workspace container is not running; run `cod up` first");
-    }
-    const { containerNameFor, runSupervisor } = await import("./supervise");
-    const name = containerNameFor(config);
-    const result = await runSupervisor(config, name, { timezone: readWorkspace(config).timezone });
+    const { formatLiveness, supervisorLiveness } = await import("./liveness");
+    const running = await isRunning(config);
+    const liveness = supervisorLiveness(config.stateDir);
     print(
       config,
-      result,
-      () => `supervisor in ${name}: ${result.lines.length} line(s), exit ${result.code}`,
+      { running, liveness: liveness.state, heartbeat: liveness.heartbeat },
+      () => [
+        `${workspace.company.name}: container ${running ? "up" : "down"}`,
+        `  ${formatLiveness(liveness)}`,
+        ...(liveness.heartbeat?.sandbox === undefined ? [] : [`  sandbox ${liveness.heartbeat.sandbox}`]),
+        "  the supervisor is the container's main process; `cod up` starts it, `cod logs` shows what it did",
+      ].join("\n"),
     );
-    if (result.code !== 0) {
-      throw new RuntimeFailure(
-        `the supervisor exited ${result.code}: ${result.lines.join("; ") || "no output"}`,
-      );
+    if (!running) throw new RuntimeFailure("the workspace container is not running; run `cod up`");
+    if (liveness.state !== "live") {
+      throw new RuntimeFailure(`the container is up but the supervisor is not live (${liveness.state}); check \`cod logs\``);
     }
   },
 
@@ -439,6 +455,11 @@ const commands: Record<
         // nothing AND created a directory named "proposed" in the cwd. --status
         // is unambiguous and cannot collide.
         const status = typeof flags.status === "string" ? flags.status : undefined;
+        const states = ["proposed", "ready", "running", "done", "failed", "rejected"];
+        // A typo used to be an empty list that read as "nothing in that state".
+        if (status !== undefined && !states.includes(status)) {
+          throw new UsageError(`--status must be one of ${states.join(", ")} (got "${status}")`);
+        }
         const items = listWork(handle, status as never);
         print(
           config,
@@ -483,6 +504,7 @@ const commands: Record<
               ? `proposed ${result.item.id} (state ${result.item.state}; it is NOT runnable until the CEO reconciles it)`
               : `refused: ${result.reason ?? "unknown"}`,
         );
+        if (!result.ok) throw new RefusedError(`proposal refused: ${result.reason ?? "unknown"}`);
         return;
       }
       if (sub === "claim") {
@@ -510,6 +532,7 @@ const commands: Record<
               ? `committed ${id} as ${outcome.item?.state ?? "done"}`
               : `commit REFUSED: ${outcome.reason ?? "unknown"}`,
         );
+        if (!outcome.ok) throw new RefusedError(`commit refused: ${outcome.reason ?? "unknown"}`);
         return;
       }
       if (sub === "unblock") {
@@ -531,7 +554,7 @@ const commands: Record<
           const result = clearReview(handle, id, why, flags.override === true);
           if (!result.ok) {
             print(config, result, () => `${id} NOT cleared: ${result.reason ?? "unknown"}`);
-            return;
+            throw new RefusedError(`${id} was not unblocked: ${result.reason ?? "unknown"}`);
           }
           const still = blockedWork(handle);
           print(
@@ -539,7 +562,7 @@ const commands: Record<
             { cleared: id, stillBlocked: still.length },
             () => [
               `cleared ${id}${why === "" ? "" : ` (${why})`}`,
-              `  it will be reviewed again on the next tick`,
+              `  a rejected item is reviewed again on the next tick; a failed one runs again`,
               `  ${still.length} item(s) still waiting on a person`,
             ].join("\n"),
           );
@@ -578,77 +601,30 @@ const commands: Record<
         }
         return;
       }
-      if (sub === "run" && flags.inside !== true) {
+      if (sub === "run") {
         const workId = positionals[1] ?? "";
         if (workId === "") throw new UsageError("work run needs an id: `cod work run <id>`");
-        // Run a ledger item as a REAL job, not a note about one. The worktree,
-        // the instruction bundle and the agent all come from the same place a
-        // cron job uses, so a job run from the ledger and a job run from cron
-        // are the same machine rather than two that drift apart.
         // Hand the job to the container. The ledger, the worktrees and /work all
-        // live in the work VOLUME, and the host has none of them - a host-side
-        // dispatch failed with "no git repository at /work", which is true and
-        // useless. So the host delegates rather than pretending.
+        // live there, and the host has none of them - a host-side dispatch failed
+        // with "no git repository at /work", which is true and useless. The
+        // in-container half is src/run-work-cli.ts: same worktree, same
+        // instruction bundle, same sandbox as a dispatch from the tick.
+        //
+        // (An unreachable `--inside` branch used to live here: a second, older
+        // copy of the dispatch with the department-vs-worker lookup bug that
+        // run-work-cli.ts fixed. `--inside` was never even a parsed option.)
         const { makeDocker } = await import("./docker");
         const { execIn } = makeDocker();
         const result = await execIn(config, [
           "bun", "run", "/usr/local/lib/cod/run-work.js", workId, "--workspace", "/cod/cod.json", "--state", "/cod",
         ], `dispatch ${workId}`);
-        if (result.code !== 0) {
-          // Surfaced, not swallowed: a refusal and a failure are different
-          // events and the runbook treats them differently.
-          for (const line of result.out.trim().split("\n")) {
-            if (line.trim() !== "") process.stderr.write(`${line}\n`);
-          }
-        }
-        print(config, null, () => result.out.trim() || (result.code === 0 ? `${workId} dispatched` : `dispatch failed (exit ${result.code})`));
+        print(config, { code: result.code, output: result.out.trim() }, () => result.out.trim() || (result.code === 0 ? `${workId} dispatched` : `dispatch failed (exit ${result.code})`));
+        // A refusal and a failure are different events, and both used to exit 0.
+        if (result.code === 3) throw new RefusedError(`${workId} was refused`);
+        if (result.code !== 0) throw new RuntimeFailure(`${workId} failed (exit ${result.code})`);
         return;
       }
 
-      if (sub === "run" && flags["inside"] === true) {
-        // The in-container half. Reached only via `cod work run --inside` from
-        // the host path above, so the recursion is exactly one hop.
-        const { runWorkItem } = await import("./runwork");
-        const workId = positionals[1] ?? "";
-        if (workId === "") throw new UsageError("work run needs an id: `cod work run <id>`");
-        const workspace = readWorkspace(config);
-        const item = get(handle, workId);
-        if (item === null || item === undefined) {
-          print(config, null, () => `no such work item: ${workId}`);
-          return;
-        }
-        const { dispatch } = await import("./dispatch");
-        const { driverFor } = await import("./drivers");
-        const { acquireWorktree, releaseWorktree } = await import("./worktree");
-        const { buildInstructions, writeInstructions, SKILLS_DIR } = await import("./skills");
-        const worker = workspace.departments
-          .flatMap((d) => d.workers)
-          .find((w) => w.name === item.to_agent);
-        const department = workspace.departments.find((d) => d.workers.some((w) => w.name === item.to_agent));
-        const cron = { name: item.id, agent: item.to_agent, task: item.payload, schedule: "0 0 1 1 *", enabled: true, expectTools: true };
-        const worktree = acquireWorktree("/work", "/work/.cod-worktrees", item.id);
-        try {
-          if (worker !== undefined && department !== undefined) {
-            writeInstructions(worktree.path, buildInstructions(department, worker, { name: item.id, task: item.payload }, 0, SKILLS_DIR));
-          }
-          const result = await runWorkItem({
-            stateDir: config.stateDir,
-            workId,
-            cron,
-            driver: driverFor(worker ?? null, workspace.company, { workdir: worktree.path }),
-          });
-          print(
-            config,
-            result,
-            () => result.ok
-              ? `ran ${workId} (radius ${result.radius ?? "?"}): ${(result.output ?? "").slice(0, 200)}`
-              : `${workId} REFUSED: ${result.reason ?? "unknown"}`,
-          );
-        } finally {
-          releaseWorktree("/work", worktree);
-        }
-        return;
-      }
       throw new UsageError(`unknown work subcommand "${sub}"; try list, propose, claim, commit, run, blocked or unblock`);
     } finally {
       handle.close();
@@ -830,6 +806,10 @@ const commands: Record<
    */
   async logs(_positionals, flags, print) {
     const config = configFrom(flags);
+    const levels = ["debug", "info", "warn", "error"];
+    if (flags.level !== undefined && !levels.includes(flags.level)) {
+      throw new UsageError(`--level must be one of ${levels.join(", ")} (got "${flags.level}")`);
+    }
     const { formatEvent, readEvents } = await import("./logs");
     const events = readEvents(join(config.stateDir, "logs"), {
       level: flags.level as never,

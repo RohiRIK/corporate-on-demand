@@ -46,5 +46,5 @@ export function pickForJob(
   // Everything on this engine is ejected. Dispatch the worker's own model
   // anyway: refusing to run is its own kind of silent failure, and it looks
   // exactly like the provider outage this exists to survive.
-  return sameEngine.length === 0 ? preferred : preferred;
+  return preferred;
 }
