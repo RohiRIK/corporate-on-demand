@@ -86,9 +86,9 @@ const cron = {
   task: goal,
   schedule: "0 0 1 1 *",
   enabled: true,
-  // Strict, always: work dispatched from the ledger is expected to change
-  // something. A read-only job is a cron with a schedule, not a work item.
-  expectTools: true,
+  // Strict for a task: it is expected to change something. A PLAN only reads,
+  // and its product is the task it proposes, so no tool call is demanded.
+  expectTools: item.kind !== "plan",
 };
 
 const worktree = acquireWorktree(workRoot, worktreeRoot, item.id);

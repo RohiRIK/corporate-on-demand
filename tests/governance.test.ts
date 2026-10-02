@@ -142,8 +142,37 @@ describe("runGovernance", () => {
     expect(new Set(ran).size).toBe(ran.length);
   });
 
+  /**
+   * A TASK in the ledger, the kind of work that lands. Plans do not - their
+   * product is a task - so a test about reviewing has to start from one.
+   */
+  function seedTask(dir: string, goal: string): string {
+    const handle = openWork(dir);
+    const made = propose(handle, { from: "engineering", to: "engineering", kind: "task", payload: goal, goal, targetPaths: ["notes/a.md"] });
+    handle.close();
+    if (!made.ok || made.item === undefined) throw new Error("seed failed");
+    return made.item.id;
+  }
+
+  /** The dispatcher commits what it ran, which is what the real one does. */
+  function committing(dir: string) {
+    return async (id: string) => {
+      const handle = openWork(dir);
+      try {
+        // Claimed by id first, as the real dispatcher does: commit() only
+        // accepts work that is running.
+        const item = claimById(handle, id, "test");
+        if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
+      } finally {
+        handle.close();
+      }
+      return { ok: true, output: "done" };
+    };
+  }
+
   test("the tick does not re-offer work it has already reviewed", async () => {
     const dir = scratch();
+    const task = seedTask(dir, "write the notes");
     const reviewed: string[] = [];
     // The lander RECORDS, exactly as src/land.ts does. A fake that only
     // returns a verdict tests a fiction: the tick filters on the record, so a
@@ -159,30 +188,16 @@ describe("runGovernance", () => {
       }
       return { outcome: "rejected" as const, reason: "not good enough" };
     };
-    // The dispatcher COMMITS, or nothing is ever `done` and the tick has nothing
-    // to land - which made this test pass with nothing to assert.
-    const dispatch = async (id: string) => {
-      const handle = openWork(dir);
-      try {
-        // Claimed by id first, as the real dispatcher does: commit() only
-        // accepts work that is running.
-        const item = claimById(handle, id, "test");
-        if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
-      } finally {
-        handle.close();
-      }
-      return { ok: true, output: "done" };
-    };
-    const run = () => runGovernance(workspace, dir, { ...opts, dispatch, land });
+    const run = () => runGovernance(workspace, dir, { ...opts, dispatch: committing(dir), land });
     await run(); await run(); await run();
-    expect(reviewed.length).toBeGreaterThan(0);   // not vacuous
-    // The lander is idempotent by contract, but the tick should not be LEANING
-    // on that: three ticks, and the same rejected branch is not offered again.
+    expect(reviewed).toContain(task);   // not vacuous
+    // Three ticks, and the same rejected branch is not offered again.
     expect(new Set(reviewed).size).toBe(reviewed.length);
   });
 
   test("a rejected item appears in the tick's report, not silently", async () => {
     const dir = scratch();
+    seedTask(dir, "write the notes");
     const land = async (id: string) => {
       const handle = openWork(dir);
       try {
@@ -192,21 +207,11 @@ describe("runGovernance", () => {
       }
       return { outcome: "rejected" as const, reason: "no test" };
     };
-    const dispatch = async (id: string) => {
-      const handle = openWork(dir);
-      try {
-        // Claimed by id first, as the real dispatcher does: commit() only
-        // accepts work that is running.
-        const item = claimById(handle, id, "test");
-        if (item !== null) commit(handle, id, item.lease_epoch, "done", "done");
-      } finally {
-        handle.close();
-      }
-      return { ok: true, output: "done" };
-    };
-    await runGovernance(workspace, dir, { ...opts, dispatch, land });
-    const report = await runGovernance(workspace, dir, { ...opts, dispatch, land });
-    expect(report.landed.some((l) => l.outcome === "rejected")).toBe(true);
+    const reports = [];
+    for (let tick = 0; tick < 2; tick += 1) {
+      reports.push(await runGovernance(workspace, dir, { ...opts, dispatch: committing(dir), land }));
+    }
+    expect(reports.some((r) => r.landed.some((l) => l.outcome === "rejected"))).toBe(true);
   });
 
   test("a MEETING does not manufacture work every time it runs", async () => {

@@ -59,6 +59,11 @@ function normalise(path: string): string {
     .replace(/^\//, "");
 }
 
+/** The global paths, as one line a planner can be told not to name. */
+export function globalPathsSummary(): string {
+  return [...GLOBAL_PREFIXES, ...GLOBAL_FILES, ...GLOBAL_BASENAMES.map((b) => `any ${b}`)].join(", ");
+}
+
 /** Is this one path global? */
 export function isGlobalPath(path: string): boolean {
   const p = normalise(path);

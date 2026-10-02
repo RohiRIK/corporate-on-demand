@@ -15,6 +15,7 @@ import { recordResult } from "./results";
 import { beginJob, findAbandoned, formatAbandoned, settleJob } from "./inflight";
 import { heartbeatPath, type Heartbeat } from "./liveness";
 import { assertCronSupport, scheduleGovernance, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
+import { singleFlight } from "./governance";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
 const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
@@ -100,7 +101,8 @@ async function dispatchWorkItem(workspace: Workspace, workId: string): Promise<{
   const department = target.department;
   // Every objection a reviewer has made so far, from the review row.
   const goal = briefFor(item, review);
-  const cron = { name: item.id, agent: worker.name, task: goal, schedule: "0 0 1 1 *", enabled: true, expectTools: true };
+  // A PLAN only reads, so no tool call is demanded of it; a task must act.
+  const cron = { name: item.id, agent: worker.name, task: goal, schedule: "0 0 1 1 *", enabled: true, expectTools: item.kind !== "plan" };
 
   const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, item.id);
   try {
@@ -127,8 +129,25 @@ async function askRoleInScratch(role: "reviewer" | "meeting", name: string, prom
   );
 }
 
-/** One unattended company tick: propose, meet, dispatch. */
+/**
+ * One unattended company tick: propose, meet, dispatch, review - never two at
+ * once. The startup tick and the first cron tick, or any tick that outlives its
+ * interval, would otherwise review the same item twice. See singleFlight.
+ */
+let tickWorkspace: Workspace | null = null;
+const guardedTick = singleFlight(
+  async (): Promise<void> => {
+    if (tickWorkspace !== null) await governanceTickOnce(tickWorkspace);
+  },
+  (): void => log("[governance] the previous tick is still running; skipping this one"),
+);
+
 async function governanceTick(workspace: Workspace): Promise<void> {
+  tickWorkspace = workspace;
+  await guardedTick();
+}
+
+async function governanceTickOnce(workspace: Workspace): Promise<void> {
   const { runGovernance } = await import("./governance");
   const report = await runGovernance(workspace, STATE_DIR, {
     dispatch: (id) => dispatchWorkItem(workspace, id),

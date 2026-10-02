@@ -24,7 +24,7 @@ import { holdMeeting, type Meeting } from "./meeting";
 // Re-exported through one seam so the tick and the dispatch path cannot drift
 // apart on how a radius is derived.
 import { radiusForWork, targetPathsOfItem } from "./runwork";
-import { openWork, listWork, latestReview, type WorkItem } from "./work";
+import { openWork, listWork, latestReview, type ReviewRecord, type WorkItem } from "./work";
 import type { Workspace } from "./workspace";
 
 /** What happened to a piece of finished work. */
@@ -112,6 +112,37 @@ function dispatchable(item: WorkItem, workspace: Workspace): boolean {
 }
 
 /**
+ * Should this item be offered for review on this tick?
+ *
+ * Only finished WORK: a task that ran in a worktree. A plan's product is a task,
+ * not a branch, and a proposal the CEO decided is closed as `done` without ever
+ * running - neither has anything to land.
+ *
+ * Read from the RECORD, never from this tick's memory - a Set is empty after a
+ * restart, which is how a rejected item used to come back on every boot:
+ *   - nothing recorded yet, or `deferred` (nobody could judge it), or `cleared`
+ *     (a person unblocked it): offer it;
+ *   - `landed`, `rejected`: never again;
+ *   - `skipped` or `changes-requested`: only once the item has RUN again since
+ *     that review - otherwise a branch with nothing to land would be offered,
+ *     and skipped, on every tick for ever.
+ */
+export function reviewable(item: WorkItem, review: ReviewRecord | null): boolean {
+  if (item.state !== "done" || item.kind === "plan" || item.to_agent === "ceo") return false;
+  if (review === null) return true;
+  switch (review.outcome) {
+    case "landed":
+    case "rejected":
+      return false;
+    case "deferred":
+    case "cleared":
+      return true;
+    default:
+      return (item.started_at ?? 0) > review.reviewedAt;
+  }
+}
+
+/**
  * One unattended tick: propose, meet, dispatch.
  *
  * Never throws. A tick that vanishes is how a schedule becomes untrustworthy,
@@ -155,9 +186,6 @@ export async function runGovernance(
 
   const dispatched: string[] = [];
   const failed: { id: string; reason: string }[] = [];
-  // Once-per-process, so a landed branch is not re-landed every tick. A merge
-  // is not idempotent by accident.
-  const landedIds = new Set<string>();
   for (const item of queue.slice(0, Math.max(0, maxDispatch))) {
     try {
       const outcome = await options.dispatch(item.id);
@@ -179,20 +207,7 @@ export async function runGovernance(
     try {
       const handle = openWork(stateDir);
       try {
-        finished = listWork(handle).filter((item) => {
-          if (item.state !== "done") return false;
-          if (landedIds.has(item.id)) return false;
-          // Skip anything already JUDGED terminally - landed OR rejected - read
-          // from the record rather than from this tick's memory.
-          //
-          // This is the defect the record was added for. `landWork` returned
-          // `rejected` without writing anything, so the item stayed `done`,
-          // this filter kept offering it, and every tick paid for a model
-          // review of work that was never going to land. A Set is empty after a
-          // restart, which is how it came back on every boot as well.
-          const seen = latestReview(handle, item.id)?.outcome;
-          return seen !== "landed" && seen !== "rejected";
-        });
+        finished = listWork(handle).filter((item) => reviewable(item, latestReview(handle, item.id)));
       } finally {
         handle.close();
       }
@@ -203,8 +218,7 @@ export async function runGovernance(
       try {
         const outcome = await options.land(item.id);
         landed.push({ id: item.id, outcome: outcome.outcome });
-        if (outcome.outcome === "landed") landedIds.add(item.id);
-        // "changes-requested" is the ONE retry, and the item goes back to ready
+        // "changes-requested" sends the item back to ready
         // so the next tick re-runs it with the review as its brief. Not here:
         // the lander owns that transition, because only it knows the diff.
       } catch (error) {
@@ -235,6 +249,30 @@ function emptyCycle(reason: string): CycleResult {
 
 function emptyMeeting(): Meeting {
   return { cast: [], speaking: [], decisions: [], summary: "meeting did not run", spoken: false };
+}
+
+/**
+ * Run `fn` at most once at a time; a call while one is in flight is skipped.
+ *
+ * Bun.cron fires on the minute whether or not the last tick finished, and a
+ * tick that dispatches agents takes minutes. Overlapping ticks saw the same
+ * finished item and both reviewed it - two model calls, and two merges racing
+ * in one repository - so the second one is refused, and `onBusy` says so.
+ */
+export function singleFlight(fn: () => Promise<void>, onBusy: () => void): () => Promise<void> {
+  let running = false;
+  return async (): Promise<void> => {
+    if (running) {
+      onBusy();
+      return;
+    }
+    running = true;
+    try {
+      await fn();
+    } finally {
+      running = false;
+    }
+  };
 }
 
 /**

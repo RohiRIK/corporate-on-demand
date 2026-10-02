@@ -23,8 +23,8 @@
  * meeting pretending to be an agent.
  */
 
-import { openWork, listWork, propose as proposeWork, type WorkItem } from "./work";
-import { textOfItem } from "./runwork";
+import { openWork, listWork, markDecided, propose as proposeWork, type WorkItem } from "./work";
+import { radiusForWork, targetPathsOfItem, textOfItem } from "./runwork";
 import type { Workspace } from "./workspace";
 
 export interface Role {
@@ -107,12 +107,15 @@ function positionFor(role: Role, company: string, items: readonly WorkItem[]): S
  * is already finished is not decided about again.
  */
 function decide(item: WorkItem, ceo: string): Decision {
-  const reason =
-    item.blast_radius !== null && item.blast_radius >= 2
-      ? "global radius: the CEO dispatches this itself, and widens it deliberately"
-      : `self-contained radius ${item.blast_radius ?? 0}: within the proposing department's authority`;
-
-  return { item: item.id, by: ceo, verdict: "dispatch", reason };
+  // The DERIVED radius, never the number the proposer wrote on the row.
+  const radius = radiusForWork(item.payload, targetPathsOfItem(item), item.blast_radius);
+  if (radius >= 2) {
+    // Unreachable through the cycle - the reconciler refuses global work before
+    // a meeting sees it - but `cod meet` can be run by hand, and the meeting
+    // must not launder a global proposal into dispatched work.
+    return { item: item.id, by: ceo, verdict: "reject", reason: "global radius: a department's proposal cannot carry it" };
+  }
+  return { item: item.id, by: ceo, verdict: "dispatch", reason: `radius ${radius}: within the proposing department's authority` };
 }
 
 /**
@@ -161,31 +164,42 @@ export async function holdMeeting(
       speaking = voiced;
     }
 
-    // The CEO decides about what is OPEN. Deciding about finished work is
-    // theatre, and deciding about nothing is manufacturing work from nothing.
+    // The CEO decides about what is OPEN AND RECONCILED. Deciding about
+    // finished work is theatre; deciding about a proposal the reconciler has
+    // not seen would let `cod meet`, run by hand, turn an unvetted proposal
+    // into dispatched work.
     const decisions = open
-      .filter((w) => w.to_agent === "ceo")
+      .filter((w) => w.to_agent === "ceo" && w.state === "ready")
       .map((w) => decide(w, "ceo"));
 
     // A decision that is a dispatch becomes WORK. This is the point of the
-    // meeting: its product is items the cycle can then run.
+    // meeting: its product is items the cycle can then run. Either way the
+    // proposal is CLOSED, so the next meeting does not decide it again.
     for (const decision of decisions) {
       const source = open.find((w) => w.id === decision.item);
       if (source === undefined) continue;
+      if (decision.verdict !== "dispatch") {
+        markDecided(handle, source.id, `decided by ceo: ${decision.verdict} - ${decision.reason}`);
+        continue;
+      }
       const made = proposeWork(handle, {
         from: "ceo",
         to: source.from_agent,
-        kind: "task",
-        payload: source.payload,
+        // The same KIND: a plan stays a plan, a task stays a task.
+        kind: source.kind,
+        payload: textOfItem(source),
         // The goal is not a column; it lives inside the payload, which is the
         // durable record a dispatch actually reads.
         goal: textOfItem(source),
-        targetPaths: [],
-        // Carries the radius of what it dispatches. Widened HERE, deliberately,
-        // because this is the authority a department did not have.
-        blastRadius: decision.verdict === "dispatch" ? source.blast_radius ?? 0 : 0,
+        // The PATHS travel with the work. Dropping them - as this used to -
+        // reset the derived radius of whatever the CEO dispatched to zero.
+        targetPaths: targetPathsOfItem(source),
+        blastRadius: source.blast_radius ?? undefined,
       });
-      void made;
+      const outcome = made.ok && made.item !== undefined
+        ? `dispatched as ${made.item.id}`
+        : `already dispatched (${made.reason ?? "refused"})`;
+      markDecided(handle, source.id, `decided by ceo: ${outcome}`);
     }
 
     const summary = [
@@ -193,7 +207,7 @@ export async function holdMeeting(
       ...speaking.map((s) => `  ${s.role}: ${s.position}`),
       `decisions: ${decisions.length}`,
       spoken ? "positions spoken by a model" : "positions COMPUTED - no model was consulted",
-    ].join("\\n");
+    ].join("\n");
 
     return { cast, speaking, decisions, summary, spoken };
   } finally {
@@ -209,7 +223,7 @@ export async function holdMeeting(
  *
  * Falls back to the computed position on any failure. A meeting that cannot be
  * held is worse than one that is thin: the point of an autonomous company is
- * that it keeps going, and a provider outage must not delete the company`s
+ * that it keeps going, and a provider outage must not delete the company's
  * agenda.
  */
 async function voiceFor(

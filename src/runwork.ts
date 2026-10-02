@@ -13,7 +13,8 @@
  * proposed value can only ever narrow the result, never widen it.
  */
 
-import { openWork, claimById, commit, get, reject, runFailureReason, type ReviewRecord, type WorkItem } from "./work";
+import { openWork, claimById, commit, get, propose, reject, runFailureReason, type ReviewRecord, type WorkItem } from "./work";
+import { parsePlan, taskPayload } from "./plan";
 import { isGlobalPath } from "./boundary";
 import { dispatch, type Driver, type Step } from "./dispatch";
 import { isAgentFailure } from "./agent";
@@ -223,6 +224,37 @@ export async function runWorkItem(options: RunWorkOptions): Promise<RunWorkResul
       const failed = commit(handle, existing.id, epoch, "failed", runFailureReason(previousReason, message));
       void failed;
       return { ok: false, workId: existing.id, radius, reason: message };
+    }
+
+    // A PLAN's product is a task, not a branch. Its answer is parsed and the
+    // task proposed like any other work - by the department that planned it,
+    // to itself, with the paths it named - so the reconciler derives its radius
+    // and refuses it by rule if those paths are global. An answer that cannot
+    // be read is a failed run, and earns the same bounded retry.
+    if (succeeded && existing.kind === "plan") {
+      const planned = parsePlan(output);
+      if (planned.kind === "invalid") {
+        const detail = `${planned.reason}; the planner answered: ${output.replace(/\s+/g, " ").slice(0, 300)}`;
+        const failed = commit(handle, existing.id, epoch, "failed", runFailureReason(previousReason, detail));
+        return { ok: false, workId: existing.id, radius, output, reason: failed.ok ? detail : (failed.reason ?? "fenced") };
+      }
+      let note = "planned nothing: the department saw nothing worth doing right now";
+      if (planned.kind === "plan") {
+        const made = propose(handle, {
+          from: existing.to_agent,
+          to: existing.to_agent,
+          kind: "task",
+          payload: taskPayload(planned.plan),
+          goal: planned.plan.goal,
+          targetPaths: planned.plan.paths,
+        });
+        note = made.ok && made.item !== undefined
+          ? `planned ${made.item.id}: ${planned.plan.goal}`
+          : `planned work that already exists: ${made.reason ?? "refused"}`;
+      }
+      const settled = commit(handle, existing.id, epoch, "done", note);
+      if (!settled.ok) return { ok: false, workId: existing.id, radius, reason: settled.reason ?? "fenced" };
+      return { ok: true, workId: existing.id, radius, output: note };
     }
 
     // FENCED. The commit carries the epoch we were given, so a run whose lease

@@ -520,6 +520,23 @@ export function requeue(handle: WorkDb, id: string): boolean {
 }
 
 /**
+ * Close a proposal the CEO has DECIDED about.
+ *
+ * A department's proposal is addressed to the CEO; the meeting turns it into
+ * work addressed back to the department. The proposal itself used to stay
+ * `ready` for ever, so every meeting decided it again (the duplicate dispatch
+ * was refused, but "decisions: 2" was reported every tick) and the CEO's own
+ * count of work "ready to dispatch" never went down. Only from `ready`, because
+ * only a reconciled proposal may be decided.
+ */
+export function markDecided(handle: WorkDb, id: string, reason: string): boolean {
+  const row = handle.db
+    .query("UPDATE work SET state = 'done', reason = ?, lease_owner = NULL WHERE id = ? AND state = 'ready' RETURNING id")
+    .get(ledgerText(reason), id) as { id: string } | null;
+  return row !== null;
+}
+
+/**
  * How many times a RUN may fail before the item waits for a person.
  *
  * A run failure is usually the provider - free models fail a measurable share
