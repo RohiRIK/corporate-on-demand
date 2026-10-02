@@ -914,14 +914,22 @@ heartbeat, and a test that ran an unconfined agent in a live workspace.
 
 ### Known limitations, revised
 
-Closed by this pass, from the list in the first Unreleased section: `work list
---state` (it is `--status`, validated); the `rejected` state (written by
-`reject()`, for work that never ran); the echo driver (real agents run on every
-path); "no reviewer, no merge" (both run unattended); write isolation between
-agents (the sandbox - read isolation is still absent).
+Every item in the list in the first Unreleased section, accounted for:
 
-Still true: read access between agents; open egress; no budget ceiling, by
-design; the novelty key catches identical repeats only, so a reworded plan is
-new work (the rest backs off a department that finds nothing, not one that
-rephrases); ledger growth is bounded by the rest, not capped; a host reboot
-needs `ops/cod-workspace@.service`.
+- **Closed by this pass:** write isolation between agents (the sandbox - read
+  isolation is still absent); "no reviewer, no merge" and "the org dispatches
+  only its floor" (the company plans, works, is reviewed and lands,
+  unattended); the echo driver on the live path (real agents run on every
+  path; `echoDriver` is a test reference).
+- **Closed by earlier passes, and still closed:** the tracked ledger database
+  (no `*.sqlite` is tracked); `work list --state` (it is `--status`, and now
+  validated); the dead `epoch` table (gone from the schema); the `rejected`
+  state (written, for work that never ran); the QUICKSTART test count; the
+  doubled `/**`; the mislabelled `limits` tests (the hand-off test creates a
+  real waiter); "no ledger" (it is the coordination layer).
+- **Still true:** read access between agents; open egress; no budget ceiling,
+  by design; `Bun.cron` rejects `@every`; redaction catches known credential
+  shapes only; the novelty key catches identical repeats only, so a reworded
+  plan is new work (the rest backs off a department that finds nothing, not
+  one that rephrases); ledger growth is bounded by the rest, not capped; a host
+  reboot needs `ops/cod-workspace@.service`.
