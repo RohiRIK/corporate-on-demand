@@ -115,10 +115,10 @@ describe("buildInstructions", () => {
 
 describe("writeInstructions", () => {
   test("writes AGENTS.md into the worktree and returns the path", () => {
-    const path = writeInstructions("/tmp/cod-write-probe", "hello");
+    const path = writeInstructions(join(tmpdir(), "cod-write-probe"), "hello");
     expect(path.endsWith("AGENTS.md")).toBe(true);
     expect(require("node:fs").readFileSync(path, "utf8")).toBe("hello");
-    rmSync("/tmp/cod-write-probe", { recursive: true, force: true });
+    rmSync(join(tmpdir(), "cod-write-probe"), { recursive: true, force: true });
   });
 
   test("creates the worktree directory if it is missing", () => {

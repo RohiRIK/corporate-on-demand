@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,4 +75,8 @@ describe("auditWorkspaceSkills", () => {
   });
 });
 
-for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+// In afterAll, not at module top level: top-level code runs while bun is
+// COLLECTING the tests, before any directory exists, and so deleted nothing.
+afterAll(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
