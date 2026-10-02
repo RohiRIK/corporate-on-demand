@@ -52,12 +52,11 @@ describe("checkLandingRepo", () => {
     expect(checkLandingRepo(dir).ok).toBe(false);
   });
 
-  test("a repository with NO origin is refused", () => {
-    // A local repo with no remote: the push would fail on every single merge,
-    // which is exactly the per-merge failure this moves to start-up.
-    const result = checkLandingRepo(gitRepo(false));
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain("origin");
+  test("a repository with NO origin is accepted - export fetches INTO it", () => {
+    // It used to be refused, because the container pushed from it. Export is
+    // now a fetch on the host into this repository, and publishing it onward is
+    // the operator's own step - so a remote is the operator's business.
+    expect(checkLandingRepo(gitRepo(false)).ok).toBe(true);
   });
 
   test("an EMPTY path is refused rather than skipped", () => {
@@ -72,8 +71,8 @@ describe("checkLandingRepo", () => {
     expect(missing.reason).toContain("landing.repo");
     expect(missing.reason).toMatch(/create it|remove the landing block/);
 
-    const noOrigin = checkLandingRepo(gitRepo(false));
-    expect(noOrigin.reason).toContain("git remote add origin");
+    const plain = checkLandingRepo(scratch());
+    expect(plain.reason).toContain("git init");
   });
 });
 

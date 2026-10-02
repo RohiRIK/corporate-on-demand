@@ -475,21 +475,11 @@ export function buildWorkspaceSpec(config: Config, workspace: Workspace): Contai
             // and every worktree with it. A volume survives both the restart and
             // the removal, which is what makes a worktree worth having.
             { source: workVolume(config), target: "/work", readOnly: false, volume: true },
-            // OPT-IN ONLY, and absent unless the operator named a path.
-            //
-            // A writable mount of host state is the single most dangerous thing
-            // this container could be given, so it happens on request only, at a
-            // fixed target rather than wherever the host happens to keep it,
-            // and it goes through assertMountAllowed like every other mount.
-            ...(workspace.landing === undefined
-              ? []
-              : (() => {
-                  // Asserted here rather than filtered later: the guard exists
-                  // to REFUSE, so its result cannot be a value that goes on
-                  // being used.
-                  assertMountAllowed(workspace.landing.repo);
-                  return [{ source: workspace.landing.repo, target: "/landing", readOnly: false }];
-                })()),
+            // And NOTHING else - not even when `landing.repo` is set. Landed
+            // work leaves as a bundle in the state directory and `cod land`
+            // fetches it on the host (src/export.ts). A writable host repository
+            // used to be mounted here at /landing, which let an agent plant a
+            // hook or an fsmonitor that the operator's own git would later run.
           ],
           // Egress is deliberate: agents install packages, so --network none is
           // incompatible with the requirement and was removed on purpose. This
@@ -550,11 +540,9 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
 
       // The landing repository is checked BEFORE the container exists.
       //
-      // Checked here because checking it later means checking it per merge: the
-      // container would start, agents would work, work would be reviewed and
-      // merged, and only then would the push fail on a path that was a typo
-      // from the beginning. Nothing is lost in that case, but the operator
-      // finds out far too late.
+      // It is not mounted - `cod land` exports into it from the host - but a
+      // typo here would otherwise surface only at the first export, after work
+      // had already been reviewed and merged.
       if (workspace.landing !== undefined) {
         const { checkLandingRepo } = await import("./landing");
         const check = checkLandingRepo(workspace.landing.repo);

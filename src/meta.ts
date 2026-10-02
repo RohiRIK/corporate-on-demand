@@ -17,6 +17,7 @@ COMMANDS:
   logs      Read the event log — the answer to "what happened"
   results   Read persisted job results — what ran, and did it work
   purge     Remove the work volume and every commit in it (--purge confirms)
+  land      Export landed work into landing.repo as cod-landed (--force if it no longer fast-forwards)
   container-name  The container and volume names this workspace will use
   meet     Hold a company meeting: every role speaks, the CEO decides, decisions become work
   cycle    Run one unattended company cycle: departments propose, then reconcile

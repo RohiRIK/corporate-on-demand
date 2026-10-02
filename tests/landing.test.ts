@@ -51,31 +51,23 @@ describe("the default container gets NOTHING extra", () => {
   });
 });
 
-describe("opting in", () => {
+describe("opting in to landing mounts NOTHING", () => {
   const withLanding = { ...workspace, landing: { repo: "/srv/shared" } } as unknown as Workspace;
 
-  test("the named repo is mounted read-write at a FIXED target", () => {
+  test("a named landing repo is NOT mounted - landed work leaves as a bundle", () => {
+    // It used to be mounted read-write at /landing, which let an agent plant a
+    // hook or an fsmonitor in the host repository for the operator's own git to
+    // run. Export is now host-side (src/export.ts), so the mount list is the
+    // same with or without it.
     const spec = buildWorkspaceSpec(config, withLanding);
-    const mount = spec.mounts.find((m) => m.target === "/landing");
-    expect(mount).toBeDefined();
-    expect(mount?.readOnly).toBe(false);
-    expect(mount?.source).toBe("/srv/shared");
-  });
-
-  test("the docker socket cannot be smuggled in as a landing repo", () => {
-    // The landing path is a new way in, so it goes through the SAME guard as
-    // every other mount rather than around it.
-    const evil = { ...workspace, landing: { repo: "/var/run/docker.sock" } } as unknown as Workspace;
-    expect(() => buildWorkspaceSpec(config, evil)).toThrow();
+    expect(spec.mounts.some((m) => m.target === "/landing")).toBe(false);
+    expect(spec.mounts.map((m) => m.target)).toEqual(["/cod/cod.json", "/cod", "/work"]);
   });
 
   test("nothing else about the container changes", () => {
     const before = buildWorkspaceSpec(config, workspace);
     const after = buildWorkspaceSpec(config, withLanding);
-    expect(after.name).toBe(before.name);
-    expect(after.image).toBe(before.image);
-    expect(after.user).toBe(before.user);
-    expect(after.network).toBe(before.network);
+    expect(after).toEqual(before);
   });
 
   test("the default spec still names the container and volume the same way", () => {

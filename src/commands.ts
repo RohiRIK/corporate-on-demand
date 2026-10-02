@@ -28,6 +28,8 @@ export interface CommandFlags {
   readonly format?: string | undefined;
   readonly workspace?: string | undefined;
   readonly yes?: boolean | undefined;
+  /** `cod init`: replace an existing workspace file. `cod land`: replace cod-landed even if it does not fast-forward. */
+  readonly force?: boolean | undefined;
   readonly json?: boolean | undefined;
   /** Override the company name; defaults to the workspace name. */
   readonly company?: string | undefined;
@@ -326,6 +328,16 @@ const commands: Record<
     } catch {
       blocked = 0;
     }
+    // Landed work the operator has not exported yet: the merge happened in the
+    // volume, and until `cod land` runs, nothing outside can see it.
+    let unexported: string | null = null;
+    if (workspace.landing !== undefined) {
+      const { readManifest, exportedSha } = await import("./export");
+      const manifest = readManifest(config.stateDir);
+      if (manifest !== null && exportedSha(workspace.landing.repo) !== manifest.sha) {
+        unexported = manifest.sha;
+      }
+    }
     print(
       config,
       {
@@ -334,10 +346,12 @@ const commands: Record<
         running,
         liveness: liveness.state,
         supervisorJobs: liveness.heartbeat?.jobs ?? null,
+        sandbox: liveness.heartbeat?.sandbox ?? null,
         timezone: workspace.timezone,
         workers: allWorkers(workspace).map((w) => w.name),
         crons: workspace.crons.map((c) => c.name),
         blocked,
+        unexported,
       },
       () =>
         [
@@ -352,6 +366,9 @@ const commands: Record<
           // line that only says "up" cannot tell an operator that items have
           // stopped and are waiting on them.
           `  blocked  ${blocked === 0 ? "nothing is waiting on you" : `${blocked} item(s) waiting - see \`cod work blocked\``}`,
+          // Whether agents are confined, as the supervisor found it at start.
+          ...(liveness.heartbeat?.sandbox === undefined ? [] : [`  sandbox  ${liveness.heartbeat.sandbox}`]),
+          ...(unexported === null ? [] : [`  landed   ${unexported.slice(0, 12)} is not exported yet - run \`cod land\``]),
         ].join("\n"),
     );
     // A dead supervisor is a runtime failure, not a status line to scroll past.
@@ -762,6 +779,11 @@ const commands: Record<
        confirmed: flags.purge === true,
        stop: stopIfRunning,
      });
+     // The landed bundle holds every commit the volume did, so it goes with it.
+     if (result.removed) {
+       const { removeExport } = await import("./export");
+       removeExport(config.stateDir);
+     }
      print(
        config,
        result,
@@ -773,7 +795,34 @@ const commands: Record<
      );
    },
 
-   /** Read the event log.
+   /**
+   * Export landed work into the landing repository, on the host.
+   *
+   * The container never gets the host repository: after each landing the
+   * supervisor writes a bundle into the state directory, and this fetches it
+   * into `landing.repo` as `refs/heads/cod-landed`, fast-forward only. Pushing
+   * it onward is yours, with your credentials. See src/export.ts.
+   */
+  async land(_positionals, flags, print) {
+    const config = configFrom(flags);
+    const workspace = readWorkspace(config);
+    if (workspace.landing === undefined) {
+      throw new UsageError('no landing repository: add "landing": { "repo": "/path/to/a/git/repo" } to cod.json');
+    }
+    const repo = workspace.landing.repo;
+    const { importLanded } = await import("./export");
+    const result = importLanded(config.stateDir, repo, { force: flags.force === true });
+    print(
+      config,
+      { ...result, repo },
+      () => result.ok
+        ? [result.reason, `  to publish it: git -C ${repo} push origin cod-landed`].join("\n")
+        : `NOT exported: ${result.reason}`,
+    );
+    if (!result.ok) throw new RuntimeFailure(`landed work was not exported: ${result.reason}`);
+  },
+
+  /** Read the event log.
    *
    * This is the answer to "what happened". The file lives in the state
    * directory, so it survives the container: run a job, destroy the container,

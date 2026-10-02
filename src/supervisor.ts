@@ -202,6 +202,7 @@ async function governanceTickOnce(workspace: Workspace): Promise<void> {
       // refusal cannot be talked past, and the radius decides who lands.
       const { openWork, get } = await import("./work");
       const { landWork } = await import("./land");
+      const { writeLandedBundle } = await import("./export");
       const handle = openWork(STATE_DIR);
       let item;
       try {
@@ -214,6 +215,12 @@ async function governanceTickOnce(workspace: Workspace): Promise<void> {
         repo: WORK_REPO,
         stateDir: STATE_DIR,
         maxRetries: workspace.governance.maxReviewRetries,
+        // Landed work leaves the volume as a bundle in the state directory;
+        // `cod land` on the host fetches it. See src/export.ts.
+        afterLanding: (base) => {
+          const failure = writeLandedBundle(WORK_REPO, base, STATE_DIR);
+          if (failure !== null) log(`could not export landed work: ${failure}`, "warn");
+        },
         ask: async (prompt) => askRoleInScratch("reviewer", `review-${id}`, prompt),
       });
     },
