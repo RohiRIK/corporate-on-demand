@@ -241,34 +241,46 @@ const commands: Record<
     const imageNote = build.outcome === "cached" ? "cached" : "built (first run, this takes minutes)";
 
     const docker = makeDocker();
-    const name = await docker.up(config, workspace);
+    const replaced: string[] = [];
+    const name = await docker.up(config, workspace, (line) => replaced.push(line));
 
     // `up` used to report success the moment the container existed. The
     // supervisor is now PID 1, so the container can be up and the schedule
     // already broken. Wait for a live heartbeat, and report the real reason
     // if one never arrives - a bare "started" that hides a dead supervisor is
     // the exact failure this stage exists to end.
-    const { formatLiveness, supervisorLiveness } = await import("./liveness");
+    const { formatLiveness, liveSince, supervisorLiveness } = await import("./liveness");
+    // Live means a heartbeat from THIS container's supervisor: the file
+    // outlives the container, and a replaced container's old heartbeat would
+    // otherwise read as live before the new supervisor had written anything.
+    const containerStartedAt = await docker.startedAt(config);
     const deadline = Date.now() + 15_000;
     let liveness = supervisorLiveness(config.stateDir);
-    while (liveness.state !== "live" && Date.now() < deadline) {
+    while (!liveSince(liveness, containerStartedAt) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 300));
       liveness = supervisorLiveness(config.stateDir);
     }
+    const live = liveSince(liveness, containerStartedAt);
+    // A heartbeat that is fresh but older than this container is not live.
+    const state = live ? "live" : liveness.state === "live" ? "previous-container" : liveness.state;
+    const line = state === "previous-container"
+      ? "supervisor: NOT RUNNING in this container (the only heartbeat is the previous container's)"
+      : formatLiveness(liveness);
 
     print(
       config,
-      { started: name, image: build.tag, outcome: build.outcome, liveness: liveness.state },
+      { started: name, image: build.tag, outcome: build.outcome, liveness: state, replaced: replaced[0] ?? null },
       () =>
         [
           `image    ${build.tag} (${imageNote})`,
+          ...replaced.map((note) => `replaced ${note}`),
           `started  ${name}`,
-          `  ${formatLiveness(liveness)}`,
+          `  ${line}`,
         ].join("\n"),
     );
 
-    if (liveness.state !== "live") {
-      throw new RuntimeFailure(supervisorDownMessage(name, liveness.state, config.stateDir, await docker.logTail(config)));
+    if (!live) {
+      throw new RuntimeFailure(supervisorDownMessage(name, state, config.stateDir, await docker.logTail(config)));
     }
   },
 
@@ -478,6 +490,10 @@ const commands: Record<
           throw new UsageError(`--status must be one of ${states.join(", ")} (got "${status}")`);
         }
         const items = listWork(handle, status as never);
+        // The task's TEXT, not its payload: a task that names paths stores
+        // `{"text": ..., "targetPaths": [...]}`, and the list used to show
+        // that JSON instead of what the work is.
+        const { textOfItem } = await import("./runwork");
         print(
           config,
           items,
@@ -490,7 +506,7 @@ const commands: Record<
                       // The GOAL is included, not just the identifiers: a ledger
                       // that cannot be read to answer "is this the same work?"
                       // is useless for the one job it exists to do.
-                      `${r.id}  ${r.state.padEnd(9)} ${truncate(r.payload, 48).padEnd(48)} ` +
+                      `${r.id}  ${r.state.padEnd(9)} ${truncate(textOfItem(r), 48).padEnd(48)} ` +
                       `${r.from_agent} -> ${r.to_agent}` +
                       `  epoch=${r.lease_epoch} attempts=${r.attempts}` +
                       (r.blast_radius === null ? "" : `  blast=${r.blast_radius}`) +

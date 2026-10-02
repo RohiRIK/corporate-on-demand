@@ -24,6 +24,10 @@
  *    rejected by review, failed with no retry left, or refused by rule - it stops
  *    proposing until a person looks. An unattended company that keeps producing
  *    work nobody accepts is a company arguing with itself.
+ *  - REST. A department whose plans keep finding nothing new - "GOAL: none", or
+ *    a task that already exists - rests before it plans again, twice as long
+ *    after each empty plan, up to a day. It used to plan every cycle for ever:
+ *    model calls to hear "nothing", and ledger rows nothing ever prunes.
  */
 
 import { openWork, propose as proposeWork, listWork, latestReview, isRetryableFailure, type WorkDb, type WorkItem } from "./work";
@@ -50,6 +54,57 @@ export interface CycleResult {
 
 /** How many consecutive bad outcomes stop a department proposing. */
 export const MAX_STRIKES = 3;
+
+/** The governance interval when cod.json names none. */
+export const DEFAULT_CYCLE_MINUTES = 30;
+
+/** The longest a department rests between empty plans. */
+export const MAX_REST_MINUTES = 24 * 60;
+
+/**
+ * The company's cycle length in minutes, whether or not governance is on: a
+ * hand-run `cod cycle` rests a department on the same clock as the schedule.
+ */
+export function cycleMinutesFor(workspace: Workspace): number {
+  const wanted = (workspace as { governance?: { cycleEveryMinutes?: number } }).governance?.cycleEveryMinutes;
+  if (typeof wanted !== "number" || !Number.isFinite(wanted) || wanted <= 0) return DEFAULT_CYCLE_MINUTES;
+  return Math.floor(wanted);
+}
+
+/**
+ * A plan that produced nothing new: "GOAL: none", work that already existed, or
+ * an answer that could not be read even on its last retry. A planner that
+ * cannot plan is no busier than one with nothing to do, and must not re-plan
+ * every tick either.
+ */
+export function isIdlePlan(item: WorkItem): boolean {
+  if (item.kind !== "plan" || item.from_agent !== "ceo") return false;
+  if (item.state === "failed") return !isRetryableFailure(item);
+  if (item.state !== "done") return false;
+  const reason = item.reason ?? "";
+  return reason.startsWith("planned nothing") || reason.startsWith("planned work that already exists");
+}
+
+/**
+ * Until when a department rests, in epoch ms, or null when it may plan now.
+ *
+ * Two cycles after one empty plan, doubling with each further one, capped at a
+ * day. The first plan that finds something resets it, because only an unbroken
+ * run of empty plans counts.
+ */
+export function departmentRestUntil(department: string, items: readonly WorkItem[], cycleMinutes: number): number | null {
+  const plans = items
+    .filter((w) => w.kind === "plan" && w.from_agent === "ceo" && w.to_agent === department && (w.state === "done" || w.state === "failed"))
+    .sort((a, b) => b.created_seq - a.created_seq);
+  let empty = 0;
+  for (const plan of plans) {
+    if (!isIdlePlan(plan)) break;
+    empty += 1;
+  }
+  const ranAt = plans[0]?.started_at ?? null;
+  if (empty === 0 || ranAt === null) return null;
+  return ranAt + Math.min(cycleMinutes * 2 ** empty, MAX_REST_MINUTES) * 60_000;
+}
 
 function mine(items: readonly WorkItem[], department: string): WorkItem[] {
   return items.filter((w) => w.from_agent === department || w.to_agent === department);
@@ -99,6 +154,7 @@ export function planDepartmentWork(
   workspace: Workspace,
   stateDir: string,
   held: { department: string; reason: string }[] = [],
+  now: number = Date.now(),
 ): PlannedWork[] {
   const handle = openWork(stateDir);
   const planned: PlannedWork[] = [];
@@ -113,6 +169,15 @@ export function planDepartmentWork(
         held.push({
           department: department.name,
           reason: `its last ${MAX_STRIKES} tasks all ended badly; see \`cod work blocked\``,
+        });
+        continue;
+      }
+      const restUntil = departmentRestUntil(department.name, items, cycleMinutesFor(workspace));
+      if (restUntil !== null && now < restUntil) {
+        held.push({
+          department: department.name,
+          // Rounded UP to the minute: a rest that ends at :12 is still on at :00.
+          reason: `resting until ${new Date(Math.ceil(restUntil / 60_000) * 60_000).toISOString().slice(0, 16)}Z: its last plans found nothing new`,
         });
         continue;
       }
@@ -159,14 +224,14 @@ export function planDepartmentWork(
 export function runCycle(
   workspace: Workspace,
   stateDir: string,
-  options: { readonly actor: string },
+  options: { readonly actor: string; readonly now?: number },
 ): CycleResult {
   let planned: PlannedWork[] = [];
   const held: { department: string; reason: string }[] = [];
   let reconciled: ReconcileReport = { promoted: [], rejected: [], expired: [], resolved: [], retried: [], unchanged: 0, errors: [] };
 
   try {
-    planned = planDepartmentWork(workspace, stateDir, held);
+    planned = planDepartmentWork(workspace, stateDir, held, options.now ?? Date.now());
     reconciled = reconcileOnce({ stateDir, actor: options.actor });
   } catch (error) {
     // A cycle that vanishes is how a schedule becomes untrustworthy, so the

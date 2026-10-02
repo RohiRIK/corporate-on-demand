@@ -188,9 +188,14 @@ export async function holdMeeting(
         // The same KIND: a plan stays a plan, a task stays a task.
         kind: source.kind,
         payload: textOfItem(source),
-        // The goal is not a column; it lives inside the payload, which is the
-        // durable record a dispatch actually reads.
-        goal: textOfItem(source),
+        // The goal is not a column - it is only the novelty key - and the key
+        // of a dispatch is the DECISION: one dispatch per decided proposal. It
+        // used to be the payload text, and every generation of a department's
+        // plan carries the same planning prompt by design, so every plan after
+        // the first was refused as a duplicate of the first. Found by the
+        // dogfood run: the company landed one round of work, then proposed two
+        // plans a tick, for ever, that never ran.
+        goal: `dispatch of ${source.id}`,
         // The PATHS travel with the work. Dropping them - as this used to -
         // reset the derived radius of whatever the CEO dispatched to zero.
         targetPaths: targetPathsOfItem(source),

@@ -28,7 +28,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claimStateDir, OWNER_FILE } from "../src/config";
 import { UsageError } from "../src/errors";
-import { assertMountAllowed, makeDocker, type RunResult } from "../src/docker";
+import { assertMountAllowed, CONFIG_LABEL, makeDocker, workspaceDigest, type RunResult } from "../src/docker";
 import { archiveAbandoned, beginJob, claimInflight, findAbandoned } from "../src/inflight";
 import { heartbeatPath, type Heartbeat } from "../src/liveness";
 import { claim, openWork, propose, recordReview } from "../src/work";
@@ -267,25 +267,43 @@ describe("cod up brings back its own stopped container", () => {
   const ok = (stdout = ""): RunResult => ({ code: 0, stdout, stderr: "", truncated: false } as unknown as RunResult);
   const missing = (): RunResult => ({ code: 1, stdout: "", stderr: "No such object", truncated: false } as unknown as RunResult);
 
-  function fakeDocker(label: string, running: boolean) {
+  const config = { workspaceFile: "/srv/one/cod.json", stateDir: "/srv/one/state", image: "cod-sandbox:test" } as never;
+  const workspace = { crons: [] } as never;
+  const digest = workspaceDigest(workspace);
+
+  /** A docker that knows one container: its owner, its state, its labels and its image. */
+  function fakeDocker(
+    label: string,
+    running: boolean,
+    facts: { configLabel?: string | null; containerImage?: string; currentImage?: string; unreadable?: boolean } = {},
+  ) {
     const calls: string[] = [];
     let removed = false;
     const runner = async (_cmd: string, args: string[]): Promise<RunResult> => {
-      calls.push(args.join(" "));
-      if (args[0] === "inspect" && args.join(" ").includes("cod.workspace")) return removed ? missing() : ok(label);
+      const line = args.join(" ");
+      calls.push(line);
+      if (args[0] === "inspect" && line.includes("cod.workspace")) return removed ? missing() : ok(label);
+      if (args[0] === "inspect" && line.includes(".Config.Labels")) {
+        if (removed) return missing();
+        if (facts.unreadable === true) return ok("not json\tnot an id");
+        const labels: Record<string, string> = { "cod.workspace": label };
+        const configLabel = facts.configLabel === undefined ? digest : facts.configLabel;
+        if (configLabel !== null) labels[CONFIG_LABEL] = configLabel;
+        return ok(`${JSON.stringify(labels)}\t${facts.containerImage ?? "sha256:aaa"}`);
+      }
       if (args[0] === "inspect") return removed ? missing() : ok(running ? "true" : "false");
+      if (args[0] === "image") return ok(facts.currentImage ?? "sha256:aaa");
       if (args[0] === "rm") removed = true;
       return ok();
     };
     return { calls, docker: makeDocker({ runner, timeoutMs: 1000 }) };
   }
 
-  const config = { workspaceFile: "/srv/one/cod.json", stateDir: "/srv/one/state" } as never;
-  const workspace = { crons: [] } as never;
-
   test("a STOPPED container of ours is removed and recreated, not a name conflict", async () => {
     const { calls, docker } = fakeDocker("/srv/one/cod.json", false);
-    await docker.up(config, workspace);
+    const notes: string[] = [];
+    await docker.up(config, workspace, (line) => notes.push(line));
+    expect(notes.join(" ")).toContain("was stopped");
     const rm = calls.findIndex((c) => c.startsWith("rm --force cod-"));
     const run = calls.findIndex((c) => c.startsWith("run "));
     expect(rm).toBeGreaterThan(-1);
@@ -303,6 +321,77 @@ describe("cod up brings back its own stopped container", () => {
     const { calls, docker } = fakeDocker("/srv/two/cod.json", false);
     await expect(docker.up(config, workspace)).rejects.toThrow(/different workspace/);
     expect(calls.some((c) => c.startsWith("rm "))).toBe(false);
+  });
+});
+
+describe("cod up notices a running container that no longer matches", () => {
+  // Found by the dogfood run: edit cod.json, `cod up`, and nothing changed - the
+  // running container was adopted as it was. And cod.json is a FILE bind
+  // mount, which pins the inode, so an editor that saves by rename left the
+  // container reading the old file until it was recreated.
+  const ok = (stdout = ""): RunResult => ({ code: 0, stdout, stderr: "", truncated: false } as unknown as RunResult);
+  const config = { workspaceFile: "/srv/one/cod.json", stateDir: "/srv/one/state", image: "cod-sandbox:test" } as never;
+  const workspace = { crons: [] } as never;
+
+  function fake(labels: Record<string, string> | null, containerImage = "sha256:aaa", currentImage = "sha256:aaa") {
+    const calls: string[] = [];
+    let removed = false;
+    const runner = async (_cmd: string, args: string[]): Promise<RunResult> => {
+      const line = args.join(" ");
+      calls.push(line);
+      if (args[0] === "inspect" && line.includes("cod.workspace")) return removed ? { ...ok(), code: 1 } : ok("/srv/one/cod.json");
+      if (args[0] === "inspect" && line.includes(".Config.Labels")) return ok(`${labels === null ? "garbage" : JSON.stringify(labels)}\t${containerImage}`);
+      if (args[0] === "inspect") return removed ? { ...ok(), code: 1 } : ok("true");
+      if (args[0] === "image") return ok(currentImage);
+      if (args[0] === "rm") removed = true;
+      return ok();
+    };
+    const notes: string[] = [];
+    const docker = makeDocker({ runner, timeoutMs: 1000 });
+    return { calls, notes, up: () => docker.up(config, workspace, (line) => notes.push(line)) };
+  }
+  const current = { "cod.workspace": "/srv/one/cod.json", [CONFIG_LABEL]: workspaceDigest(workspace) };
+
+  test("the same workspace on the same image is adopted, untouched", async () => {
+    const { calls, notes, up } = fake(current);
+    await up();
+    expect(calls.some((c) => c.startsWith("rm ") || c.startsWith("run "))).toBe(false);
+    expect(notes).toEqual([]);
+  });
+
+  test("an EDITED cod.json replaces the container, and says why", async () => {
+    const { calls, notes, up } = fake({ ...current, [CONFIG_LABEL]: "0000000000000000" });
+    await up();
+    expect(calls.some((c) => c.startsWith("rm --force"))).toBe(true);
+    expect(calls.some((c) => c.startsWith("run "))).toBe(true);
+    expect(notes.join(" ")).toContain("cod.json changed");
+  });
+
+  test("a REBUILT image replaces the container, and says why", async () => {
+    const { calls, notes, up } = fake(current, "sha256:old", "sha256:new");
+    await up();
+    expect(calls.some((c) => c.startsWith("run "))).toBe(true);
+    expect(notes.join(" ")).toContain("rebuilt");
+  });
+
+  test("a container from before the label existed is adopted - replacing it is not a guess to make", async () => {
+    const { calls, up } = fake({ "cod.workspace": "/srv/one/cod.json" });
+    await up();
+    expect(calls.some((c) => c.startsWith("rm "))).toBe(false);
+  });
+
+  test("facts that cannot be read are no reason to stop running work", async () => {
+    const { calls, up } = fake(null);
+    await up();
+    expect(calls.some((c) => c.startsWith("rm "))).toBe(false);
+  });
+
+  test("the digest is of the workspace as parsed: same content, same digest; any change, a new one", () => {
+    const a = { version: 1, company: { name: "a", purpose: "p" }, crons: [] } as never;
+    const same = JSON.parse(JSON.stringify(a)) as never;
+    const edited = { version: 1, company: { name: "a", purpose: "q" }, crons: [] } as never;
+    expect(workspaceDigest(same)).toBe(workspaceDigest(a));
+    expect(workspaceDigest(edited)).not.toBe(workspaceDigest(a));
   });
 });
 

@@ -46,6 +46,12 @@ describe("a directory cod creates belongs to the container's uid", () => {
     if (isRoot) expect(statSync(state).gid).toBe(CONTAINER_GID);
   });
 
+  test("a new state directory is not world-readable (SEC-07)", () => {
+    const state = join(scratch(), "state");
+    makeContainerDir(state);
+    expect(statSync(state).mode & 0o007).toBe(0);
+  });
+
   test("an EXISTING directory is never re-owned - it is the operator's", () => {
     const state = join(scratch(), "state");
     mkdirSync(state);

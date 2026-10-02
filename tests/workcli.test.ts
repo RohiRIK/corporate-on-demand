@@ -51,6 +51,17 @@ function workspace(dir: string): void {
   expect(r.code).toBe(0);
 }
 
+describe("cod work list shows what the work is", () => {
+  test("a task that names paths is listed by its text, not its JSON payload", () => {
+    const dir = scratch();
+    workspace(dir);
+    cod(dir, "work", "propose", "--goal", "add a healthcheck", "--paths", "compose/healthcheck.yml");
+    const r = cod(dir, "work", "list");
+    expect(r.out).toContain("add a healthcheck");
+    expect(r.out).not.toContain('{"text"');
+  });
+});
+
 describe("cod work list --status", () => {
   test("filters by status, and says so when nothing matches", () => {
     const dir = scratch();

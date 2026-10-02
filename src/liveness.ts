@@ -71,6 +71,26 @@ export function supervisorLiveness(stateDir: string, now: number = Date.now()): 
   return { state: "live", heartbeat, ageMs };
 }
 
+/** How far the container's clock and the heartbeat's may disagree, in ms. */
+const START_SLACK_MS = 2_000;
+
+/**
+ * Is the heartbeat from a supervisor that started in THIS container?
+ *
+ * The heartbeat file is on the host and outlives the container. Right after
+ * `cod up` replaced a container, the OLD supervisor's heartbeat was seconds old
+ * and read as "live" before the new one had written anything - so a new
+ * container whose supervisor never came up would have been reported healthy.
+ * A supervisor starts after its container does, so a heartbeat that started
+ * before the container is not this container's. With no known start time it
+ * falls back to the plain check.
+ */
+export function liveSince(liveness: Liveness, containerStartedAt: number | null): boolean {
+  if (liveness.state !== "live") return false;
+  if (containerStartedAt === null) return true;
+  return liveness.heartbeat.startedAt >= containerStartedAt - START_SLACK_MS;
+}
+
 /** One line for a human. Never says healthy when it is not. */
 export function formatLiveness(liveness: Liveness): string {
   if (liveness.state === "never") {

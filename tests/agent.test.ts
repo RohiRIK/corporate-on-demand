@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
+import { parseEventStream } from "../src/events";
 
 /**
  * The live tests need a running sandbox. CI has no Docker container, and a
@@ -46,11 +47,29 @@ const SKIP = SANDBOX === null;
  * assertion is extra flakiness in a build people are learning to ignore.
  */
 describe("the agent runtime", () => {
-  test("a real model call returns text, credential-free, at no cost", () => {
+  test("a real model call, inside the sandbox, answers what the prompt does not contain - at no cost", () => {
     if (SANDBOX === null) {
       console.warn("SKIPPED: no sandbox container is running; `cod up` then re-run, or use scripts/cleanroom.sh");
       return;
     }
+    // In a scratch directory, through cod-sandbox with a role's policy - how
+    // every agent runs now. This used to run `cd /work && opencode run` with no
+    // sandbox: whatever cod container happened to be up got an UNCONFINED agent
+    // in its live main checkout. Found when it was a stub engine that obeyed,
+    // and committed straight onto a running company's base branch.
+    //
+    // And an ARITHMETIC question. The old prompt said "reply with exactly:
+    // AGENT_OK" and the check grepped for AGENT_OK, which passes on anything
+    // that echoes the prompt. 391 appears nowhere in the question.
+    const script = [
+      "set -e",
+      'scratch="$(mktemp -d)"',
+      'cd "$scratch"',
+      'exec cod-sandbox --ro /usr --ro /bin --ro /sbin --ro /lib --ro /lib64 --ro /etc --ro /opt --ro /proc --ro /sys --ro /var \\',
+      '  --rw /tmp --rw /dev --rw "$HOME" --rw "$scratch" \\',
+      "  -- timeout 120 opencode run --pure --auto --format json -m opencode/space-bunny-free --title cod-live-test \\",
+      '  "What is 17 multiplied by 23? Reply with the number only."',
+    ].join("\n");
     // `execFileSync` THROWS on a non-zero exit, so a provider blip surfaced as
     // an opaque `Command failed: docker exec ...` with the real reason buried
     // in the error object. Captured instead, so a provider outage is REPORTED
@@ -60,43 +79,32 @@ describe("the agent runtime", () => {
     let out: string;
     let code = 0;
     try {
-      out = execFileSync(
-        "docker",
-        [
-          "exec",
-          SANDBOX,
-          "sh",
-          "-lc",
-          'cd /work && timeout 120 opencode run --pure --format json -m opencode/space-bunny-free "reply with exactly: AGENT_OK" 2>&1',
-        ],
-        { encoding: "utf8", timeout: 180_000 },
-      );
+      out = execFileSync("docker", ["exec", SANDBOX, "sh", "-c", script], { encoding: "utf8", timeout: 180_000 });
     } catch (error) {
-      const failure = error as { status?: number; stdout?: string; stderr?: string; message?: string };
+      const failure = error as { status?: number; stdout?: string; stderr?: string };
       out = `${failure.stdout ?? ""}${failure.stderr ?? ""}`;
       code = failure.status ?? 1;
     }
-    // A missing binary is OUR problem and must fail the build. A provider error
-    // is not: the same command is verified by hand, and a green build that
-    // quietly stopped testing anything is worth less than an honest skip.
-    if (code !== 0 && /command not found|No such file or directory/.test(out)) {
-      throw new Error(`the agent runtime is missing from the image: ${out.slice(0, 300)}`);
+    // A missing binary is OUR problem and must fail the build.
+    if (/command not found|No such file or directory|cannot run/.test(out) && code !== 0) {
+      throw new Error(`the agent runtime or the sandbox is missing from the image: ${out.slice(0, 300)}`);
     }
-    if (code !== 0) {
-      console.warn(`SKIPPED: the free provider is unavailable, not a code failure - ${out.slice(0, 200)}`);
+    // Judged the way the system judges a run: by the event stream.
+    const parsed = parseEventStream(out);
+    // A provider error is not ours: the same path is verified by hand and by
+    // the clean room, and a green build that quietly stopped testing anything
+    // is worth less than an honest skip that says why.
+    if (parsed.errors.length > 0 || (code !== 0 && parsed.answer === "")) {
+      console.warn(`SKIPPED: the provider did not answer, not a code failure - ${(parsed.errors[0]?.message ?? out).slice(0, 200)}`);
       return;
     }
-    // The text event carries the model's actual answer.
-    expect(out).toContain("AGENT_OK");
-    // Free model: the token block must report no cost. If this ever fails, a
-    // paid model has entered the system and the security posture changed -
-    // that should fail the build loudly, not pass quietly.
-    expect(out).toContain('"cost":0');
+    expect(parsed.answer).toMatch(/(^|[^0-9])391([^0-9]|$)/);
+    // Free model: the stream must report no cost. If this ever fails, a paid
+    // model has entered the system and the security posture changed - that
+    // should fail the build loudly, not pass quietly.
+    expect(parsed.tokens?.cost ?? -1).toBe(0);
     // An explicit budget, because Bun's default is 5 SECONDS and this test does
-    // real network I/O that legitimately takes 5-15s. It had no timeout of its
-    // own, so it passed only when a container happened to be absent (early
-    // return) or the provider happened to answer fast. A live test with the
-    // default budget is a coin flip wearing a checkmark.
+    // real network I/O that legitimately takes 5-15s.
   }, 180_000);
 
   test("the sandbox has opencode and deliberately has no docker", () => {

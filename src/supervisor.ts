@@ -1,9 +1,11 @@
 /**
  * The in-container supervisor: reads the mounted workspace and schedules it.
  *
- * Run with `docker exec`, so a crashed supervisor shows up as a failed exec
- * rather than a container that silently restarts in a loop. It must not
- * register anything when Bun.cron is unavailable — see scheduler.ts.
+ * The container's PID 1: the entrypoint `exec`s it, so the container lives
+ * exactly as long as the schedule, and Docker's restart policy brings both back
+ * together. It refuses to run as anything else - a second one `docker exec`'d
+ * in beside it doubled every cron. It must not register anything when Bun.cron
+ * is unavailable — see scheduler.ts.
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -19,6 +21,7 @@ import { archiveAbandoned, beginJob, findAbandoned, formatAbandoned, settleJob }
 import { heartbeatPath, type Heartbeat } from "./liveness";
 import { assertCronSupport, scheduleGovernance, scheduleWorkspace, type ScheduledHandle } from "./scheduler";
 import { singleFlight } from "./governance";
+import { describeTimezone } from "./timezone";
 
 const WORKSPACE_FILE = process.env["COD_WORKSPACE_FILE"] ?? "/cod/cod.json";
 const LOG_DIR = process.env["COD_LOG_DIR"] ?? "/cod/logs";
@@ -357,7 +360,11 @@ function main(): void {
   const jobNames = parsed.data.crons.filter((c) => c.enabled).map((c) => c.name);
   beat(jobNames);
   log(`heartbeat written for ${jobNames.length} job(s), run ${RUN_ID}`);
-  log(`timezone ${parsed.data.timezone} (${new Date().toString().slice(-25)})`);
+  // The workspace's zone, and the one this process's clock actually reads - the
+  // two must agree for a cron to fire at the hour it says. (This printed the
+  // last 25 characters of Date.toString(), which cut the zone's name mid-word:
+  // "(ordinated Universal Time))".)
+  log(`timezone ${describeTimezone(parsed.data.timezone)}; the process clock reads ${Intl.DateTimeFormat().resolvedOptions().timeZone}`);
 
   // Anything still announced in flight was killed by the last crash. Named on
   // startup, because "where did it stop" is the question a crashed supervisor
@@ -402,22 +409,21 @@ function main(): void {
         const { buildInstructions, writeInstructions, resolveSkillsRoot } = await import("./skills");
 
         // Each job gets its own git worktree, so concurrent jobs cannot collide
-        // and a half-finished job keeps its work. The worktree is ALSO the
-        // boundary: `--dir` confines the agent to it, which is what makes the
-        // blast-radius check mean anything.
+        // and a half-finished job keeps its work. The worktree is where the
+        // agent STARTS; what confines it there is the sandbox (jobSandbox
+        // below), not its working directory.
         const worktree = acquireWorktree(WORK_REPO, WORKTREE_ROOT, cron.name);
         const worker = findWorker(parsed.data, cron.agent);
         const department = worker === undefined
           ? undefined
           : parsed.data.departments.find((d) => d.workers.some((w) => w.name === worker.name));
         if (worker !== undefined && department !== undefined) {
-          // Radius 0 - the NARROWEST boundary - because an agent now has tools.
-          // The ledger currently lets a proposer assert its own radius, which is
-          // a trust boundary trusting its subject; defaulting closed is the
-          // opposite and stays safe until that radius is derived server-side.
+          // The radius the change is JUDGED at, below. AGENTS.md used to say 0
+          // whatever the job's name granted, so a job named for cross-department
+          // work was told it had none of that authority, and then held to it.
           writeInstructions(
             worktree.path,
-            buildInstructions(department, worker, { name: cron.name, task: cron.task }, 0, resolveSkillsRoot()),
+            buildInstructions(department, worker, { name: cron.name, task: cron.task }, blastRadiusFor(cron), resolveSkillsRoot()),
           );
         }
         log(`job "${cron.name}" worktree ${worktree.branch} at ${worktree.path}`);

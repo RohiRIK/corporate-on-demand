@@ -82,6 +82,34 @@ describe("commit only finishes work that is running", () => {
     handle.close();
   });
 
+  test("a zombie that wakes while the NEWER run is still running is fenced - the case only the epoch stops", () => {
+    // Since commit() also requires `running`, a zombie that wakes AFTER the
+    // newer run finished is refused by the state alone. This is the case left
+    // for the epoch: the item is running - someone else's run - when the old
+    // worker comes back. Without the epoch predicate it would overwrite a
+    // result that does not exist yet with one nobody is responsible for.
+    const { dir, handle } = ledger();
+    const id = proposeOne(handle, "slow work");
+    reconcileOnce({ stateDir: dir, actor: "t", handle });
+    const first = claimById(handle, id, "worker-a");
+    if (first === null) throw new Error("claim failed");
+    // The lease is reclaimed, as the reconciler does to a run past its budget,
+    // and a second run claims the item.
+    handle.db.query("UPDATE work SET state = 'ready', lease_owner = NULL WHERE id = ?").run(id);
+    const second = claimById(handle, id, "worker-b");
+    if (second === null) throw new Error("reclaim failed");
+    expect(second.lease_epoch).toBeGreaterThan(first.lease_epoch);
+
+    const zombie = commit(handle, id, first.lease_epoch, "done", "the zombie's result");
+    expect(zombie.ok).toBe(false);
+    expect(zombie.fenced).toBe(true);
+    expect(get(handle, id)?.state).toBe("running");
+    // And the run that holds the lease still lands its own result.
+    expect(commit(handle, id, second.lease_epoch, "done", "the real result").ok).toBe(true);
+    expect(get(handle, id)?.reason).toContain("the real result");
+    handle.close();
+  });
+
   test("the recorded reason is bounded and redacted", () => {
     const { dir, handle } = ledger();
     const id = proposeOne(handle, "chatty");

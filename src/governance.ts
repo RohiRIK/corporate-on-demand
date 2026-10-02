@@ -19,7 +19,7 @@
  * model, and so the supervisor can supply the one that has a driver behind it.
  */
 
-import { runCycle, type CycleResult } from "./cycle";
+import { cycleMinutesFor, runCycle, type CycleResult } from "./cycle";
 import { holdMeeting, type Meeting } from "./meeting";
 // Re-exported through one seam so the tick and the dispatch path cannot drift
 // apart on how a radius is derived.
@@ -82,7 +82,6 @@ export interface GovernanceReport {
 }
 
 const DEFAULT_MAX_DISPATCH = 2;
-const DEFAULT_INTERVAL_MINUTES = 30;
 
 /**
  * Is this item one the company may start on its own?
@@ -234,6 +233,11 @@ export async function runGovernance(
     `failed ${failed.length}`,
     `${queue.length} item(s) ready`,
     ...(landed.length > 0 ? [`landed ${landed.filter((l) => l.outcome === "landed").length}/${landed.length} reviewed`] : []),
+    // A department that did not plan, and why - resting after empty plans, or
+    // held after three strikes. The supervisor logs this line and nothing else
+    // of the cycle, so without it a quiet department was indistinguishable
+    // from a broken one.
+    ...(cycle.held ?? []).map((h) => `${h.department} held: ${h.reason}`),
   ].join("; ");
   return { cycle, meeting, dispatched, landed, failed, summary };
 }
@@ -283,11 +287,7 @@ export function singleFlight(fn: () => Promise<void>, onBusy: () => void): () =>
  * off, and nonsense intervals fall back rather than scheduling nonsense.
  */
 export function governanceIntervalFor(workspace: Workspace): number {
-  const raw = (workspace as { governance?: { enabled?: boolean; cycleEveryMinutes?: number } }).governance;
+  const raw = (workspace as { governance?: { enabled?: boolean } }).governance;
   if (raw?.enabled === false) return 0;
-  const wanted = raw?.cycleEveryMinutes;
-  if (typeof wanted !== "number" || !Number.isFinite(wanted) || wanted <= 0) {
-    return DEFAULT_INTERVAL_MINUTES;
-  }
-  return Math.floor(wanted);
+  return cycleMinutesFor(workspace);
 }

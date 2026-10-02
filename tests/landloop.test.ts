@@ -173,7 +173,10 @@ describe("the review loop", () => {
     const review = latestReview(h, id);
     h.close();
     expect(review?.outcome).toBe("rejected");
-    expect(briefFor(item!, review)).toBe("write notes");
+    // The brief is exactly what it was before any review: the task and the
+    // paths it named, and no objection to "fix".
+    expect(briefFor(item!, review)).toBe(briefFor(item!, null));
+    expect(briefFor(item!, review)).not.toContain("reviewed and returned");
   });
 
   test("a cap of zero refuses on the first objection", async () => {

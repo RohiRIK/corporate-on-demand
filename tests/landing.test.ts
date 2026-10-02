@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildWorkspaceSpec, assertMountAllowed, containerNameForFile, workVolume } from "../src/docker";
+import { buildWorkspaceSpec, assertMountAllowed, CONFIG_LABEL, containerNameForFile, workVolume } from "../src/docker";
 import { Workspace } from "../src/workspace";
 import type { Config } from "../src/config";
 
@@ -65,9 +65,14 @@ describe("opting in to landing mounts NOTHING", () => {
   });
 
   test("nothing else about the container changes", () => {
+    // Everything but the record of WHICH workspace definition it runs - the
+    // label `cod up` compares to notice an edited cod.json, which is meant to
+    // differ when the workspace does.
+    const strip = (spec: ReturnType<typeof buildWorkspaceSpec>) => ({ ...spec, labels: { ...spec.labels, [CONFIG_LABEL]: "" } });
     const before = buildWorkspaceSpec(config, workspace);
     const after = buildWorkspaceSpec(config, withLanding);
-    expect(after).toEqual(before);
+    expect(strip(after)).toEqual(strip(before));
+    expect(after.labels[CONFIG_LABEL]).not.toBe(before.labels[CONFIG_LABEL]);
   });
 
   test("the default spec still names the container and volume the same way", () => {

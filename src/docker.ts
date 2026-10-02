@@ -13,6 +13,7 @@
  *    CLI attach to a foreign container and inherit its mounts and capabilities.
  */
 
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { PATHS } from "./image";
@@ -422,6 +423,35 @@ async function containerWorkspaceLabel(
 
 }
 
+/**
+ * Why a running container no longer matches what `cod up` would start, or null.
+ *
+ * Only a DEFINITE mismatch counts: a container from before the label existed,
+ * or an inspect that cannot be read, is adopted as it always was - replacing a
+ * container stops the work running in it, which is not a guess to make.
+ */
+async function staleness(name: string, spec: ContainerSpec, runner: Runner): Promise<string | null> {
+  const facts = await tryRun(runner, ["inspect", "--format", "{{json .Config.Labels}}\t{{.Image}}", name], 10_000);
+  if (facts === undefined || facts.code !== 0) return null;
+  const [labelsJson = "", imageId = ""] = facts.stdout.trim().split("\t");
+  let labels: Record<string, unknown> = {};
+  try {
+    labels = (JSON.parse(labelsJson) as Record<string, unknown> | null) ?? {};
+  } catch {
+    return null;
+  }
+  const recorded = labels[CONFIG_LABEL];
+  if (typeof recorded === "string" && recorded !== spec.labels[CONFIG_LABEL]) {
+    return "cod.json changed since this container started";
+  }
+  const current = await tryRun(runner, ["image", "inspect", "--format", "{{.Id}}", spec.image], 10_000);
+  const currentId = current?.code === 0 ? current.stdout.trim() : "";
+  if (imageId.startsWith("sha256:") && currentId.startsWith("sha256:") && imageId !== currentId) {
+    return `the image ${spec.image} was rebuilt since this container started`;
+  }
+  return null;
+}
+
 /** Whether a container of this name exists at all, labelled or not. */
 async function containerExists(name: string, runner: Runner): Promise<boolean> {
   const result = await tryRun(runner, ["inspect", "--format", "{{.Id}}", name], 10_000);
@@ -491,6 +521,17 @@ export async function doctor(
   };
 }
 
+/** The label that records which workspace definition a container runs. */
+export const CONFIG_LABEL = "cod.config";
+
+/**
+ * A digest of the workspace AS PARSED - what the supervisor acts on - so a
+ * reformatted cod.json is the same workspace and an edited one is not.
+ */
+export function workspaceDigest(workspace: Workspace): string {
+  return createHash("sha256").update(JSON.stringify(workspace)).digest("hex").slice(0, 16);
+}
+
 /**
  * The container spec for a workspace.
  *
@@ -507,7 +548,10 @@ export function buildWorkspaceSpec(config: Config, workspace: Workspace): Contai
           // that decides whether `cod up` may adopt an already-running container,
           // and a name-only label made every workspace called cod.json compare
           // equal - so the guard adopted the wrong container instead of refusing.
-          labels: { "cod.workspace": config.workspaceFile },
+          //
+          // And what the container was started FROM, so `cod up` can tell a
+          // running container that no longer matches cod.json - see up().
+          labels: { "cod.workspace": config.workspaceFile, [CONFIG_LABEL]: workspaceDigest(workspace) },
           mounts: [
             // The workspace is a bind mount, so the repo and its worktrees live
             // in the container's own writable layer under /work. That keeps a
@@ -581,7 +625,7 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
       return { code: result.code, out: `${result.stdout}${result.stderr}` };
     },
 
-    async up(config: Config, workspace: Workspace): Promise<string> {
+    async up(config: Config, workspace: Workspace, report: (line: string) => void = () => {}): Promise<string> {
       const wsName = workspaceFromConfig(config);
 
       // The landing repository is checked BEFORE the container exists.
@@ -600,6 +644,7 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
         }
       }
       const name = containerNameForFile(config.workspaceFile);
+      const spec = buildWorkspaceSpec(config, workspace);
 
       // Idempotent, but only by label: a container of the same name that we did
       // not create is a conflict, not something to adopt.
@@ -612,17 +657,27 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
               `refusing to adopt it. Remove it with \`docker rm -f ${name}\` first.`,
           );
         }
-        if (state.stdout.trim() === "true") return name;
-        // OUR container, stopped: after the restart policy gave up, after a
-        // reboot, after `docker stop`. `docker run` with its name used to fail
-        // with a name conflict, so `cod up` - and the systemd unit that runs it
-        // - could not bring the workspace back without a manual `cod down`. The
-        // work is in the volume, not the container, so the container is
-        // replaced.
+        if (state.stdout.trim() === "true") {
+          // Running, and ours - but is it still THIS workspace? An edited
+          // cod.json or a rebuilt image used to change nothing: `cod up` adopted
+          // the old container and reported success. Worse, cod.json is a file
+          // bind mount, which pins the inode, so an editor that saves by rename
+          // left the container reading the OLD file until it was recreated.
+          const stale = await staleness(name, spec, runner);
+          if (stale === null) return name;
+          report(`${stale}; replacing ${name} (work in flight is stopped, and reported as abandoned on the next start)`);
+        } else {
+          report(`${name} was stopped; replacing it (the work is in the volume, not the container)`);
+        }
+        // OUR container, stopped (after the restart policy gave up, after a
+        // reboot, after `docker stop`) or stale. `docker run` with its name used
+        // to fail with a name conflict, so `cod up` - and the systemd unit that
+        // runs it - could not bring the workspace back without a manual
+        // `cod down`. The work is in the volume, not the container, so the
+        // container is replaced.
         await run(["rm", "--force", name], wsName);
       }
 
-      const spec = buildWorkspaceSpec(config, workspace);
       await run(buildRunArgv(spec), wsName);
       return name;
     },
@@ -640,6 +695,16 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
       const result = await tryRun(runner, ["logs", "--tail", String(lines), name], 10_000);
       if (result === undefined || result.code !== 0) return [];
       return `${result.stdout}\n${result.stderr}`.split("\n").map((line) => line.trimEnd()).filter((line) => line !== "");
+    },
+
+    /** When the workspace container last started, in epoch ms, or null. */
+    async startedAt(config: Config): Promise<number | null> {
+      const name = containerNameForFile(config.workspaceFile);
+      const result = await tryRun(runner, ["inspect", "--format", "{{.State.StartedAt}}", name], 10_000);
+      if (result === undefined || result.code !== 0) return null;
+      const ms = Date.parse(result.stdout.trim());
+      // Docker reports the zero time, year 1, for a container that never ran.
+      return Number.isFinite(ms) && ms > 0 ? ms : null;
     },
 
     async down(config: Config): Promise<boolean> {

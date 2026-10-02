@@ -127,7 +127,13 @@ export function textOfItem(item: WorkItem): string {
  * is being asked something else.
  */
 export function briefFor(item: WorkItem, review?: Pick<ReviewRecord, "outcome" | "reason"> | null): string {
-  const task = textOfItem(item);
+  // The paths the task named go WITH it. The reviewer judges scope against
+  // exactly these, and the worker used to be told only the goal - so it was
+  // held to a list it had never been shown.
+  const paths = targetPathsOfItem(item);
+  const task = paths.length === 0
+    ? textOfItem(item)
+    : `${textOfItem(item)}\n\nPaths this task named - keep the change to these: ${paths.join(", ")}`;
   if (review === undefined || review === null || review.outcome !== "changes-requested") return task;
   const objections = review.reason.trim();
   if (objections === "") return task;

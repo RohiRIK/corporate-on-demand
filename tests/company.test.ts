@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openWork, propose, listWork, get, latestReview, recordReview, type WorkItem } from "../src/work";
 import { runGovernance, reviewable } from "../src/governance";
-import { runCycle, departmentBusy, departmentStruckOut, MAX_STRIKES } from "../src/cycle";
+import { runCycle, departmentBusy, departmentStruckOut, departmentRestUntil, isIdlePlan, MAX_STRIKES, MAX_REST_MINUTES, DEFAULT_CYCLE_MINUTES } from "../src/cycle";
 import { holdMeeting } from "../src/meeting";
 import { runWorkItem, targetPathsOfItem } from "../src/runwork";
 import { parsePlan, planningPrompt, taskPayload } from "../src/plan";
@@ -47,13 +47,18 @@ const workspace = {
   crons: [],
 } as unknown as Workspace;
 
-/** A stub engine: plans name one notes file per generation; tasks just succeed. */
+/**
+ * A stub engine: each plan names a NEW notes file - the n-th plan that runs
+ * names notes/status-n.md - and tasks just succeed. A planner that names the
+ * same file every time would be proposing work that already exists, which is
+ * a different property (the department rests; see below).
+ */
+let plansRun = 0;
 function stubDriver(item: WorkItem): Driver {
   return async () => {
     if (item.kind === "plan") {
-      const n = item.payload.length % 1000; // any stable token; the plan text is what matters
-      void n;
-      return ["Looked around.", "GOAL: write notes/status.md describing the state of the notes", "PATHS: notes/status.md", "CHECK: the file exists and is not empty"].join("\n");
+      plansRun += 1;
+      return ["Looked around.", `GOAL: write notes/status-${plansRun}.md describing the state of the notes`, `PATHS: notes/status-${plansRun}.md`, "CHECK: the file exists and is not empty"].join("\n");
     }
     return "wrote it and committed";
   };
@@ -98,15 +103,21 @@ describe("the loop: plan -> task -> review -> land -> plan again", () => {
     const handle = openWork(dir);
     const items = listWork(handle);
     handle.close();
-    const plans = items.filter((w) => w.kind === "plan" && w.from_agent === "engineering");
+    // Plans that RAN - the CEO's dispatches, done, that planned a task. This
+    // counted the department's PROPOSALS once, which are numbered by
+    // generation and so always differ: the test passed while every dispatch
+    // after the first was refused as a duplicate and no second plan ever ran.
+    const ran = items.filter((w) => w.kind === "plan" && w.from_agent === "ceo" && w.state === "done" && (w.reason ?? "").startsWith("planned w-"));
     const tasks = items.filter((w) => w.kind === "task" && w.from_agent === "engineering");
-    // More than one GENERATION of plans: the department iterated.
-    expect(plans.length).toBeGreaterThan(1);
-    // The plan's answer became a task carrying the paths it named.
-    expect(tasks.length).toBeGreaterThan(0);
-    expect(targetPathsOfItem(tasks[0]!)).toEqual(["notes/status.md"]);
-    // And that task was reviewed and landed.
+    // More than one GENERATION of plans RAN: the department iterated.
+    expect(ran.length).toBeGreaterThan(1);
+    // Each plan's answer became a task carrying the paths it named.
+    expect(tasks.length).toBeGreaterThan(1);
+    expect(targetPathsOfItem(tasks[0]!)).toEqual(["notes/status-1.md"]);
+    expect(targetPathsOfItem(tasks[1]!)).toEqual(["notes/status-2.md"]);
+    // And more than one of them was reviewed and landed.
     expect(landed).toContain(tasks[0]!.id);
+    expect(landed).toContain(tasks[1]!.id);
   });
 
   test("the CEO's proposals are CLOSED once decided, so meetings stop re-deciding them", async () => {
@@ -220,6 +231,91 @@ describe("one thing at a time, and three strikes", () => {
     }
     expect(departmentStruckOut(handle, "engineering")).toBe(false);
     handle.close();
+  });
+});
+
+describe("a department that finds nothing new rests", () => {
+  // Found by the dogfood run, the other half of the stall: once every plan was
+  // dispatched again, a department whose planner answered "GOAL: none" would
+  // plan again on the very next tick, for ever - a model call per role per tick
+  // to hear "nothing", and ledger rows that nothing ever prunes.
+
+  /** Run one plan for engineering, through the real path, answering `answer`. */
+  async function runPlan(dir: string, answer: string): Promise<WorkItem> {
+    const handle = openWork(dir);
+    const made = propose(handle, { from: "ceo", to: "engineering", kind: "plan", payload: `plan ${Math.random()}`, goal: `plan ${Math.random()}` });
+    handle.close();
+    if (!made.ok || made.item === undefined) throw new Error("seed");
+    reconcileOnce({ stateDir: dir, actor: "t" });
+    await runWorkItem({
+      stateDir: dir,
+      workId: made.item.id,
+      cron: { name: made.item.id, agent: "builder", task: "plan", schedule: "0 0 1 1 *", enabled: true, expectTools: false },
+      driver: async () => answer,
+    });
+    const after = openWork(dir);
+    const item = get(after, made.item.id);
+    after.close();
+    if (item === null) throw new Error("vanished");
+    return item;
+  }
+  const minutes = (n: number): number => n * 60_000;
+
+  test("after a plan that found nothing, the department rests two cycles - then plans again", async () => {
+    const dir = scratch();
+    const plan = await runPlan(dir, "GOAL: none");
+    expect(isIdlePlan(plan)).toBe(true);
+    const ranAt = plan.started_at ?? 0;
+    const soon = runCycle(workspace, dir, { actor: "t", now: ranAt + minutes(DEFAULT_CYCLE_MINUTES) });
+    expect(soon.proposed).toEqual([]);
+    expect(soon.summary).toContain("engineering held: resting until");
+    const later = runCycle(workspace, dir, { actor: "t", now: ranAt + minutes(2 * DEFAULT_CYCLE_MINUTES) + 1 });
+    expect(later.proposed.map((p) => p.from)).toEqual(["engineering"]);
+  });
+
+  test("the governance summary - the line the supervisor logs - says who is resting", async () => {
+    const dir = scratch();
+    await runPlan(dir, "GOAL: none");
+    const report = await runGovernance(workspace, dir, { maxDispatch: 0, dispatch: async () => ({ ok: true }) });
+    expect(report.summary).toContain("engineering held: resting until");
+  });
+
+  test("a plan that proposes work that ALREADY exists counts as finding nothing", async () => {
+    const dir = scratch();
+    const answer = "GOAL: write notes/a.md\nPATHS: notes/a.md\nCHECK: it exists";
+    expect(isIdlePlan(await runPlan(dir, answer))).toBe(false);
+    expect(isIdlePlan(await runPlan(dir, answer))).toBe(true);
+  });
+
+  test("each further empty plan doubles the rest, up to a day", () => {
+    const empty = (seq: number, at: number): WorkItem =>
+      ({ id: `p${seq}`, kind: "plan", state: "done", from_agent: "ceo", to_agent: "engineering", reason: "planned nothing: x", created_seq: seq, started_at: at } as unknown as WorkItem);
+    const at = 1_000_000;
+    expect(departmentRestUntil("engineering", [empty(1, at)], 30)).toBe(at + minutes(60));
+    expect(departmentRestUntil("engineering", [empty(1, 0), empty(2, at)], 30)).toBe(at + minutes(120));
+    expect(departmentRestUntil("engineering", [empty(1, 0), empty(2, 0), empty(3, at)], 30)).toBe(at + minutes(240));
+    const many = Array.from({ length: 12 }, (_, i) => empty(i + 1, i === 11 ? at : 0));
+    expect(departmentRestUntil("engineering", many, 30)).toBe(at + minutes(MAX_REST_MINUTES));
+  });
+
+  test("a plan whose answer could not be read even on its last retry counts as empty", () => {
+    // Otherwise a planner that always answers garbage frees its department to
+    // plan again the moment its retries run out - four model calls a cycle, for
+    // ever, with nothing to show.
+    const failed = (reason: string): WorkItem =>
+      ({ id: "p1", kind: "plan", state: "failed", from_agent: "ceo", to_agent: "engineering", reason, created_seq: 1, started_at: 5 } as unknown as WorkItem);
+    expect(isIdlePlan(failed("run failed (3/3): the plan had no GOAL line"))).toBe(true);
+    expect(departmentRestUntil("engineering", [failed("run failed (3/3): no GOAL")], 30)).not.toBeNull();
+    // Still retrying is not empty - it is in motion, and the department is busy.
+    expect(isIdlePlan(failed("run failed (1/3): no GOAL"))).toBe(false);
+  });
+
+  test("a plan that found something resets it - only an unbroken run of empty plans counts", () => {
+    const plan = (seq: number, reason: string): WorkItem =>
+      ({ id: `p${seq}`, kind: "plan", state: "done", from_agent: "ceo", to_agent: "engineering", reason, created_seq: seq, started_at: 5 } as unknown as WorkItem);
+    expect(departmentRestUntil("engineering", [plan(1, "planned nothing: x"), plan(2, "planned w-1: write it")], 30)).toBeNull();
+    // Another department's empty plans are not this one's.
+    expect(departmentRestUntil("cto", [plan(1, "planned nothing: x")], 30)).toBeNull();
   });
 });
 

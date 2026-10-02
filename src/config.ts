@@ -150,10 +150,12 @@ export const CONTAINER_GID = 1000;
  * died on its first mkdir, and `cod up` could only report "not live". So when
  * root creates one, it hands it to the container's uid - only a directory it
  * has just CREATED, never one that already existed, which is the operator's to
- * own (ops/ creates its own with `install -d -o 1000`).
+ * own (ops/ creates its own with `install -d -o 1000`). Created 0750.
  */
 export function makeContainerDir(path: string): void {
-  const created = mkdirSync(path, { recursive: true });
+  // 0750: the ledger, the results and the log are nobody else's business on a
+  // shared host. A default-umask directory left them world-readable (SEC-07).
+  const created = mkdirSync(path, { recursive: true, mode: 0o750 });
   if (created !== undefined && process.platform === "linux" && process.getuid?.() === 0) {
     chownSync(path, CONTAINER_UID, CONTAINER_GID);
   }
