@@ -16,7 +16,7 @@
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { PATHS } from "./image";
-import type { Config } from "./config";
+import { CONTAINER_GID, CONTAINER_UID, type Config } from "./config";
 import { RuntimeFailure, UnsupportedRuntimeError, UsageError } from "./errors";
 import type { Workspace } from "./workspace";
 
@@ -534,7 +534,7 @@ export function buildWorkspaceSpec(config: Config, workspace: Workspace): Contai
           memory: "2g",
           cpus: "2",
           env: { TZ: workspace.timezone },
-          user: "1000:1000",
+          user: `${CONTAINER_UID}:${CONTAINER_GID}`,
   };
 }
 
@@ -625,6 +625,21 @@ export function makeDocker({ runner = defaultRunner, timeoutMs = 120_000 }: { ru
       const spec = buildWorkspaceSpec(config, workspace);
       await run(buildRunArgv(spec), wsName);
       return name;
+    },
+
+    /**
+     * The last lines the workspace container wrote, for a failure message.
+     *
+     * When the supervisor never comes up, the reason is in the container's own
+     * output - "cannot write the state directory", a schema error - and "check
+     * docker logs" made the operator go and find it. Never throws: a failure
+     * report must not fail.
+     */
+    async logTail(config: Config, lines = 15): Promise<string[]> {
+      const name = containerNameForFile(config.workspaceFile);
+      const result = await tryRun(runner, ["logs", "--tail", String(lines), name], 10_000);
+      if (result === undefined || result.code !== 0) return [];
+      return `${result.stdout}\n${result.stderr}`.split("\n").map((line) => line.trimEnd()).filter((line) => line !== "");
     },
 
     async down(config: Config): Promise<boolean> {

@@ -51,6 +51,14 @@ COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 # whole import graph, and the container has no node_modules to resolve it
 # from - the copy compiled fine and then died on the first import.
 # `bun build --target=bun` inlines all 99 modules into one readable file.
+#
+# The build directory is named, not inherited. It has to stay off the path
+# from bun's global directory up to /: `bun add --global` below looks for a
+# package.json in every ancestor of /usr/local/install/global, and with this
+# project's at / it installed kilo into /node_modules - along with this
+# project's devDependencies - and the step after it found no kilo. It worked
+# only because the base image happens to set this same WORKDIR.
+WORKDIR /home/bun/app
 COPY package.json bun.lock ./
 COPY src ./src
 RUN bun install --production --frozen-lockfile

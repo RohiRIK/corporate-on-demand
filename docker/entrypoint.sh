@@ -17,6 +17,26 @@ else
   log "workspace found at $WORKSPACE_FILE"
 fi
 
+# The state directory is the one host path the container writes - the ledger,
+# the heartbeat, the log, the results - and a bind mount carries the HOST's
+# ownership in. One the container's uid cannot write used to surface as the
+# supervisor dying on its first mkdir, and `cod up` saying only "not live".
+# Checked here, where the uid asking is the uid that matters, and said in a
+# FATAL line `cod up` repeats along with the fix. Directories and the
+# database: everything else in it is written by rename, which only needs the
+# directory.
+STATE_DIR="${COD_STATE_DIR:-/cod}"
+unwritable=""
+for path in "$STATE_DIR" "$STATE_DIR/logs" "$STATE_DIR/work" "$STATE_DIR/work/ledger.sqlite" \
+            "$STATE_DIR/work/ledger.sqlite-wal" "$STATE_DIR/work/ledger.sqlite-shm" \
+            "$STATE_DIR/results" "$STATE_DIR/inflight" "$STATE_DIR/export"; do
+  if [ -e "$path" ] && [ ! -w "$path" ]; then unwritable="$unwritable $path"; fi
+done
+if [ -n "$unwritable" ]; then
+  log "FATAL: uid $(id -u) cannot write the state directory:$unwritable"
+  exit 78
+fi
+
 mkdir -p /work
 
 # One directory per worker, owned by the uid the agent runs as. Convention, not

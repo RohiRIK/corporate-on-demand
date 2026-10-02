@@ -11,7 +11,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_MAX_CONCURRENT } from "./limit";
 import { describeTimezone, hostTimezone } from "./timezone";
-import { loadConfig, ensureStateDir, ensureParentDir, claimStateDir, type Config } from "./config";
+import { loadConfig, ensureStateDir, ensureParentDir, claimStateDir, CONTAINER_GID, CONTAINER_UID, type Config } from "./config";
 import { RefusedError, RuntimeFailure, UsageError } from "./errors";
 import { isDockerAvailable } from "./docker";
 import {
@@ -112,6 +112,26 @@ function readWorkspace(config: Config): Workspace {
     throw new UsageError(`${config.workspaceFile} is not a valid workspace — ${where}`);
   }
   return result.data;
+}
+
+/**
+ * Why `cod up` failed, in the container's own words.
+ *
+ * The FATAL lines the entrypoint prints are the cause; when there are none,
+ * the last lines are the best evidence there is. A state directory the
+ * container cannot write gets the exact command, with the HOST path - the
+ * container only knows it as /cod.
+ */
+export function supervisorDownMessage(name: string, state: string, stateDir: string, tail: readonly string[]): string {
+  const fatal = tail.filter((line) => line.includes("FATAL"));
+  const evidence = (fatal.length > 0 ? fatal : tail.slice(-8)).map((line) => `  ${line}`);
+  const lines = [`the container started but the supervisor is not live (${state}); the schedule is not running.`];
+  if (evidence.length > 0) lines.push(`${name} said:`, ...evidence);
+  else lines.push(`${name} printed nothing; check: docker logs ${name}`);
+  if (tail.some((line) => line.includes("cannot write the state directory"))) {
+    lines.push(`fix: sudo chown -R ${CONTAINER_UID}:${CONTAINER_GID} ${stateDir}   (the container runs as uid ${CONTAINER_UID})`);
+  }
+  return lines.join("\n");
 }
 
 const commands: Record<
@@ -248,10 +268,7 @@ const commands: Record<
     );
 
     if (liveness.state !== "live") {
-      throw new RuntimeFailure(
-        `the container started but the supervisor is not live (${liveness.state}); ` +
-          `the schedule is not running. Check: docker logs ${name}`,
-      );
+      throw new RuntimeFailure(supervisorDownMessage(name, liveness.state, config.stateDir, await docker.logTail(config)));
     }
   },
 

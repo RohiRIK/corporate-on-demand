@@ -7,7 +7,7 @@
  * source next to the value rather than making the user guess.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chownSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { UsageError } from "./errors";
@@ -135,10 +135,34 @@ export function loadConfig(flags: ConfigFlags = {}): Config {
   };
 }
 
+/**
+ * The uid and gid the container runs as (`--user` in src/docker.ts), and so
+ * the owner the state directory - its one writable bind mount - needs.
+ */
+export const CONTAINER_UID = 1000;
+export const CONTAINER_GID = 1000;
+
+/**
+ * Create a directory the container will write, owned so that it can.
+ *
+ * A bind mount carries the HOST's ownership into the container. A state
+ * directory created by a root `cod init` was root's, the supervisor (uid 1000)
+ * died on its first mkdir, and `cod up` could only report "not live". So when
+ * root creates one, it hands it to the container's uid - only a directory it
+ * has just CREATED, never one that already existed, which is the operator's to
+ * own (ops/ creates its own with `install -d -o 1000`).
+ */
+export function makeContainerDir(path: string): void {
+  const created = mkdirSync(path, { recursive: true });
+  if (created !== undefined && process.platform === "linux" && process.getuid?.() === 0) {
+    chownSync(path, CONTAINER_UID, CONTAINER_GID);
+  }
+}
+
 /** Create the state directory and its parents; returns the directory. */
 export function ensureStateDir(config: Config): string {
-  mkdirSync(config.stateDir, { recursive: true });
-  mkdirSync(join(config.stateDir, "bus"), { recursive: true });
+  makeContainerDir(config.stateDir);
+  makeContainerDir(join(config.stateDir, "bus"));
   return config.stateDir;
 }
 
@@ -178,6 +202,6 @@ export function claimStateDir(config: Pick<Config, "stateDir" | "workspaceFile">
     }
     if (recorded === config.workspaceFile) return;
   }
-  mkdirSync(config.stateDir, { recursive: true });
+  makeContainerDir(config.stateDir);
   writeFileSync(owner, `${JSON.stringify({ workspace: config.workspaceFile }, null, 2)}\n`, "utf8");
 }

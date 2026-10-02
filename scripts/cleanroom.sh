@@ -141,7 +141,9 @@ check "$INS" '.Memory != null and .Memory > 0' "memory limit set"
 check "$MOUNTS" '[.[].Destination] | sort == ["/cod", "/cod/cod.json", "/work"]' "exactly the three expected mounts"
 check "$MOUNTS" 'map(select(.Destination == "/cod/cod.json")) | .[0].RW == false' "the workspace file is read-only"
 check "$MOUNTS" 'map(select(.Destination == "/work")) | .[0].Type == "volume"' "/work is a named volume, not a host path"
-check "$MOUNTS" 'map(.Source | test("\\.sock$|/run/docker|/var/lib/docker")) | any | not' "no container runtime socket or directory is mounted"
+# Bind sources only: a named volume's own source is under /var/lib/docker by
+# definition, and is not a host path anyone handed over.
+check "$MOUNTS" 'map(select(.Type == "bind") | .Source | test("\\.sock$|/run/docker|/var/lib/docker|/run/containerd")) | any | not' "no container runtime socket or directory is bind-mounted"
 
 step "7. agents are confined by the kernel"
 PROBE="$(docker exec "$CONTAINER" cod-sandbox --probe 2>&1 || true)"
